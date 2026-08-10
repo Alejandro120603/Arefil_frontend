@@ -265,7 +265,7 @@ export default async function PriceListDetailPage({ params, searchParams }: Pric
                       </Link>
                     </TableCell>
                     <TableCell>{item.item_number ?? "—"}</TableCell>
-                    <TableCell className="max-w-xs truncate">{item.description ?? "—"}</TableCell>
+                    <TableCell className="max-w-xs truncate" title={item.description ?? undefined}>{item.description ?? "—"}</TableCell>
                     <TableCell className="text-right">{formatCurrency(item.unit_price, priceList.currency)}</TableCell>
                     <TableCell>{item.classification ?? "—"}</TableCell>
                     <TableCell>{item.sat_code ?? "—"}</TableCell>

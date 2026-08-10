@@ -133,7 +133,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                   <TableRow key={product.id}>
                     <TableCell className="font-medium">{product.part_number}</TableCell>
                     <TableCell>{product.item_number ?? "—"}</TableCell>
-                    <TableCell className="max-w-xs truncate">{product.description ?? "—"}</TableCell>
+                    <TableCell className="max-w-xs truncate" title={product.description ?? undefined}>{product.description ?? "—"}</TableCell>
                     <TableCell>{product.sat_code ?? "—"}</TableCell>
                     <TableCell>{product.supplier}</TableCell>
                     <TableCell className="text-right">

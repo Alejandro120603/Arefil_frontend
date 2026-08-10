@@ -1,10 +1,11 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ApiError, getHealth, getPriceList, listPriceLists, listProducts, listSuppliers } from "@/lib/api";
+import { getErrorMessage, getHealth, getPriceList, listPriceLists, listProducts, listSuppliers } from "@/lib/api";
 import { formatDate } from "@/lib/format/date";
 import type { PriceListDetail } from "@/types/api";
 
 const DONALDSON_SUPPLIER_CODE = "DONALDSON";
+const CONNECTION_FALLBACK = "No se pudo conectar con el backend.";
 
 interface DashboardData {
   health: { ok: boolean; error?: string };
@@ -14,12 +15,6 @@ interface DashboardData {
   productsError?: string;
   latestPriceList: PriceListDetail | null;
   priceListError?: string;
-}
-
-function describeError(error: unknown): string {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error) return error.message;
-  return "No se pudo conectar con el backend.";
 }
 
 async function loadDashboardData(): Promise<DashboardData> {
@@ -33,7 +28,7 @@ async function loadDashboardData(): Promise<DashboardData> {
   const health =
     healthResult.status === "fulfilled"
       ? { ok: healthResult.value.status === "ok" }
-      : { ok: false, error: describeError(healthResult.reason) };
+      : { ok: false, error: getErrorMessage(healthResult.reason, CONNECTION_FALLBACK) };
 
   let donaldsonSupplier: DashboardData["donaldsonSupplier"] = null;
   let donaldsonError: string | undefined;
@@ -41,11 +36,11 @@ async function loadDashboardData(): Promise<DashboardData> {
     const donaldson = suppliersResult.value.find((supplier) => supplier.code === DONALDSON_SUPPLIER_CODE);
     donaldsonSupplier = donaldson ? { name: donaldson.name, active: donaldson.active } : null;
   } else {
-    donaldsonError = describeError(suppliersResult.reason);
+    donaldsonError = getErrorMessage(suppliersResult.reason, CONNECTION_FALLBACK);
   }
 
   const totalProducts = productsResult.status === "fulfilled" ? productsResult.value.meta.total_items : null;
-  const productsError = productsResult.status === "rejected" ? describeError(productsResult.reason) : undefined;
+  const productsError = productsResult.status === "rejected" ? getErrorMessage(productsResult.reason, CONNECTION_FALLBACK) : undefined;
 
   let latestPriceList: PriceListDetail | null = null;
   let priceListError: string | undefined;
@@ -55,11 +50,11 @@ async function loadDashboardData(): Promise<DashboardData> {
       try {
         latestPriceList = await getPriceList(first.id);
       } catch (error) {
-        priceListError = describeError(error);
+        priceListError = getErrorMessage(error, CONNECTION_FALLBACK);
       }
     }
   } else {
-    priceListError = describeError(priceListsResult.reason);
+    priceListError = getErrorMessage(priceListsResult.reason, CONNECTION_FALLBACK);
   }
 
   return {

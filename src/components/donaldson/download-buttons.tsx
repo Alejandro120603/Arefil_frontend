@@ -5,6 +5,7 @@ import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getErrorMessage } from "@/lib/api/errors";
 import { downloadPriceListCsv, downloadPriceListSource, downloadPriceListXlsx } from "@/lib/api/price-lists";
+import { triggerBrowserDownload } from "@/lib/download";
 import type { BlobDownload } from "@/lib/api/client";
 
 type DownloadKind = "xlsx" | "csv" | "source";
@@ -20,17 +21,6 @@ const DOWNLOAD_FNS: Record<DownloadKind, (priceListId: number) => Promise<BlobDo
   csv: downloadPriceListCsv,
   source: downloadPriceListSource,
 };
-
-function triggerBrowserDownload(download: BlobDownload, fallbackFilename: string) {
-  const url = URL.createObjectURL(download.blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = download.filename ?? fallbackFilename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
 
 interface DownloadButtonsProps {
   priceListId: number;

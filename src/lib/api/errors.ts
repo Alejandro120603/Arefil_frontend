@@ -18,10 +18,14 @@ export class ApiError extends Error {
 }
 
 interface ValidationErrorItem {
+  type?: string;
   loc?: (string | number)[];
   msg?: string;
   message?: string;
+  input?: unknown;
 }
+
+const GENERIC_ERROR_MESSAGE = "Error inesperado del servidor.";
 
 function formatDetail(detail: unknown): string {
   if (detail == null) return "Error de comunicación con el servidor.";
@@ -33,13 +37,11 @@ function formatDetail(detail: unknown): string {
   if (typeof detail === "object") {
     const record = detail as Record<string, unknown>;
     if (typeof record.message === "string") return record.message;
-    try {
-      return JSON.stringify(detail);
-    } catch {
-      return "Error inesperado del servidor.";
-    }
+    // Unrecognized object shape - never fall back to JSON.stringify here, a
+    // raw payload dump is exactly what users must never see.
+    return GENERIC_ERROR_MESSAGE;
   }
-  return String(detail);
+  return GENERIC_ERROR_MESSAGE;
 }
 
 export function getErrorMessage(error: unknown, fallback = "No se pudo comunicar con el backend."): string {
@@ -57,9 +59,7 @@ function formatValidationItem(item: unknown): string {
     if (field && message) return `${field}: ${message}`;
     if (message) return message;
   }
-  try {
-    return JSON.stringify(item);
-  } catch {
-    return "";
-  }
+  // Unrecognized item shape - drop it rather than leak raw JSON; the caller
+  // already falls back to "Error de validación." if every item drops out.
+  return "";
 }

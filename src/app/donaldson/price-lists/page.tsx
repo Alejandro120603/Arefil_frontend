@@ -125,7 +125,7 @@ export default async function PriceListsPage({ searchParams }: PriceListsPagePro
                     <TableCell className="font-medium">{formatDate(priceList.effective_date)}</TableCell>
                     <TableCell>{priceList.supplier}</TableCell>
                     <TableCell>{priceList.currency}</TableCell>
-                    <TableCell className="max-w-xs truncate">{priceList.source_filename}</TableCell>
+                    <TableCell className="max-w-xs truncate" title={priceList.source_filename}>{priceList.source_filename}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">{priceList.status}</Badge>
                     </TableCell>

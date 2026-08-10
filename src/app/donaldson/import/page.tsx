@@ -3,6 +3,7 @@
 import { useReducer, useRef } from "react";
 import Link from "next/link";
 import { Loader2, TriangleAlert } from "lucide-react";
+import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ImportDropzone } from "@/components/donaldson/import-dropzone";
@@ -11,7 +12,7 @@ import { ImportPreviewSummary } from "@/components/donaldson/import-preview-summ
 import { ImportProductsSampleTable } from "@/components/donaldson/import-products-sample-table";
 import { ImportResult } from "@/components/donaldson/import-result";
 import { SelectedFileCard } from "@/components/donaldson/selected-file-card";
-import { ApiError } from "@/lib/api/errors";
+import { getErrorMessage } from "@/lib/api/errors";
 import { confirmImport, getDuplicateImportDetail, previewDonaldsonImport } from "@/lib/api/imports";
 import type { ImportConfirmResult, ImportPreviewResponse } from "@/types/api";
 
@@ -96,9 +97,7 @@ function describeError(error: unknown): { message: string; duplicateImportId: nu
   if (duplicate) {
     return { message: duplicate.message, duplicateImportId: duplicate.existing_import_id };
   }
-  if (error instanceof ApiError) return { message: error.message, duplicateImportId: null };
-  if (error instanceof Error) return { message: error.message, duplicateImportId: null };
-  return { message: "No se pudo comunicar con el backend.", duplicateImportId: null };
+  return { message: getErrorMessage(error), duplicateImportId: null };
 }
 
 export default function ImportDonaldsonPage() {
@@ -143,6 +142,7 @@ export default function ImportDonaldsonPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      <Breadcrumbs items={[{ label: "Dashboard", href: "/" }, { label: "Donaldson" }, { label: "Importar lista" }]} />
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Importar lista Donaldson</h1>
         <p className="text-sm text-muted-foreground">

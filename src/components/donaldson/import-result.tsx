@@ -45,7 +45,7 @@ export function ImportResult({ result, onImportAnother }: ImportResultProps) {
         </div>
 
         <div className="flex flex-wrap gap-2 pt-2">
-          <Button render={<Link href={`/donaldson/price-lists/${result.price_list_id}`} />}>
+          <Button nativeButton={false} render={<Link href={`/donaldson/price-lists/${result.price_list_id}`} />}>
             Ver lista importada
           </Button>
           <Button type="button" variant="outline" onClick={onImportAnother}>
