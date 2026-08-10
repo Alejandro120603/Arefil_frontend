@@ -42,6 +42,12 @@ function formatDetail(detail: unknown): string {
   return String(detail);
 }
 
+export function getErrorMessage(error: unknown, fallback = "No se pudo comunicar con el backend."): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
 function formatValidationItem(item: unknown): string {
   if (typeof item === "string") return item;
   if (item && typeof item === "object") {
