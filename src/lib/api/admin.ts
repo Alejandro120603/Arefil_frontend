@@ -1,5 +1,6 @@
-import { apiDownloadBlob, type BlobDownload } from "./client";
+import { browserApiClient } from "./browser-client";
+import type { BlobDownload } from "./client";
 
 export function downloadDatabaseBackup(): Promise<BlobDownload> {
-  return apiDownloadBlob("/admin/database/backup");
+  return browserApiClient.apiDownloadBlob("/admin/database/backup");
 }

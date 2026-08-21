@@ -1,11 +1,5 @@
 import { ApiError } from "./errors";
 
-const DEFAULT_BASE_URL = "http://127.0.0.1:8000/api";
-
-export function getApiBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_BASE_URL;
-}
-
 export type QueryParams = Record<string, string | number | boolean | undefined>;
 
 export interface PageParams {
@@ -14,14 +8,20 @@ export interface PageParams {
   [key: string]: string | number | boolean | undefined;
 }
 
-function buildUrl(path: string, query?: QueryParams): string {
-  const url = new URL(`${getApiBaseUrl()}${path}`);
+export function buildApiUrl(baseUrl: string, path: string, query?: QueryParams): string {
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
+  if (!normalizedBaseUrl) throw new Error("La URL base del API no puede estar vacía.");
+
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const joinedUrl = `${normalizedBaseUrl}${normalizedPath}`;
+  const isAbsolute = /^https?:\/\//i.test(joinedUrl);
+  const url = new URL(joinedUrl, "http://arefil.local");
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
   }
-  return url.toString();
+  return isAbsolute ? url.toString() : `${url.pathname}${url.search}${url.hash}`;
 }
 
 async function ensureOk(response: Response): Promise<void> {
@@ -47,50 +47,61 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-export async function apiGet<T>(path: string, options?: RequestOptions): Promise<T> {
-  const response = await fetch(buildUrl(path, options?.query), {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    signal: options?.signal,
-    cache: "no-store",
-  });
-  return parseJson<T>(response);
+export interface ApiClient {
+  apiGet<T>(path: string, options?: RequestOptions): Promise<T>;
+  apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
+  apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T>;
+  apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload>;
 }
 
-export async function apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
-  const response = await fetch(buildUrl(path, options?.query), {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal: options?.signal,
-  });
-  return parseJson<T>(response);
-}
+export function createApiClient(resolveBaseUrl: () => string): ApiClient {
+  async function apiGet<T>(path: string, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: options?.signal,
+      cache: "no-store",
+    });
+    return parseJson<T>(response);
+  }
 
-export async function apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
-  const response = await fetch(buildUrl(path, options?.query), {
-    method: "POST",
-    headers: { Accept: "application/json" },
-    body: formData,
-    signal: options?.signal,
-  });
-  return parseJson<T>(response);
+  async function apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
+  async function apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      body: formData,
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
+  async function apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "GET",
+      signal: options?.signal,
+    });
+    await ensureOk(response);
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition");
+    return { blob, filename: disposition ? extractFilename(disposition) : null };
+  }
+
+  return { apiGet, apiPostJson, apiUpload, apiDownloadBlob };
 }
 
 export interface BlobDownload {
   blob: Blob;
   filename: string | null;
-}
-
-export async function apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload> {
-  const response = await fetch(buildUrl(path, options?.query), {
-    method: "GET",
-    signal: options?.signal,
-  });
-  await ensureOk(response);
-  const blob = await response.blob();
-  const disposition = response.headers.get("Content-Disposition");
-  return { blob, filename: disposition ? extractFilename(disposition) : null };
 }
 
 function extractFilename(disposition: string): string | null {

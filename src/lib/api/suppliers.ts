@@ -1,6 +1,6 @@
-import { apiGet } from "./client";
+import { serverApiClient } from "./server-client";
 import type { Supplier } from "@/types/api";
 
 export function listSuppliers(): Promise<Supplier[]> {
-  return apiGet<Supplier[]>("/suppliers");
+  return serverApiClient.apiGet<Supplier[]>("/suppliers");
 }

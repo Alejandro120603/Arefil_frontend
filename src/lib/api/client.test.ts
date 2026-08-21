@@ -1,0 +1,78 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildApiUrl, createApiClient } from "./client";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("buildApiUrl", () => {
+  it("builds relative browser URLs with encoded query parameters", () => {
+    expect(buildApiUrl("/backend-api/", "/products", { search: "filtro aire", page: 2 })).toBe(
+      "/backend-api/products?search=filtro+aire&page=2",
+    );
+  });
+
+  it("builds absolute server URLs and omits undefined query values", () => {
+    expect(
+      buildApiUrl("http://backend:8000/api", "health", { page: undefined, active: true }),
+    ).toBe("http://backend:8000/api/health?active=true");
+  });
+});
+
+describe("createApiClient", () => {
+  it("keeps JSON requests and FastAPI validation errors normalized", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ status: "ok" }))
+      .mockResolvedValueOnce(
+        Response.json(
+          { detail: [{ loc: ["body", "file"], msg: "Campo requerido", type: "missing" }] },
+          { status: 422 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createApiClient(() => "/backend-api");
+
+    await expect(api.apiGet<{ status: string }>("/health")).resolves.toEqual({ status: "ok" });
+    await expect(api.apiPostJson("/imports/1/confirm")).rejects.toMatchObject({
+      status: 422,
+      message: "file: Campo requerido",
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/backend-api/health");
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+    });
+  });
+
+  it("preserves FormData uploads without overriding the multipart boundary", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ import_id: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createApiClient(() => "/backend-api");
+    const formData = new FormData();
+    formData.append("file", new Blob(["xlsx"]), "sample.xlsx");
+
+    await api.apiUpload("/imports/donaldson/preview", formData);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/imports/donaldson/preview",
+      expect.objectContaining({ method: "POST", headers: { Accept: "application/json" }, body: formData }),
+    );
+  });
+
+  it("returns blob downloads with the backend filename", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("backup", {
+        headers: { "Content-Disposition": 'attachment; filename="arefil.db"' },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createApiClient(() => "/backend-api");
+
+    const result = await api.apiDownloadBlob("/admin/database/backup");
+
+    expect(result.filename).toBe("arefil.db");
+    await expect(result.blob.text()).resolves.toBe("backup");
+  });
+});

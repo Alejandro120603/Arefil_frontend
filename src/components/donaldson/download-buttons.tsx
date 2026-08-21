@@ -4,7 +4,11 @@ import { useRef, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getErrorMessage } from "@/lib/api/errors";
-import { downloadPriceListCsv, downloadPriceListSource, downloadPriceListXlsx } from "@/lib/api/price-lists";
+import {
+  downloadPriceListCsv,
+  downloadPriceListSource,
+  downloadPriceListXlsx,
+} from "@/lib/api/price-list-downloads";
 import { triggerBrowserDownload } from "@/lib/download";
 import type { BlobDownload } from "@/lib/api/client";
 

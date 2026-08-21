@@ -12,13 +12,9 @@ import { triggerBrowserDownload } from "@/lib/download";
 type Status = "idle" | "downloading" | "success" | "error";
 
 /**
- * The backend does set `Content-Disposition` with a timestamped filename, but
- * its CORS config doesn't add it to `Access-Control-Expose-Headers`, so the
- * browser hides it from `fetch()` on this cross-origin setup (verified: curl
- * sees the header, in-browser `fetch()` does not). That's a backend fix this
- * project's rules don't allow making here, so this fallback at least keeps
- * repeated downloads distinguishable by generating its own timestamp instead
- * of a static name every backup would collide on.
+ * The same-origin proxy normally exposes the backend's timestamped
+ * `Content-Disposition` filename. Keep a unique fallback for direct API
+ * overrides or intermediaries that omit that header.
  */
 function buildFallbackFilename(): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);

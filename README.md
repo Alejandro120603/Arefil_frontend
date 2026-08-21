@@ -24,10 +24,13 @@ npm install
 cp .env.example .env.local
 ```
 
-`.env.local` no se versiona (ver `.gitignore`); define ahí la URL del backend:
+`.env.local` no se versiona (ver `.gitignore`). El navegador usa por default el
+proxy same-origin de Next.js y el servidor se conecta directamente al backend
+local:
 
 ```env
-NEXT_PUBLIC_API_URL=http://127.0.0.1:8000/api
+NEXT_PUBLIC_API_URL=/backend-api
+API_INTERNAL_URL=http://127.0.0.1:8000/api
 ```
 
 Para el backend, sigue `Arefil_backend/backend/README.md` (o usa `make setup_panel`,
@@ -102,20 +105,83 @@ src/
 ## API client
 
 `src/lib/api/` es el único punto de acceso al backend (nada de `fetch` suelto
-en páginas). `apiGet`/`apiPostJson`/`apiUpload`/`apiDownloadBlob` en
-`client.ts` manejan JSON, multipart y descargas blob; `errors.ts` normaliza
-`detail` de FastAPI (string, objeto o arreglo de errores de validación) a un
-mensaje legible vía `ApiError`.
+en páginas). El cliente compartido de `client.ts` maneja JSON, multipart,
+descargas blob y errores; `server-client.ts` configura el destino privado de
+Server Components y `browser-client.ts` configura el destino público del
+navegador. `errors.ts` normaliza `detail` de FastAPI (string, objeto o arreglo
+de errores de validación) a un mensaje legible vía `ApiError`.
+
+En el navegador, `/backend-api/*` se reenvía desde Next.js hacia
+`API_INTERNAL_URL`. Por eso el hostname interno Docker `backend` nunca aparece
+como destino del navegador y el flujo normal no requiere CORS ni una IP LAN
+horneada en el bundle.
 
 Los campos `Decimal` del backend (p. ej. `unit_price`, `unit_weight_kg`)
 llegan como **string** en el JSON y así se tipan en `src/types/api.ts`
 (`DecimalString = string`) — nunca se convierten silenciosamente a `number`;
 usa `src/lib/format/decimal.ts` para parsearlos al momento de mostrarlos.
 
+## Docker
+
+La imagen de producción usa Node 22 Alpine, `npm ci`, el output standalone de
+Next.js y un runner no-root. Docker es una segunda forma de ejecución; no
+reemplaza `make run_panel`.
+
+Construir el frontend:
+
+```bash
+docker build -t arefil-frontend .
+```
+
+Al ejecutarlo junto al contenedor del backend, ambos deben compartir una red y
+el backend debe tener el alias `backend`:
+
+```bash
+docker run --rm \
+  --name arefil-frontend \
+  --network arefil \
+  -p 3000:3000 \
+  -e API_INTERNAL_URL=http://backend:8000/api \
+  arefil-frontend
+```
+
+La creación de la red, el contenedor backend y su almacenamiento persistente se
+integrará mediante Docker Compose en la siguiente fase. Mientras tanto, sigue
+las instrucciones Docker de `../Arefil_backend/README.md`; nunca ejecutes el
+backend sin montar almacenamiento persistente en `/app/data` si contiene datos
+reales.
+
+Variables de la imagen:
+
+| Variable | Momento | Default | Uso |
+|---|---|---|---|
+| `NEXT_PUBLIC_API_URL` | build | `/backend-api` | Destino visible al navegador; queda horneado en el bundle. |
+| `API_INTERNAL_URL` | runtime | `http://127.0.0.1:8000/api` | Destino privado de Server Components y del proxy. |
+| `HOSTNAME` | runtime | `0.0.0.0` | Bind del servidor standalone. |
+| `PORT` | runtime | `3000` | Puerto del servidor standalone. |
+
+El default `/backend-api` permite reutilizar la misma imagen al cambiar de IP o
+acceder desde otra laptop. Si se necesita que el navegador consulte FastAPI de
+forma directa, la URL pública puede sobrescribirse durante el build:
+
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_API_URL=http://192.168.1.20:8000/api \
+  -t arefil-frontend .
+```
+
+Ese modo exige reconstruir la imagen si cambia la dirección y configurar CORS
+en FastAPI. `NEXT_PUBLIC_*` nunca debe contener secretos.
+
+El healthcheck consulta `GET /api/health` en el propio frontend. Es liveness del
+proceso Next.js, no readiness del backend; la conectividad end-to-end puede
+comprobarse con `GET /backend-api/health`.
+
 ## Validación
 
 ```bash
 npm run lint
+npm test
 npm run typecheck
 npm run build
 make run_panel
