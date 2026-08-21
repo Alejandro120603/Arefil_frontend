@@ -5,13 +5,15 @@ BACKEND_DIR ?= ../Arefil_backend/backend
 FRONTEND_DIR ?= .
 BACKEND_PORT ?= 8000
 FRONTEND_PORT ?= 3000
+BACKEND_DATA_DIR ?= ../Arefil_backend/backend/data
+COMPOSE_PROJECT_NAME ?= arefil
 
 # Backend deps live in a venv that is a sibling of backend/ (matches
 # Arefil_backend/README.md's own `python3 -m venv .venv` instructions).
 BACKEND_VENV ?= $(BACKEND_DIR)/../.venv
 BACKEND_PY ?= $(BACKEND_VENV)/bin/python
 
-.PHONY: run_panel setup_panel check_backend check_frontend
+.PHONY: run_panel setup_panel check_backend check_frontend docker_preflight docker_up docker_down docker_logs docker_ps docker_rebuild
 
 ## Validate the sibling backend + its venv, or fail with an actionable message.
 check_backend:
@@ -65,3 +67,39 @@ run_panel: check_backend check_frontend
 		BACKEND_PORT="$(BACKEND_PORT)" FRONTEND_PORT="$(FRONTEND_PORT)" \
 		BACKEND_PY="$(BACKEND_PY)" \
 		exec ./scripts/run_panel.sh
+
+## Validate Docker, Compose, the sibling backend, and the persistent data path.
+docker_preflight:
+	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" ./scripts/docker_preflight.sh
+
+## Start the complete production stack and wait for both healthchecks.
+docker_up: docker_preflight
+	@AREFIL_UID="$$(id -u)" AREFIL_GID="$$(id -g)" \
+		FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
+		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+		docker compose up --detach --build --wait
+
+## Stop and remove containers/network. Persistent backend data is never removed.
+docker_down: docker_preflight
+	@FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
+		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+		docker compose down
+
+## Follow logs for both application services.
+docker_logs: docker_preflight
+	@FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
+		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+		docker compose logs --follow --tail=100 frontend backend
+
+## Show Compose service and health status.
+docker_ps: docker_preflight
+	@FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
+		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+		docker compose ps
+
+## Rebuild/recreate both services without deleting persistent data.
+docker_rebuild: docker_preflight
+	@AREFIL_UID="$$(id -u)" AREFIL_GID="$$(id -g)" \
+		FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
+		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+		docker compose up --detach --build --force-recreate --wait

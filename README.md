@@ -5,17 +5,23 @@ Tailwind CSS + shadcn/ui, consumiendo el backend FastAPI de `Arefil_backend`.
 
 ## Requisitos
 
+Para desarrollo local:
+
 - Node.js 20.9+ y npm
 - Python 3.11+ (para el backend hermano)
-- El repositorio `Arefil_backend` clonado como repo hermano de este:
 
-  ```text
-  ~/projects/
-    Arefil_frontend/   (este repo)
-    Arefil_backend/
-      .venv/            (entorno virtual del backend, ver más abajo)
-      backend/          (código FastAPI, Alembic, requirements.txt)
-  ```
+Para Docker portable no se instalan dependencias Node/Python en el host. Solo
+se necesitan Git, Docker Engine con `docker compose` y ambos repos clonados
+como hermanos:
+
+```text
+~/projects/
+  Arefil_frontend/   (este repo)
+  Arefil_backend/
+    .venv/           (solo necesario para desarrollo local)
+    backend/
+      data/          (SQLite, uploads y backups persistentes)
+```
 
 ## Instalación
 
@@ -123,34 +129,115 @@ usa `src/lib/format/decimal.ts` para parsearlos al momento de mostrarlos.
 
 ## Docker
 
-La imagen de producción usa Node 22 Alpine, `npm ci`, el output standalone de
-Next.js y un runner no-root. Docker es una segunda forma de ejecución; no
-reemplaza `make run_panel`.
-
-Construir el frontend:
+Docker Compose es la forma portable oficial y una alternativa a
+`make run_panel`; no reemplaza el desarrollo local. Desde este repositorio:
 
 ```bash
-docker build -t arefil-frontend .
+make docker_up
 ```
 
-Al ejecutarlo junto al contenedor del backend, ambos deben compartir una red y
-el backend debe tener el alias `backend`:
+El preflight valida Docker, el daemon, Compose, ambos Dockerfiles, el repo
+hermano y que el directorio persistente sea escribible. Después construye ambas
+imágenes, arranca FastAPI, espera su healthcheck y finalmente arranca Next.js.
+No usa `node_modules`, `.next` ni `.venv` del host.
+
+Comandos operativos:
 
 ```bash
-docker run --rm \
-  --name arefil-frontend \
-  --network arefil \
-  -p 3000:3000 \
-  -e API_INTERNAL_URL=http://backend:8000/api \
-  arefil-frontend
+make docker_ps       # estado y health
+make docker_logs     # logs de ambos servicios; Ctrl+C solo deja de seguirlos
+make docker_rebuild  # reconstruye/recrea sin borrar datos
+make docker_down     # detiene el stack sin borrar datos
 ```
 
-La creación de la red, el contenedor backend y su almacenamiento persistente se
-integrará mediante Docker Compose en la siguiente fase. Mientras tanto, sigue
-las instrucciones Docker de `../Arefil_backend/README.md`; nunca ejecutes el
-backend sin montar almacenamiento persistente en `/app/data` si contiene datos
-reales.
+`docker_down` nunca usa `down -v` y no existe un target de reset. Los datos
+viven en el bind mount real:
 
+```text
+../Arefil_backend/backend/data/
+├── arefil.db
+├── arefil.db-wal / arefil.db-shm (cuando SQLite está activo)
+├── uploads/       (Excel originales)
+└── backups/       (snapshots SQLite)
+```
+
+No borres ese directorio, no uses `docker compose down -v` como hábito y no
+copies una base SQLite/WAL activa. Para un respaldo consistente usa
+`Administración > Respaldos` o `GET /api/admin/database/backup`.
+
+### Configuración y puertos
+
+Los defaults son:
+
+- Frontend: <http://localhost:3000>
+- Backend: <http://localhost:8000>
+- Swagger: <http://localhost:8000/docs>
+
+Se pueden cambiar los puertos publicados sin alterar los puertos internos:
+
+```bash
+make docker_up FRONTEND_PORT=3100 BACKEND_PORT=8100
+```
+
+Los Make targets construyen el backend con el UID/GID del usuario actual para
+que el proceso no-root pueda escribir el bind mount. Para usar Compose
+directamente:
+
+```bash
+AREFIL_UID="$(id -u)" AREFIL_GID="$(id -g)" \
+  docker compose up --detach --build --wait
+```
+
+`.env.docker.example` documenta overrides opcionales. Puede copiarse a `.env`
+y ajustarse sin versionar secretos:
+
+```bash
+cp .env.docker.example .env
+```
+
+`BACKEND_DATA_DIR` permite apuntar a otro directorio persistente explícito; el
+default siempre es el `backend/data/` real del repo hermano.
+
+### Browser, red interna y LAN
+
+Next.js usa `API_INTERNAL_URL=http://backend:8000/api` dentro de la red Compose.
+El navegador usa `/backend-api` sobre el mismo origen del frontend, por lo que
+nunca intenta resolver `backend` ni requiere una IP pública horneada en la
+imagen.
+
+Desde otra laptop en la misma LAN abre:
+
+```text
+http://IP-DE-LAPTOP-SERVIDOR:3000
+```
+
+No uses `localhost` en la laptop cliente: apuntaría a esa laptop, no al servidor.
+Compose publica 3000 y 8000 en las interfaces del host; permitir tráfico en el
+firewall/red local es responsabilidad del operador. Los scripts no modifican
+reglas de firewall.
+
+### Mover Arefil a otra laptop
+
+1. Genera un backup desde Arefil y ejecuta `make docker_down`.
+2. Clona ambos repos como hermanos en la laptop nueva.
+3. Copia completo `Arefil_backend/backend/data/` con el stack detenido. Incluye
+   DB, WAL/SHM si existen, `uploads/` y `backups/`.
+4. Asegura que el usuario nuevo sea propietario o pueda escribir el directorio.
+5. Ejecuta `make docker_up` desde `Arefil_frontend`.
+6. Comprueba catálogo, históricos, archivos fuente y backups antes de retirar
+   la copia anterior.
+
+Para restaurar únicamente un snapshot descargado, mantén el stack detenido,
+conserva una copia de seguridad del directorio actual y coloca el snapshot como
+`backend/data/arefil.db`; conserva también `uploads/` si deben funcionar las
+descargas de archivos fuente.
+
+SQLite en WAL debe permanecer en un filesystem local confiable; no uses NFS,
+SMB o CIFS para `backend/data/`.
+
+### Imagen frontend
+
+La imagen usa Node 22 Alpine, `npm ci`, output standalone y un runner no-root.
 Variables de la imagen:
 
 | Variable | Momento | Default | Uso |
@@ -162,7 +249,8 @@ Variables de la imagen:
 
 El default `/backend-api` permite reutilizar la misma imagen al cambiar de IP o
 acceder desde otra laptop. Si se necesita que el navegador consulte FastAPI de
-forma directa, la URL pública puede sobrescribirse durante el build:
+forma directa fuera de Compose, la URL pública puede sobrescribirse durante
+el build:
 
 ```bash
 docker build \
