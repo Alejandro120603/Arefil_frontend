@@ -1,7 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, Loader2 } from "lucide-react";
+import { ArrowLeftRight, FileText, Loader2 } from "lucide-react";
 import { ComparisonSummary } from "@/components/donaldson/comparison-summary";
 import { ComparisonTable } from "@/components/donaldson/comparison-table";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
@@ -10,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { getPriceListComparison } from "@/lib/api/reports";
+import { buildViewerHref, storeComparisonHandoff } from "@/lib/reports/comparison-handoff";
 import {
   ALL_STATUSES,
   COMPARISON_STATUS_FILTERS,
@@ -112,6 +114,7 @@ export function PriceListComparison({ priceLists }: PriceListComparisonProps) {
   // both still read `isComparing === false` without this ref (same guard as the
   // import and backup flows).
   const comparingRef = useRef(false);
+  const router = useRouter();
 
   const selectionError = validateComparisonSelection(priceListAId, priceListBId);
 
@@ -142,6 +145,23 @@ export function PriceListComparison({ priceLists }: PriceListComparisonProps) {
       comparingRef.current = false;
       setIsComparing(false);
     }
+  }
+
+  /**
+   * Hands the dataset already in memory to the viewer route instead of making
+   * Backend #9 rebuild it. The navigation happens either way: on a failed write
+   * (storage disabled, or a comparison too large for the quota) the viewer
+   * falls back to fetching the same pair of ids itself.
+   */
+  function handleOpenReport() {
+    if (comparison == null) return;
+    // The ids come from the response, not from the pickers: the user may have
+    // changed the selection after comparing, and the report must describe the
+    // dataset actually on screen.
+    const priceListAId = comparison.list_a.id;
+    const priceListBId = comparison.list_b.id;
+    storeComparisonHandoff({ priceListAId, priceListBId, comparison });
+    router.push(buildViewerHref(priceListAId, priceListBId));
   }
 
   function handleSwap() {
@@ -197,6 +217,13 @@ export function PriceListComparison({ priceLists }: PriceListComparisonProps) {
               {isComparing && <Loader2 className="animate-spin" />}
               {isComparing ? "Comparando..." : "Comparar"}
             </Button>
+            {/* Only offered once a dataset exists - there is nothing to render before that. */}
+            {comparison != null && (
+              <Button type="button" variant="outline" onClick={handleOpenReport} disabled={isComparing}>
+                <FileText />
+                Ver reporte
+              </Button>
+            )}
             {selectionError && <p className="text-sm text-muted-foreground">{selectionError}</p>}
           </div>
         </CardContent>
