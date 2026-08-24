@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Archive, LayoutDashboard, ListTree, Package, Upload, XCircle } from "lucide-react";
+import { Archive, FileChartColumn, LayoutDashboard, ListTree, Package, Upload, XCircle } from "lucide-react";
 
 export interface NavLink {
   label: string;
@@ -24,6 +24,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Listas de precios", href: "/donaldson/price-lists", icon: ListTree },
       { label: "Productos", href: "/donaldson/products", icon: Package },
       { label: "Cancelados", href: "/donaldson/cancelados", icon: XCircle },
+      { label: "Reportes", href: "/donaldson/reports", icon: FileChartColumn },
     ],
   },
   {

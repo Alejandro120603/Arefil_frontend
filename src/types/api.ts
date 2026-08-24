@@ -161,3 +161,79 @@ export interface ImportConfirmResult {
 export interface HealthStatus {
   status: string;
 }
+
+/**
+ * Reports — mirrored from `Arefil_backend/backend/app/schemas/reports.py`.
+ *
+ * The backend derives this dataset at request time from two price lists that
+ * must share supplier and currency (it answers 422 otherwise). Keep this shape
+ * stable: Frontend #9 will feed the very same `PriceListComparisonResponse`
+ * into the Stimulsoft viewer without a second endpoint.
+ */
+export type ComparisonStatus = "INCREASED" | "DECREASED" | "UNCHANGED" | "NEW" | "REMOVED";
+
+export interface PriceListComparisonRequest {
+  price_list_a_id: number;
+  price_list_b_id: number;
+}
+
+export interface ComparisonReportMetadata {
+  code: "PRICE_LIST_COMPARISON";
+  generated_at: string;
+}
+
+export interface ComparisonSupplier {
+  id: number;
+  code: string;
+  name: string;
+}
+
+export interface ComparisonPriceList {
+  id: number;
+  effective_date: string;
+  currency: string;
+  source_filename: string;
+}
+
+export interface PriceListComparisonSummary {
+  total_products: number;
+  increased: number;
+  decreased: number;
+  unchanged: number;
+  new: number;
+  removed: number;
+  /** `null` when no row had a comparable percentage (empty lists, or every A price was 0). */
+  average_percentage_change: DecimalString | null;
+}
+
+/**
+ * `price_a` is null for `NEW`, `price_b` is null for `REMOVED`, and both
+ * `absolute_change` / `percentage_change` are null on those rows. On a
+ * compared row `percentage_change` is still null when `price_a` was exactly 0
+ * (the backend refuses to divide by zero) — render "—", never "0%"/"Infinity%".
+ */
+export interface PriceListComparisonItem {
+  product_id: number;
+  part_number: string;
+  item_number: string | null;
+  description: string | null;
+  price_a_cents: number | null;
+  price_a: DecimalString | null;
+  price_b_cents: number | null;
+  price_b: DecimalString | null;
+  absolute_change_cents: number | null;
+  absolute_change: DecimalString | null;
+  percentage_change: DecimalString | null;
+  classification_a: string | null;
+  classification_b: string | null;
+  status: ComparisonStatus;
+}
+
+export interface PriceListComparisonResponse {
+  report: ComparisonReportMetadata;
+  supplier: ComparisonSupplier;
+  list_a: ComparisonPriceList;
+  list_b: ComparisonPriceList;
+  summary: PriceListComparisonSummary;
+  items: PriceListComparisonItem[];
+}
