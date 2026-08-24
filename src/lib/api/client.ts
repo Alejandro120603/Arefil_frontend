@@ -49,7 +49,9 @@ export interface RequestOptions {
 
 export interface ApiClient {
   apiGet<T>(path: string, options?: RequestOptions): Promise<T>;
+  apiGetText(path: string, options?: RequestOptions): Promise<string>;
   apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
+  apiPutText<T>(path: string, body: string, options?: RequestOptions): Promise<T>;
   apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T>;
   apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload>;
 }
@@ -65,11 +67,32 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return parseJson<T>(response);
   }
 
+  async function apiGetText(path: string, options?: RequestOptions): Promise<string> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: options?.signal,
+      cache: "no-store",
+    });
+    await ensureOk(response);
+    return response.text();
+  }
+
   async function apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
+  async function apiPutText<T>(path: string, body: string, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body,
       signal: options?.signal,
     });
     return parseJson<T>(response);
@@ -96,7 +119,7 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return { blob, filename: disposition ? extractFilename(disposition) : null };
   }
 
-  return { apiGet, apiPostJson, apiUpload, apiDownloadBlob };
+  return { apiGet, apiGetText, apiPostJson, apiPutText, apiUpload, apiDownloadBlob };
 }
 
 export interface BlobDownload {

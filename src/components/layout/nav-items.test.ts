@@ -13,4 +13,12 @@ describe("NAV_SECTIONS", () => {
     ]);
     expect(donaldson?.links.at(-1)?.label).toBe("Reportes");
   });
+
+  it("links the report catalogue from Administración", () => {
+    const admin = NAV_SECTIONS.find((section) => section.label === "Administración");
+    expect(admin?.links.map((link) => link.href)).toEqual([
+      "/administracion/respaldos",
+      "/administracion/reportes",
+    ]);
+  });
 });

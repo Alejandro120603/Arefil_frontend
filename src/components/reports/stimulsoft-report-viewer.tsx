@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * The one and only module in the app that touches Stimulsoft.
+ * Browser-only Viewer entry point. Designer uses its own package entry point;
+ * both share setup through `stimulsoft-runtime.ts`.
  *
  * `stimulsoft-reports-js-react/viewer` pulls in the engine, chart, export,
  * xlsx and maps bundles (~14 MB of JavaScript) and its `StiViewer` writes the
@@ -10,12 +11,12 @@
  * `next/dynamic(..., { ssr: false })` - see `price-list-comparison-report.tsx`,
  * which is the only importer.
  *
- * The Designer bundle (`stimulsoft-reports-js-react/designer`) is deliberately
- * NOT imported: it is a separate entry point in the same package and is out of
- * scope for this issue.
+ * The Designer bundle is deliberately not imported here so users of the Viewer
+ * do not download the editing UI.
  */
 import { useEffect, useMemo } from "react";
 import { Stimulsoft, Viewer } from "stimulsoft-reports-js-react/viewer";
+import { applyStimulsoftLicense, registerStimulsoftData } from "@/lib/reports/stimulsoft-runtime";
 
 export interface StimulsoftReportViewerProps {
   /** Raw `.mrt` contents (JSON), already fetched by the caller. */
@@ -38,23 +39,15 @@ export interface StimulsoftReportViewerProps {
  * pretending a server-only variable could protect it (see the deliverable, §12).
  * Unset means trial mode: fully functional, with a TRIAL banner on every page.
  */
-function applyLicense(): void {
-  const key = process.env.NEXT_PUBLIC_STIMULSOFT_LICENSE_KEY?.trim();
-  if (key) Stimulsoft.Base.StiLicense.key = key;
-}
-
 function createReport(template: string, data: unknown, dataSourceName: string) {
-  applyLicense();
+  applyStimulsoftLicense(Stimulsoft);
   const report = new Stimulsoft.Report.StiReport();
   // `load` takes the already-fetched text; `loadFile` would issue its own
   // request and give us no way to report a 404 to the user.
   report.load(template);
   // The committed template ships without a data connection, but clearing is
   // what makes re-registering idempotent if that ever changes.
-  report.dictionary.databases.clear();
-  const dataSet = new Stimulsoft.System.Data.DataSet(dataSourceName);
-  dataSet.readJson(JSON.stringify(data));
-  report.regData(dataSourceName, dataSourceName, dataSet);
+  registerStimulsoftData(report, Stimulsoft, data, dataSourceName);
   return report;
 }
 

@@ -30,8 +30,8 @@ import { COMPARISON_STATUS_LABELS, EMPTY_VALUE, formatComparisonRow } from "@/li
  */
 export const AREFIL_DATA_SOURCE_NAME = "ArefilReportData";
 
-/** Served from `public/`, so it is the same URL in dev, standalone and Docker. */
-export const PRICE_LIST_COMPARISON_TEMPLATE_URL = "/reports/price-list-comparison.mrt";
+/** Compatibility reference only; runtime templates come from Backend #10. */
+export const PRICE_LIST_COMPARISON_REFERENCE_URL = "/reports/price-list-comparison.mrt";
 
 /** Report code of the only template this module knows about (Backend #9). */
 export const PRICE_LIST_COMPARISON_REPORT_CODE = "PRICE_LIST_COMPARISON";

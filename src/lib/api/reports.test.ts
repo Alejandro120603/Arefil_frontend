@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PRICE_LIST_COMPARISON_PATH, SAME_PRICE_LIST_MESSAGE, getPriceListComparison } from "./reports";
+import {
+  PRICE_LIST_COMPARISON_PATH,
+  SAME_PRICE_LIST_MESSAGE,
+  getPriceListComparison,
+  getReportTemplate,
+  saveReportTemplate,
+} from "./reports";
 import { ApiError, getUserErrorMessage } from "./errors";
 import type { PriceListComparisonResponse } from "@/types/api";
 
@@ -97,6 +103,46 @@ describe("getPriceListComparison", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockRejectedValue(new TypeError("fetch failed")));
 
     await expect(getPriceListComparison({ price_list_a_id: 1, price_list_b_id: 2 })).rejects.toThrow("fetch failed");
+  });
+});
+
+describe("report templates", () => {
+  it("loads the active template and saves the Designer output through the browser proxy", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "");
+    const template = '{"ReportVersion":"2026.3.2","ReportName":"Edited","Pages":{"0":{}}}';
+    const saved = {
+      report_code: "PRICE_LIST_COMPARISON",
+      version: 2,
+      checksum: "abc",
+      created_at: "2026-08-24T12:00:00Z",
+      updated_at: "2026-08-24T12:00:00Z",
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(template))
+      .mockResolvedValueOnce(Response.json(saved, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getReportTemplate("PRICE_LIST_COMPARISON")).resolves.toBe(template);
+    await expect(saveReportTemplate("PRICE_LIST_COMPARISON", template)).resolves.toEqual(saved);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/backend-api/reports/PRICE_LIST_COMPARISON/template");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/backend-api/reports/PRICE_LIST_COMPARISON/template");
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "PUT", body: template });
+  });
+
+  it("does not turn backend validation failure into a successful save", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({ detail: "La plantilla excede el tamaño máximo permitido." }, { status: 413 }),
+      ),
+    );
+
+    await expect(saveReportTemplate("PRICE_LIST_COMPARISON", "too-large")).rejects.toMatchObject({
+      status: 413,
+      message: "La plantilla excede el tamaño máximo permitido.",
+    });
   });
 });
 

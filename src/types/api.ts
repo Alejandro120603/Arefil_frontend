@@ -237,3 +237,22 @@ export interface PriceListComparisonResponse {
   summary: PriceListComparisonSummary;
   items: PriceListComparisonItem[];
 }
+
+export interface ReportDefinition {
+  code: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  enabled: boolean;
+  active_template_version: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReportTemplateVersion {
+  report_code: string;
+  version: number;
+  checksum: string;
+  created_at: string;
+  updated_at: string;
+}

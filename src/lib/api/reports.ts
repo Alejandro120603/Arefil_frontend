@@ -1,8 +1,17 @@
 import { browserApiClient } from "./browser-client";
 import type { RequestOptions } from "./client";
-import type { PriceListComparisonRequest, PriceListComparisonResponse } from "@/types/api";
+import type {
+  PriceListComparisonRequest,
+  PriceListComparisonResponse,
+  ReportTemplateVersion,
+} from "@/types/api";
 
-export const PRICE_LIST_COMPARISON_PATH = "/reports/price-list-comparison/data";
+export const PRICE_LIST_COMPARISON_CODE = "PRICE_LIST_COMPARISON";
+export const PRICE_LIST_COMPARISON_PATH = `/reports/${PRICE_LIST_COMPARISON_CODE}/data`;
+
+function reportPath(code: string, suffix = ""): string {
+  return `/reports/${encodeURIComponent(code)}${suffix}`;
+}
 
 /**
  * A == B is rejected by the backend with a 422 whose message is written for
@@ -30,4 +39,16 @@ export function getPriceListComparison(
     return Promise.reject(new SamePriceListError());
   }
   return browserApiClient.apiPostJson<PriceListComparisonResponse>(PRICE_LIST_COMPARISON_PATH, request, options);
+}
+
+export function getReportTemplate(code: string, options?: RequestOptions): Promise<string> {
+  return browserApiClient.apiGetText(reportPath(code, "/template"), options);
+}
+
+export function saveReportTemplate(
+  code: string,
+  template: string,
+  options?: RequestOptions,
+): Promise<ReportTemplateVersion> {
+  return browserApiClient.apiPutText<ReportTemplateVersion>(reportPath(code, "/template"), template, options);
 }

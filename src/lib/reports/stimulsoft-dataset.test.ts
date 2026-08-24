@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   AREFIL_DATA_SOURCE_NAME,
   AREFIL_REPORT_BINDINGS,
-  PRICE_LIST_COMPARISON_TEMPLATE_URL,
+  PRICE_LIST_COMPARISON_REFERENCE_URL,
   toArefilReportData,
 } from "./stimulsoft-dataset";
 import type { ComparisonStatus, PriceListComparisonItem, PriceListComparisonResponse } from "@/types/api";
@@ -193,8 +193,8 @@ describe("price-list-comparison.mrt", () => {
   }[];
   const serialized = JSON.stringify(template);
 
-  it("is served from public/ under the URL the viewer requests", () => {
-    expect(PRICE_LIST_COMPARISON_TEMPLATE_URL).toBe("/reports/price-list-comparison.mrt");
+  it("keeps the compatibility reference at its established public path", () => {
+    expect(PRICE_LIST_COMPARISON_REFERENCE_URL).toBe("/reports/price-list-comparison.mrt");
   });
 
   it("declares one data source per section of ArefilReportData", () => {

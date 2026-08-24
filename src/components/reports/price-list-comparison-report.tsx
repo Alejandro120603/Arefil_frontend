@@ -17,12 +17,12 @@ import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getUserErrorMessage } from "@/lib/api/errors";
-import { getPriceListComparison } from "@/lib/api/reports";
+import { getPriceListComparison, getReportTemplate } from "@/lib/api/reports";
 import { describeComparisonList } from "@/lib/reports/comparison";
 import { readComparisonHandoff, type ViewerSelection } from "@/lib/reports/comparison-handoff";
 import {
   AREFIL_DATA_SOURCE_NAME,
-  PRICE_LIST_COMPARISON_TEMPLATE_URL,
+  PRICE_LIST_COMPARISON_REPORT_CODE,
   toArefilReportData,
   type ArefilReportData,
 } from "@/lib/reports/stimulsoft-dataset";
@@ -31,7 +31,7 @@ import type { PriceListComparisonResponse } from "@/types/api";
 const REPORTS_HREF = "/donaldson/reports";
 
 const TEMPLATE_ERROR =
-  "No se pudo cargar la plantilla del reporte. Verifica que el archivo price-list-comparison.mrt esté publicado.";
+  "No se pudo cargar la plantilla activa del reporte desde el backend. Verifica el catálogo administrativo.";
 const COMPARISON_ERROR = "No fue posible recuperar la comparación. Vuelve a Reportes y genérala de nuevo.";
 const VIEWER_ERROR = "No fue posible inicializar el visor de reportes. Recarga la página e intenta de nuevo.";
 
@@ -60,14 +60,16 @@ class TemplateError extends Error {
 }
 
 /**
- * The `.mrt` is a static asset in `public/`, so this is a same-origin request in
- * dev, in the standalone build and inside Docker alike - the browser never
- * needs to know about `backend:8000`.
+ * The active `.mrt` is owned by Backend #10 and reached through the same-origin
+ * proxy. There is intentionally no static fallback: it could hide a failed
+ * save or show a stale template after a container recreation.
  */
 async function fetchTemplate(signal: AbortSignal): Promise<string> {
-  const response = await fetch(PRICE_LIST_COMPARISON_TEMPLATE_URL, { signal, cache: "no-store" });
-  if (!response.ok) throw new TemplateError();
-  return response.text();
+  try {
+    return await getReportTemplate(PRICE_LIST_COMPARISON_REPORT_CODE, { signal });
+  } catch {
+    throw new TemplateError();
+  }
 }
 
 interface ReportPayload {

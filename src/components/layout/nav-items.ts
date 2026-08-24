@@ -29,6 +29,9 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: "Administración",
-    links: [{ label: "Respaldos", href: "/administracion/respaldos", icon: Archive }],
+    links: [
+      { label: "Respaldos", href: "/administracion/respaldos", icon: Archive },
+      { label: "Reportes", href: "/administracion/reportes", icon: FileChartColumn },
+    ],
   },
 ];
