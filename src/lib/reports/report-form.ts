@@ -9,6 +9,8 @@ import type {
 } from "@/types/api";
 
 export const KNOWN_REPORT_HANDLER = "price_list_comparison";
+export const REPEATABLE_REPORT_HANDLER = "repeatable_rows";
+export const REPORT_HANDLERS = [KNOWN_REPORT_HANDLER, REPEATABLE_REPORT_HANDLER] as const;
 
 export const DATA_TYPES: ReportParameterDataType[] = [
   "string",
@@ -40,7 +42,19 @@ export interface ReportFormValue {
   parameters: ReportParameter[];
 }
 
-export function handlerParameters(): ReportParameter[] {
+export function handlerParameters(handler: string = KNOWN_REPORT_HANDLER): ReportParameter[] {
+  if (handler === REPEATABLE_REPORT_HANDLER) {
+    return [{
+      name: "price_list_id",
+      label: "Lista de precios",
+      data_type: "integer",
+      input_type: "select",
+      required: true,
+      default_value: null,
+      display_order: 0,
+      configuration_json: { options_source: "price_lists" },
+    }];
+  }
   return [
     {
       name: "price_list_a_id",
@@ -120,7 +134,7 @@ export function validateReportForm(value: ReportFormValue, creating: boolean): s
   if (value.data_source_type === "SQL_QUERY" && !value.query_text.trim()) {
     errors.push("Los reportes SQL_QUERY requieren una consulta.");
   }
-  if (value.data_source_type === "HANDLER" && value.data_source_key !== KNOWN_REPORT_HANDLER) {
+  if (value.data_source_type === "HANDLER" && !REPORT_HANDLERS.includes(value.data_source_key as typeof REPORT_HANDLERS[number])) {
     errors.push("Selecciona un handler permitido.");
   }
 
@@ -161,7 +175,7 @@ export function toReportRequest(value: ReportFormValue): ReportCreateRequest {
     description: value.description.trim() || null,
     category: value.category.trim() || null,
     data_source_type: value.data_source_type,
-    data_source_key: value.data_source_type === "HANDLER" ? KNOWN_REPORT_HANDLER : null,
+    data_source_key: value.data_source_type === "HANDLER" ? value.data_source_key : null,
     query_text: value.data_source_type === "SQL_QUERY" ? value.query_text.trim() : null,
     enabled: value.data_source_type === "SQL_QUERY" ? false : value.enabled,
     parameters: normalizedParameters(value.parameters),

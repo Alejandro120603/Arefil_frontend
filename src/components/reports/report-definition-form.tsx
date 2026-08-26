@@ -16,6 +16,7 @@ import { getUserErrorMessage } from "@/lib/api/errors";
 import { createReport, previewReport, updateReport } from "@/lib/api/reports";
 import {
   KNOWN_REPORT_HANDLER,
+  REPEATABLE_REPORT_HANDLER,
   coerceRuntimeValue,
   emptyReportForm,
   handlerParameters,
@@ -68,6 +69,12 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
       enabled: next === "HANDLER",
       parameters: next === "HANDLER" ? handlerParameters() : [],
     });
+  }
+
+  function changeHandler(next: string) {
+    if (next === value.data_source_key) return;
+    if (value.parameters.length > 0 && !globalThis.confirm("Cambiar el handler reemplazará los parámetros actuales. ¿Continuar?")) return;
+    change({ data_source_key: next, parameters: handlerParameters(next), enabled: true });
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -189,8 +196,9 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
           {value.data_source_type === "HANDLER" ? (
             <div className="grid max-w-xl gap-1.5">
               <Label htmlFor="report-handler">Handler permitido</Label>
-              <select id="report-handler" className={CONTROL_CLASS} value={KNOWN_REPORT_HANDLER} disabled>
+              <select id="report-handler" className={CONTROL_CLASS} value={value.data_source_key ?? KNOWN_REPORT_HANDLER} onChange={(event) => changeHandler(event.target.value)}>
                 <option value={KNOWN_REPORT_HANDLER}>Comparación de listas de precios</option>
+                <option value={REPEATABLE_REPORT_HANDLER}>Renglones repetibles por producto</option>
               </select>
               <p className="text-xs text-muted-foreground">No se aceptan nombres de función ni import paths arbitrarios.</p>
             </div>
@@ -211,7 +219,7 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
         </CardContent>
       </Card>
 
-      <Card><CardContent><ReportParameterEditor parameters={value.parameters} locked={value.data_source_type === "HANDLER"} onChange={(parameters) => change({ parameters })} /></CardContent></Card>
+      <Card><CardContent><ReportParameterEditor parameters={value.parameters} locked={value.data_source_type === "HANDLER" && value.data_source_key === KNOWN_REPORT_HANDLER} onChange={(parameters) => change({ parameters })} /></CardContent></Card>
 
       {!creating && value.data_source_type === "SQL_QUERY" && (
         <Card>

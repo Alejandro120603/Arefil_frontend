@@ -47,11 +47,12 @@ const QUANTITY: ReportParameter = {
 const REPORT = {
   code: "COTIZACION", name: "Cotización", description: null, category: null, enabled: true,
   data_source_type: "SQL_QUERY" as const, active_template_version: null, parameters: [QUANTITY],
+  parameter_groups: [],
   created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
   data_source_key: null, query_text: "SELECT 1",
 };
 
-const EMPTY_BUILDER: ReportBuilderDefinition = { report: REPORT, columns: [], excel_layout: null };
+const EMPTY_BUILDER: ReportBuilderDefinition = { report: REPORT, columns: [], parameter_groups: [], excel_layout: null };
 
 const SAVED_BUILDER: ReportBuilderDefinition = {
   report: REPORT,
@@ -60,6 +61,7 @@ const SAVED_BUILDER: ReportBuilderDefinition = {
     source_field: "product.part_number", source_parameter: null, formula_definition: null,
     data_type: "string", format_type: "text", display_order: 0, visible: true, width: 18,
   }],
+  parameter_groups: [],
   excel_layout: {
     sheet_name: "Cotización", title: "Cotización", show_report_name: true, show_generated_at: true,
     show_parameters: true, freeze_header: true, header_row: 1, totals: [],
@@ -78,8 +80,8 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function renderWorkspace() {
-  return render(<ReportBuilderWorkspace code="COTIZACION" parameters={[QUANTITY]} />);
+function renderWorkspace(dataSourceKey: string | null = null) {
+  return render(<ReportBuilderWorkspace code="COTIZACION" parameters={[QUANTITY]} dataSourceKey={dataSourceKey} />);
 }
 
 async function addFieldColumn(user: ReturnType<typeof userEvent.setup>, fieldKey: string) {
@@ -220,6 +222,27 @@ describe("ReportBuilderWorkspace", () => {
     })]);
     expect(request.excel_layout).toMatchObject({ sheet_name: "Cotización", freeze_header: true, totals: [] });
     expect(await screen.findByText("Constructor guardado")).toBeTruthy();
+  });
+
+  it("configures and saves repeatable metadata in the same transactional builder request", async () => {
+    const user = userEvent.setup();
+    renderWorkspace("repeatable_rows");
+    await user.click(await screen.findByRole("button", { name: "Agregar grupo repetible" }));
+    expect((screen.getByLabelText("Nombre interno", { selector: "#group-name" }) as HTMLInputElement).value).toBe("items");
+    expect(screen.getByDisplayValue("Producto")).toBeTruthy();
+    await addFieldColumn(user, "product.part_number");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1]).toMatchObject({
+      parameter_groups: [{
+        name: "items", resolver_key: "products_by_price_list", context_parameter: "quantity", min_items: 1,
+        fields: [{
+          name: "product_id", data_type: "integer", input_type: "select", required: true,
+          configuration_json: { options_source: "products_by_price_list", context_parameter: "quantity" },
+        }],
+      }],
+    });
   });
 
   it("surfaces the backend save error and preserves the edited state", async () => {

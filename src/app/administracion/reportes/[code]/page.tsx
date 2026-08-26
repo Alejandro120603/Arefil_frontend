@@ -35,7 +35,7 @@ export default async function ConfigureReportPage({ params }: ConfigureReportPag
               formula reference the backend has not persisted yet would be
               rejected on save. Editing parameters above and saving refreshes
               this server component with the new list. */}
-          <ReportBuilderWorkspace code={report.code} parameters={report.parameters} />
+          <ReportBuilderWorkspace code={report.code} parameters={report.parameters} dataSourceKey={report.data_source_key} />
         </>
       )}
     </div>

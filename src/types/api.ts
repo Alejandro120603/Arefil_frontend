@@ -247,6 +247,7 @@ export interface ReportDefinition {
   data_source_type: ReportDataSourceType;
   active_template_version: number | null;
   parameters: ReportParameter[];
+  parameter_groups: ReportParameterGroup[];
   created_at: string;
   updated_at: string;
 }
@@ -254,10 +255,11 @@ export interface ReportDefinition {
 export type ReportDataSourceType = "HANDLER" | "SQL_QUERY";
 export type ReportParameterDataType = "integer" | "string" | "decimal" | "boolean" | "date" | "datetime";
 export type ReportParameterInputType = "text" | "number" | "date" | "datetime" | "checkbox" | "select";
-export type ReportOptionsSource = "price_lists" | "suppliers";
+export type ReportOptionsSource = "price_lists" | "suppliers" | "products_by_price_list";
+export type ReportScalarOptionsSource = Exclude<ReportOptionsSource, "products_by_price_list">;
 
 export interface ReportParameterConfiguration {
-  options_source: ReportOptionsSource;
+  options_source: ReportScalarOptionsSource;
 }
 
 export interface ReportParameter {
@@ -269,6 +271,44 @@ export interface ReportParameter {
   default_value: unknown | null;
   display_order: number;
   configuration_json: ReportParameterConfiguration | null;
+}
+
+export interface ReportNumericConfiguration {
+  minimum?: number | string;
+  maximum?: number | string;
+  exclusive_minimum?: boolean;
+  exclusive_maximum?: boolean;
+}
+
+export interface ReportDependentOptionsConfiguration {
+  options_source: "products_by_price_list";
+  context_parameter: string;
+}
+
+export type ReportParameterGroupFieldConfiguration =
+  | ReportNumericConfiguration
+  | ReportDependentOptionsConfiguration;
+
+export interface ReportParameterGroupField {
+  name: string;
+  label: string;
+  data_type: ReportParameterDataType;
+  input_type: ReportParameterInputType;
+  required: boolean;
+  default_value: unknown | null;
+  display_order: number;
+  configuration_json: ReportParameterGroupFieldConfiguration | null;
+}
+
+export interface ReportParameterGroup {
+  name: string;
+  label: string;
+  resolver_key: "products_by_price_list";
+  context_parameter: string;
+  min_items: number;
+  max_items: number | null;
+  display_order: number;
+  fields: ReportParameterGroupField[];
 }
 
 export interface ReportAdminDefinition extends ReportDefinition {
@@ -318,7 +358,7 @@ export interface ReportTemplateVersion {
 }
 
 /**
- * Report Builder — mirrored from Backend #12
+ * Report Builder — mirrored from Backend #12/#13
  * (`Arefil_backend/backend/app/schemas/reports.py`, `app/db/enums.py`).
  *
  * The builder describes the *logical shell* of a report: which columns exist,
@@ -386,12 +426,14 @@ export interface ReportExcelLayout {
 export interface ReportBuilderDefinition {
   report: ReportAdminDefinition;
   columns: ReportColumn[];
+  parameter_groups: ReportParameterGroup[];
   excel_layout: ReportExcelLayout | null;
 }
 
 /** Body of `PUT /reports/{code}/builder` — columns and layout save together. */
 export interface ReportBuilderWriteRequest {
   columns: ReportColumn[];
+  parameter_groups: ReportParameterGroup[];
   excel_layout: ReportExcelLayout;
 }
 

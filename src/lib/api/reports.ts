@@ -102,11 +102,12 @@ export function executeReport<T = SQLReportExecutionResponse>(
 export function getReportParameterOptions(
   code: string,
   parameterName: string,
+  context?: Record<string, string | number | boolean | undefined>,
   options?: RequestOptions,
 ): Promise<ReportOption[]> {
   return browserApiClient.apiGet<ReportOption[]>(
     reportPath(code, `/parameters/${encodeURIComponent(parameterName)}/options`),
-    options,
+    { ...options, query: { ...options?.query, ...context } },
   );
 }
 

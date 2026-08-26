@@ -48,9 +48,11 @@ interface RuntimeLoadState {
 export function GenericReportViewer({
   report,
   parameters,
+  payload,
 }: {
   report: ReportDefinition;
   parameters: Record<string, unknown>;
+  payload?: unknown;
 }) {
   const key = JSON.stringify(parameters);
   const [state, setState] = useState<RuntimeLoadState | null>(null);
@@ -64,7 +66,9 @@ export function GenericReportViewer({
         ? Promise.resolve<string | null>(null)
         : getReportTemplate(report.code, { signal: controller.signal });
       const [executionResult, templateResult] = await Promise.allSettled([
-        executeReport(report.code, parameters, { signal: controller.signal }),
+        payload === undefined
+          ? executeReport(report.code, parameters, { signal: controller.signal })
+          : Promise.resolve(payload),
         templatePromise,
       ]);
       if (controller.signal.aborted) return;
@@ -121,7 +125,7 @@ export function GenericReportViewer({
 
     void load();
     return () => controller.abort();
-  }, [key, parameters, report]);
+  }, [key, parameters, payload, report]);
 
   const handleViewerError = useCallback(() => {
     setState((value) => value?.key === key

@@ -12,12 +12,15 @@ import {
   MAX_COLUMN_WIDTH,
   MIN_COLUMN_WIDTH,
   applyFieldSource,
+  applyGroupParameterSource,
   applyParameterSource,
   formatsForDataType,
   groupFieldCatalog,
+  groupParameterReferences,
   moveColumn,
   newFieldColumn,
   newFormulaColumn,
+  newGroupParameterColumn,
   newParameterColumn,
   removeColumn,
   retypeColumn,
@@ -29,6 +32,7 @@ import type {
   ReportFieldDescriptor,
   ReportFormatType,
   ReportParameter,
+  ReportParameterGroup,
 } from "@/types/api";
 
 const CONTROL_CLASS =
@@ -55,12 +59,14 @@ export function ReportColumnEditor({
   columns,
   fields,
   parameters,
+  parameterGroups,
   disabled = false,
   onChange,
 }: {
   columns: ReportColumn[];
   fields: ReportFieldDescriptor[];
   parameters: ReportParameter[];
+  parameterGroups: ReportParameterGroup[];
   disabled?: boolean;
   onChange: (columns: ReportColumn[]) => void;
 }) {
@@ -69,6 +75,8 @@ export function ReportColumnEditor({
     columns.filter((column) => column.column_type === "PARAMETER").map((column) => column.source_parameter),
   );
   const availableParameters = parameters.filter((parameter) => !usedParameters.has(parameter.name));
+  const groupedParameters = groupParameterReferences(parameterGroups);
+  const availableGroupedParameters = groupedParameters.filter((parameter) => !usedParameters.has(parameter.source));
 
   function replace(index: number, next: ReportColumn) {
     onChange(columns.map((column, current) => (current === index ? next : column)));
@@ -82,8 +90,12 @@ export function ReportColumnEditor({
 
   function addParameter(name: string) {
     const parameter = parameters.find((candidate) => candidate.name === name);
-    if (!parameter) return;
-    onChange(withDisplayOrder([...columns, newParameterColumn(parameter, columns)]));
+    if (parameter) {
+      onChange(withDisplayOrder([...columns, newParameterColumn(parameter, columns)]));
+      return;
+    }
+    const grouped = groupedParameters.find((candidate) => candidate.source === name);
+    if (grouped) onChange(withDisplayOrder([...columns, newGroupParameterColumn(grouped, columns)]));
   }
 
   return (
@@ -114,15 +126,22 @@ export function ReportColumnEditor({
             id="builder-add-parameter"
             className={CONTROL_CLASS}
             value=""
-            disabled={disabled || availableParameters.length === 0}
+            disabled={disabled || (availableParameters.length === 0 && availableGroupedParameters.length === 0)}
             onChange={(event) => { addParameter(event.target.value); event.target.value = ""; }}
           >
             <option value="">
-              {availableParameters.length === 0 ? "Sin parámetros disponibles" : "Selecciona un parámetro…"}
+              {availableParameters.length === 0 && availableGroupedParameters.length === 0 ? "Sin parámetros disponibles" : "Selecciona un parámetro…"}
             </option>
-            {availableParameters.map((parameter) => (
-              <option key={parameter.name} value={parameter.name}>{parameter.label} · {parameter.name}</option>
-            ))}
+            {availableParameters.length > 0 && <optgroup label="Parámetros escalares">
+              {availableParameters.map((parameter) => (
+                <option key={parameter.name} value={parameter.name}>{parameter.label} · {parameter.name}</option>
+              ))}
+            </optgroup>}
+            {availableGroupedParameters.length > 0 && <optgroup label="Campos repetibles">
+              {availableGroupedParameters.map((parameter) => (
+                <option key={parameter.source} value={parameter.source}>{parameter.label} · {parameter.source}</option>
+              ))}
+            </optgroup>}
           </select>
         </div>
         <Button
@@ -191,7 +210,7 @@ export function ReportColumnEditor({
                       value={column.key}
                       // A PARAMETER column must keep the parameter's own name;
                       // any other key is rejected as a parameter conflict.
-                      disabled={disabled || column.column_type === "PARAMETER"}
+                      disabled={disabled || (column.column_type === "PARAMETER" && !column.source_parameter?.includes("."))}
                       onChange={(event) => replace(index, { ...column, key: event.target.value })}
                     />
                   </div>
@@ -260,19 +279,25 @@ export function ReportColumnEditor({
                         id={`column-parameter-${index}`}
                         className={CONTROL_CLASS}
                         value={column.source_parameter ?? ""}
-                        disabled={disabled || parameters.length === 0}
+                        disabled={disabled || (parameters.length === 0 && groupedParameters.length === 0)}
                         onChange={(event) => {
                           const parameter = parameters.find((candidate) => candidate.name === event.target.value);
-                          if (parameter) replace(index, applyParameterSource(column, parameter));
+                          if (parameter) {
+                            replace(index, applyParameterSource(column, parameter));
+                            return;
+                          }
+                          const grouped = groupedParameters.find((candidate) => candidate.source === event.target.value);
+                          if (grouped) replace(index, applyGroupParameterSource(column, grouped, columns));
                         }}
                       >
                         <option value="">
-                          {parameters.length === 0 ? "El reporte no declara parámetros" : "Selecciona un parámetro…"}
+                          {parameters.length === 0 && groupedParameters.length === 0 ? "El reporte no declara parámetros" : "Selecciona un parámetro…"}
                         </option>
                         {parameters.map((parameter) => (
-                          <option key={parameter.name} value={parameter.name}>
-                            {parameter.label} · {parameter.name}
-                          </option>
+                          <option key={parameter.name} value={parameter.name}>{parameter.label} · {parameter.name}</option>
+                        ))}
+                        {groupedParameters.map((parameter) => (
+                          <option key={parameter.source} value={parameter.source}>{parameter.label} · {parameter.source}</option>
                         ))}
                       </select>
                     </div>

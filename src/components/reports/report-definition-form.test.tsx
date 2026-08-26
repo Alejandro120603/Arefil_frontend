@@ -33,6 +33,7 @@ const SQL_REPORT: ReportAdminDefinition = {
   query_text: "SELECT id FROM products",
   active_template_version: null,
   parameters: [],
+  parameter_groups: [],
   created_at: "2026-08-25T12:00:00Z",
   updated_at: "2026-08-25T12:00:00Z",
 };
@@ -99,5 +100,24 @@ describe("ReportDefinitionForm", () => {
     expect((screen.getByDisplayValue("price_list_b_id") as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByText(/No se aceptan nombres de función/)).toBeTruthy();
     expect(screen.queryByLabelText("Consulta")).toBeNull();
+  });
+
+  it("creates the repeatable_rows handler with an editable price-list context", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+    createReport.mockResolvedValue({ ...SQL_REPORT, code: "COTIZACION", name: "Cotización", data_source_type: "HANDLER", enabled: true });
+    render(<ReportDefinitionForm />);
+    await user.type(screen.getByLabelText("Nombre"), "Cotización");
+    await user.type(screen.getByLabelText("Código"), "COTIZACION");
+    await user.selectOptions(screen.getByLabelText("Tipo de fuente"), "HANDLER");
+    await user.selectOptions(screen.getByLabelText("Handler permitido"), "repeatable_rows");
+
+    expect((screen.getByDisplayValue("price_list_id") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.queryByDisplayValue("price_list_a_id")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Crear reporte" }));
+    await waitFor(() => expect(createReport).toHaveBeenCalledWith(expect.objectContaining({
+      code: "COTIZACION", data_source_type: "HANDLER", data_source_key: "repeatable_rows", enabled: true,
+      parameters: [expect.objectContaining({ name: "price_list_id", configuration_json: { options_source: "price_lists" } })],
+    })));
   });
 });

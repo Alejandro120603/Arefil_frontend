@@ -6,9 +6,11 @@ import {
   formatsForDataType,
   formulaReferences,
   groupFieldCatalog,
+  groupParameterReferences,
   moveColumn,
   newFieldColumn,
   newFormulaColumn,
+  newGroupParameterColumn,
   newParameterColumn,
   pruneTotals,
   removeColumn,
@@ -26,6 +28,7 @@ import type {
   ReportColumn,
   ReportFieldDescriptor,
   ReportParameter,
+  ReportParameterGroup,
 } from "@/types/api";
 
 const FIELDS: ReportFieldDescriptor[] = [
@@ -43,6 +46,15 @@ const QUANTITY: ReportParameter = {
 const DISCOUNT: ReportParameter = {
   name: "discount", label: "Descuento", data_type: "decimal", input_type: "number",
   required: false, default_value: null, display_order: 1, configuration_json: null,
+};
+
+const ITEMS_GROUP: ReportParameterGroup = {
+  name: "items", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "quantity",
+  min_items: 1, max_items: 10, display_order: 0,
+  fields: [
+    { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "quantity" } },
+    { name: "line_quantity", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: "0", exclusive_minimum: true } },
+  ],
 };
 
 function column(overrides: Partial<ReportColumn>): ReportColumn {
@@ -65,7 +77,7 @@ function quotationForm(): ReportBuilderFormValue {
     { ...column({}), key: "tax", label: "IVA", column_type: "FORMULA", source_field: null, formula_definition: "subtotal * 0.16", data_type: "decimal", format_type: "currency" },
     { ...column({}), key: "total", label: "Total", column_type: "FORMULA", source_field: null, formula_definition: "subtotal + tax", data_type: "decimal", format_type: "currency" },
   ];
-  return { columns: withDisplayOrder(columns), layout: emptyExcelLayout() };
+  return { columns: withDisplayOrder(columns), parameterGroups: [], layout: emptyExcelLayout() };
 }
 
 describe("field catalog", () => {
@@ -101,6 +113,13 @@ describe("column construction", () => {
     expect(newParameterColumn(QUANTITY, [])).toMatchObject({
       key: "quantity", column_type: "PARAMETER", source_parameter: "quantity",
       source_field: null, data_type: "integer",
+    });
+  });
+
+  it("binds repeatable fields through dotted backend paths while keeping a valid column key", () => {
+    const reference = groupParameterReferences([ITEMS_GROUP]).find((item) => item.source === "items.line_quantity")!;
+    expect(newGroupParameterColumn(reference, [])).toMatchObject({
+      key: "line_quantity", column_type: "PARAMETER", source_parameter: "items.line_quantity", data_type: "integer",
     });
   });
 
@@ -187,15 +206,24 @@ describe("builder validation", () => {
     expect(validateBuilderForm(quotationForm(), [QUANTITY, DISCOUNT], FIELDS)).toEqual([]);
   });
 
+  it("accepts a valid repeatable group and its dotted parameter column", () => {
+    const reference = groupParameterReferences([ITEMS_GROUP])[1];
+    const value: ReportBuilderFormValue = {
+      columns: [newGroupParameterColumn(reference, [])], parameterGroups: [ITEMS_GROUP], layout: emptyExcelLayout(),
+    };
+    expect(validateBuilderForm(value, [QUANTITY], FIELDS)).toEqual([]);
+    expect(toBuilderRequest(value).parameter_groups[0].fields[1].name).toBe("line_quantity");
+  });
+
   it("requires at least one column", () => {
-    const errors = validateBuilderForm({ columns: [], layout: emptyExcelLayout() }, [], FIELDS);
+    const errors = validateBuilderForm({ columns: [], parameterGroups: [], layout: emptyExcelLayout() }, [], FIELDS);
     expect(errors).toContain("Agrega al menos una columna al reporte.");
   });
 
   it("rejects an invalid internal key and a duplicate", () => {
     const value: ReportBuilderFormValue = {
       columns: withDisplayOrder([column({ key: "1bad" }), column({ key: "dup" }), column({ key: "DUP" })]),
-      layout: emptyExcelLayout(),
+      parameterGroups: [], layout: emptyExcelLayout(),
     };
     const errors = validateBuilderForm(value, [], FIELDS);
     expect(errors.some((error) => error.includes("nombre interno"))).toBe(true);
@@ -205,7 +233,7 @@ describe("builder validation", () => {
   it("rejects a source field outside the catalog", () => {
     const value: ReportBuilderFormValue = {
       columns: [column({ key: "made_up", source_field: "products.part_number" })],
-      layout: emptyExcelLayout(),
+      parameterGroups: [], layout: emptyExcelLayout(),
     };
     expect(validateBuilderForm(value, [], FIELDS)).toContain(
       "El campo 'products.part_number' no pertenece al catálogo permitido.",
@@ -215,7 +243,7 @@ describe("builder validation", () => {
   it("rejects a parameter column pointing at a parameter the report does not declare", () => {
     const value: ReportBuilderFormValue = {
       columns: [column({ key: "ghost", column_type: "PARAMETER", source_field: null, source_parameter: "ghost" })],
-      layout: emptyExcelLayout(),
+      parameterGroups: [], layout: emptyExcelLayout(),
     };
     expect(validateBuilderForm(value, [QUANTITY], FIELDS)).toContain(
       "El parámetro 'ghost' no existe en el reporte.",
@@ -227,7 +255,7 @@ describe("builder validation", () => {
       columns: withDisplayOrder([
         { ...column({}), key: "subtotal", column_type: "FORMULA", source_field: null, formula_definition: "price * quantity", data_type: "decimal", format_type: "number" },
       ]),
-      layout: emptyExcelLayout(),
+      parameterGroups: [], layout: emptyExcelLayout(),
     };
     const errors = validateBuilderForm(value, [], FIELDS);
     expect(errors).toContain("La fórmula de 'subtotal' referencia 'price', que no existe.");
@@ -240,7 +268,7 @@ describe("builder validation", () => {
         column({ key: "sku" }),
         { ...column({}), key: "calc", column_type: "FORMULA", source_field: null, formula_definition: "sku * 2", data_type: "decimal", format_type: "number" },
       ]),
-      layout: emptyExcelLayout(),
+      parameterGroups: [], layout: emptyExcelLayout(),
     };
     expect(validateBuilderForm(value, [], FIELDS)).toContain(
       "La fórmula de 'calc' referencia 'sku', que no es numérico.",
@@ -252,7 +280,7 @@ describe("builder validation", () => {
       columns: withDisplayOrder([
         { ...column({}), key: "loop", column_type: "FORMULA", source_field: null, formula_definition: "loop + 1", data_type: "decimal", format_type: "number" },
       ]),
-      layout: emptyExcelLayout(),
+      parameterGroups: [], layout: emptyExcelLayout(),
     };
     expect(validateBuilderForm(value, [], FIELDS)).toContain(
       "La fórmula de 'loop' no puede referenciarse a sí misma.",
@@ -262,7 +290,7 @@ describe("builder validation", () => {
   it("rejects an incompatible format and an out-of-range width", () => {
     const value: ReportBuilderFormValue = {
       columns: [column({ key: "sku", format_type: "currency", width: 900 })],
-      layout: emptyExcelLayout(),
+      parameterGroups: [], layout: emptyExcelLayout(),
     };
     const errors = validateBuilderForm(value, [], FIELDS);
     expect(errors.some((error) => error.includes("no es compatible con el tipo"))).toBe(true);
@@ -272,7 +300,7 @@ describe("builder validation", () => {
   it("rejects a column key that collides with a parameter", () => {
     const value: ReportBuilderFormValue = {
       columns: [column({ key: "quantity" })],
-      layout: emptyExcelLayout(),
+      parameterGroups: [], layout: emptyExcelLayout(),
     };
     expect(validateBuilderForm(value, [QUANTITY], FIELDS)).toContain(
       "La columna 'quantity' entra en conflicto con un parámetro del reporte.",
@@ -282,7 +310,7 @@ describe("builder validation", () => {
   it("rejects an illegal sheet name and header row", () => {
     const value: ReportBuilderFormValue = {
       columns: [column({ key: "sku" })],
-      layout: { ...emptyExcelLayout(), sheet_name: "Datos/2026", header_row: 0 },
+      parameterGroups: [], layout: { ...emptyExcelLayout(), sheet_name: "Datos/2026", header_row: 0 },
     };
     const errors = validateBuilderForm(value, [], FIELDS);
     expect(errors.some((error) => error.includes("caracteres no permitidos"))).toBe(true);
@@ -292,7 +320,7 @@ describe("builder validation", () => {
   it("rejects a total on a hidden column", () => {
     const value: ReportBuilderFormValue = {
       columns: [column({ key: "total", data_type: "decimal", format_type: "number", visible: false })],
-      layout: { ...emptyExcelLayout(), totals: [{ column_key: "total", operation: "SUM" }] },
+      parameterGroups: [], layout: { ...emptyExcelLayout(), totals: [{ column_key: "total", operation: "SUM" }] },
     };
     expect(validateBuilderForm(value, [], FIELDS)).toContain(
       "SUM solo puede aplicarse a una columna visible ('total').",
@@ -307,9 +335,10 @@ describe("serialization", () => {
         code: "COTIZACION", name: "Cotización", description: null, category: null, enabled: true,
         data_source_type: "SQL_QUERY", active_template_version: null, parameters: [QUANTITY],
         created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
-        data_source_key: null, query_text: "SELECT 1",
+        data_source_key: null, query_text: "SELECT 1", parameter_groups: [],
       },
       columns: [column({ key: "b", display_order: 5 }), column({ key: "a", display_order: 1 })],
+      parameter_groups: [],
       excel_layout: { ...emptyExcelLayout(), sheet_name: "Cotización", totals: [] },
     };
     const value = builderFormFromDefinition(builder);
@@ -323,9 +352,10 @@ describe("serialization", () => {
         code: "NEW", name: "Nuevo", description: null, category: null, enabled: false,
         data_source_type: "SQL_QUERY", active_template_version: null, parameters: [],
         created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
-        data_source_key: null, query_text: null,
+        data_source_key: null, query_text: null, parameter_groups: [],
       },
       columns: [],
+      parameter_groups: [],
       excel_layout: null,
     });
     expect(value.layout).toEqual(emptyExcelLayout());
@@ -336,7 +366,7 @@ describe("serialization", () => {
       columns: [
         { ...column({}), key: " subtotal ", label: "  Subtotal  ", column_type: "FORMULA", source_field: "product.part_number", formula_definition: " price * 2 ", data_type: "decimal", format_type: "number", display_order: 9 },
       ],
-      layout: { ...emptyExcelLayout(), sheet_name: " Cotización ", title: "  " },
+      parameterGroups: [], layout: { ...emptyExcelLayout(), sheet_name: " Cotización ", title: "  " },
     };
     const request = toBuilderRequest(value);
     expect(request.columns[0]).toMatchObject({

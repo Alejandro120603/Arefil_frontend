@@ -52,7 +52,7 @@ export function ReportDataDownloadButtons({
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-2">
         {(["xlsx", "csv"] as const).map((format) => (
-          <Button key={format} type="button" size="sm" variant="outline" disabled={disabled || active != null} onClick={() => download(format)}>
+          <Button key={format} type="button" size="sm" variant={format === "xlsx" ? "default" : "outline"} disabled={disabled || active != null} onClick={() => download(format)}>
             {active === format ? <Loader2 className="animate-spin" /> : <Download />}
             {active === format ? "Descargando..." : `Descargar ${format.toUpperCase()}`}
           </Button>

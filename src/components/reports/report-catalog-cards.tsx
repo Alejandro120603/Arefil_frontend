@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Download, Eye, PencilRuler, Settings } from "lucide-react";
+import { FileText, PencilRuler, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,22 +30,21 @@ export function ReportCatalogCards({ reports }: { reports: ReportDefinition[] })
               <div className="flex flex-wrap gap-2">
                 {report.enabled ? (
                   <>
-                    <Button size="sm" nativeButton={false} render={<Link href={operationHref} />}><Eye /> Ver</Button>
-                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`${operationHref}#descargas`} />}>
-                      <Download /> Descargar datos
+                    <Button size="sm" nativeButton={false} render={<Link href={operationHref} />}><FileText /> Generar</Button>
+                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}`} />}>
+                      <Settings /> Configurar
                     </Button>
                   </>
                 ) : (
                   <>
-                    <Button size="sm" disabled><Eye /> Ver</Button>
-                    <Button size="sm" variant="outline" disabled><Download /> Descargar datos</Button>
+                    <Button size="sm" disabled><FileText /> Generar</Button>
+                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}`} />}>
+                      <Settings /> Configurar
+                    </Button>
                   </>
                 )}
                 <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/designer`} />}>
                   <PencilRuler /> Diseñar
-                </Button>
-                <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}`} />}>
-                  <Settings /> Configurar
                 </Button>
               </div>
               {!report.enabled && (

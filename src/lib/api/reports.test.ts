@@ -54,6 +54,16 @@ describe("report manager API", () => {
     );
   });
 
+  it("passes scalar context when loading options for a repeatable field", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json([{ value: 101, label: "P-001 · Filtro" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    await getReportParameterOptions("COTIZACION", "items.product_id", { price_list_id: 7 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/parameters/items.product_id/options?price_list_id=7",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("prefers an RFC 5987 backend filename and removes path separators", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response("csv", {
       headers: { "Content-Disposition": "attachment; filename=fallback.csv; filename*=UTF-8''reporte%20agosto%2Ffinal.csv" },
@@ -291,6 +301,7 @@ describe("report builder API", () => {
         source_field: "product.part_number", source_parameter: null, formula_definition: null,
         data_type: "string" as const, format_type: "text" as const, display_order: 0, visible: true, width: 18,
       }],
+      parameter_groups: [],
       excel_layout: {
         sheet_name: "Data", title: null, show_report_name: true, show_generated_at: true,
         show_parameters: true, freeze_header: true, header_row: 1, totals: [],
@@ -322,6 +333,7 @@ describe("report builder API", () => {
 
     const error = await saveReportBuilder("COTIZACION", {
       columns: [],
+      parameter_groups: [],
       excel_layout: {
         sheet_name: "Data", title: null, show_report_name: true, show_generated_at: true,
         show_parameters: true, freeze_header: true, header_row: 1, totals: [],

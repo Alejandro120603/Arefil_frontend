@@ -1,5 +1,5 @@
 /**
- * Pure state/validation helpers for the Report Builder (Backend #12).
+ * Pure state/validation helpers for the Report Builder (Backend #12/#13).
  *
  * Everything here mirrors rules the backend already enforces
  * (`app/services/reports/builder.py`). The duplication buys immediate feedback
@@ -16,6 +16,8 @@ import type {
   ReportFieldDescriptor,
   ReportFormatType,
   ReportParameter,
+  ReportParameterGroup,
+  ReportParameterGroupField,
   ReportParameterDataType,
   ReportTotalConfiguration,
 } from "@/types/api";
@@ -68,6 +70,7 @@ export function formatsForDataType(dataType: ReportParameterDataType): ReportFor
 
 export interface ReportBuilderFormValue {
   columns: ReportColumn[];
+  parameterGroups: ReportParameterGroup[];
   layout: ReportExcelLayout;
 }
 
@@ -88,10 +91,30 @@ export function emptyExcelLayout(): ReportExcelLayout {
 export function builderFormFromDefinition(builder: ReportBuilderDefinition): ReportBuilderFormValue {
   return {
     columns: orderedColumns(builder.columns).map((column) => ({ ...column })),
+    parameterGroups: builder.parameter_groups.map((group) => ({
+      ...group,
+      fields: group.fields.map((field) => ({ ...field, configuration_json: field.configuration_json ? { ...field.configuration_json } : null })),
+    })),
     layout: builder.excel_layout
       ? { ...builder.excel_layout, totals: builder.excel_layout.totals.map((total) => ({ ...total })) }
       : emptyExcelLayout(),
   };
+}
+
+export interface GroupParameterReference {
+  source: string;
+  key: string;
+  label: string;
+  field: ReportParameterGroupField;
+}
+
+export function groupParameterReferences(groups: ReportParameterGroup[]): GroupParameterReference[] {
+  return groups.flatMap((group) => group.fields.map((field) => ({
+    source: `${group.name}.${field.name}`,
+    key: field.name,
+    label: `${group.label} · ${field.label}`,
+    field,
+  })));
 }
 
 export function orderedColumns(columns: ReportColumn[]): ReportColumn[] {
@@ -190,6 +213,23 @@ export function newParameterColumn(parameter: ReportParameter, columns: ReportCo
   };
 }
 
+export function newGroupParameterColumn(reference: GroupParameterReference, columns: ReportColumn[]): ReportColumn {
+  const dataType = reference.field.data_type;
+  return {
+    key: uniqueKey(reference.key, takenKeys(columns)),
+    label: reference.field.label || reference.key,
+    column_type: "PARAMETER",
+    source_field: null,
+    source_parameter: reference.source,
+    formula_definition: null,
+    data_type: dataType,
+    format_type: isNumericDataType(dataType) ? "number" : formatsForDataType(dataType)[0],
+    display_order: columns.length,
+    visible: true,
+    width: null,
+  };
+}
+
 /** Formula columns are always decimal — the backend refuses any other type. */
 export function newFormulaColumn(columns: ReportColumn[]): ReportColumn {
   return {
@@ -260,6 +300,24 @@ export function applyParameterSource(column: ReportColumn, parameter: ReportPara
   };
 }
 
+export function applyGroupParameterSource(
+  column: ReportColumn,
+  reference: GroupParameterReference,
+  columns: ReportColumn[],
+): ReportColumn {
+  const others = columns.filter((candidate) => candidate !== column);
+  return {
+    ...column,
+    key: uniqueKey(reference.key, takenKeys(others)),
+    column_type: "PARAMETER",
+    source_field: null,
+    source_parameter: reference.source,
+    formula_definition: null,
+    data_type: reference.field.data_type,
+    format_type: compatibleFormat(column.format_type, reference.field.data_type),
+  };
+}
+
 function compatibleFormat(
   format: ReportFormatType | null,
   dataType: ReportParameterDataType,
@@ -326,13 +384,62 @@ export function validateBuilderForm(
   fields: ReportFieldDescriptor[],
 ): string[] {
   const errors: string[] = [];
-  const { columns, layout } = value;
+  const { columns, layout, parameterGroups } = value;
 
   if (columns.length === 0) errors.push("Agrega al menos una columna al reporte.");
+  if (parameterGroups.length > 1) errors.push("Esta versión admite un solo grupo repetible por reporte.");
+
+  for (const group of parameterGroups) {
+    if (!COLUMN_KEY_PATTERN.test(group.name)) errors.push("El nombre interno del grupo repetible no es válido.");
+    if (!group.label.trim()) errors.push(`El grupo '${group.name || "repetible"}' requiere una etiqueta.`);
+    if (parameters.some((parameter) => parameter.name.toLocaleLowerCase() === group.name.toLocaleLowerCase())) {
+      errors.push(`El grupo '${group.name}' entra en conflicto con un parámetro escalar.`);
+    }
+    const context = parameters.find((parameter) => parameter.name === group.context_parameter);
+    if (!context) errors.push(`El parámetro de contexto '${group.context_parameter}' no existe.`);
+    else if (context.data_type !== "integer") errors.push(`El contexto '${group.context_parameter}' debe ser integer.`);
+    if (!Number.isInteger(group.min_items) || group.min_items < 0) errors.push("El mínimo de renglones debe ser un entero mayor o igual que cero.");
+    if (group.max_items != null && (!Number.isInteger(group.max_items) || group.max_items < 1)) {
+      errors.push("El máximo de renglones debe ser un entero mayor o igual que uno.");
+    } else if (group.max_items != null && group.max_items < group.min_items) {
+      errors.push("El máximo de renglones debe ser mayor o igual que el mínimo.");
+    }
+    if (group.fields.length === 0) errors.push(`El grupo '${group.name}' requiere al menos un subcampo.`);
+    const fieldNames = new Set<string>();
+    let productSelects = 0;
+    for (const field of group.fields) {
+      if (!COLUMN_KEY_PATTERN.test(field.name)) errors.push(`El nombre del subcampo '${field.name || "sin nombre"}' no es válido.`);
+      const folded = field.name.toLocaleLowerCase();
+      if (folded && fieldNames.has(folded)) errors.push(`El subcampo '${field.name}' está duplicado.`);
+      fieldNames.add(folded);
+      if (!field.label.trim()) errors.push(`El subcampo '${field.name || "sin nombre"}' requiere una etiqueta.`);
+      const configuration = field.configuration_json ?? {};
+      if (field.input_type === "select") {
+        productSelects += 1;
+        if (!("options_source" in configuration) || configuration.options_source !== "products_by_price_list") {
+          errors.push(`El select '${field.name}' debe usar products_by_price_list.`);
+        }
+        if (!("context_parameter" in configuration) || configuration.context_parameter !== group.context_parameter) {
+          errors.push(`El select '${field.name}' debe usar el contexto '${group.context_parameter}'.`);
+        }
+        if (field.data_type !== "integer") errors.push(`El select '${field.name}' debe ser integer.`);
+      } else if ((field.data_type === "integer" || field.data_type === "decimal") && !("options_source" in configuration)) {
+        const minimum = configuration.minimum == null ? null : Number(configuration.minimum);
+        const maximum = configuration.maximum == null ? null : Number(configuration.maximum);
+        if (minimum != null && !Number.isFinite(minimum)) errors.push(`El mínimo de '${field.name}' no es válido.`);
+        if (maximum != null && !Number.isFinite(maximum)) errors.push(`El máximo de '${field.name}' no es válido.`);
+        if (minimum != null && maximum != null && minimum > maximum) errors.push(`El mínimo de '${field.name}' no puede superar su máximo.`);
+      }
+    }
+    if (productSelects !== 1) errors.push(`El grupo '${group.name}' requiere exactamente un selector de producto.`);
+  }
 
   const fieldKeys = new Set(fields.map((field) => field.key));
   const fieldsByKey = new Map(fields.map((field) => [field.key, field]));
   const parametersByName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+  const groupedParametersByName = new Map(
+    groupParameterReferences(parameterGroups).map((reference) => [reference.source, reference.field]),
+  );
   const seenKeys = new Set<string>();
   const columnsByKey = new Map<string, ReportColumn>();
 
@@ -366,7 +473,9 @@ export function validateBuilderForm(
         }
       }
     } else if (column.column_type === "PARAMETER") {
-      const parameter = column.source_parameter ? parametersByName.get(column.source_parameter) : undefined;
+      const parameter = column.source_parameter
+        ? parametersByName.get(column.source_parameter) ?? groupedParametersByName.get(column.source_parameter)
+        : undefined;
       if (!column.source_parameter) {
         errors.push(`La columna '${name}' requiere un parámetro del reporte.`);
       } else if (!parameter) {
@@ -460,6 +569,18 @@ export function toBuilderRequest(value: ReportBuilderFormValue): ReportBuilderWr
       source_field: column.column_type === "FIELD" ? column.source_field : null,
       source_parameter: column.column_type === "PARAMETER" ? column.source_parameter : null,
       display_order,
+    })),
+    parameter_groups: value.parameterGroups.map((group, display_order) => ({
+      ...group,
+      name: group.name.trim(),
+      label: group.label.trim(),
+      display_order,
+      fields: group.fields.map((field, fieldOrder) => ({
+        ...field,
+        name: field.name.trim(),
+        label: field.label.trim(),
+        display_order: fieldOrder,
+      })),
     })),
     excel_layout: {
       ...value.layout,

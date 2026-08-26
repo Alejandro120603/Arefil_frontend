@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GenericReportRuntime } from "./generic-report-runtime";
+import { ApiError } from "@/lib/api/errors";
 import type { ReportDefinition } from "@/types/api";
 
 vi.mock("@/components/reports/generic-report-viewer", () => ({
@@ -11,10 +12,15 @@ vi.mock("@/components/reports/generic-report-viewer", () => ({
     <div data-testid="generic-viewer">{JSON.stringify(parameters)}</div>
   ),
 }));
-vi.mock("@/lib/api/reports", () => ({
-  getReportParameterOptions: vi.fn().mockResolvedValue([]),
-  downloadReportData: vi.fn(),
+const { executeReport, getReportParameterOptions, downloadReportData, triggerBrowserDownload } = vi.hoisted(() => ({
+  executeReport: vi.fn(), getReportParameterOptions: vi.fn(), downloadReportData: vi.fn(), triggerBrowserDownload: vi.fn(),
 }));
+vi.mock("@/lib/api/reports", () => ({
+  getReportParameterOptions,
+  downloadReportData,
+  executeReport,
+}));
+vi.mock("@/lib/download", () => ({ triggerBrowserDownload }));
 
 const REPORT: ReportDefinition = {
   code: "NO_PARAMETERS",
@@ -25,23 +31,31 @@ const REPORT: ReportDefinition = {
   data_source_type: "SQL_QUERY",
   active_template_version: null,
   parameters: [],
+  parameter_groups: [],
   created_at: "2026-08-26T12:00:00Z",
   updated_at: "2026-08-26T12:00:00Z",
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe("GenericReportRuntime", () => {
   it("executes a parameterless report and exposes direct backend downloads", async () => {
     const user = userEvent.setup();
+    executeReport.mockResolvedValue({ columns: [], rows: [], row_count: 0 });
     render(<GenericReportRuntime report={REPORT} />);
     expect(screen.getByText("Este reporte no requiere parámetros.")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Descargar XLSX" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "Descargar XLSX" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Generar reporte" }));
-    expect(screen.getByTestId("generic-viewer").textContent).toBe("{}");
+    await waitFor(() => expect(executeReport).toHaveBeenCalledWith("NO_PARAMETERS", {}, expect.anything()));
+    expect((await screen.findByTestId("generic-viewer")).textContent).toBe("{}");
+    expect(screen.getByRole("button", { name: "Descargar XLSX" })).toBeTruthy();
   });
 
   it("blocks invalid required values and A/B with the same list", () => {
+    getReportParameterOptions.mockResolvedValue([{ value: 7, label: "Lista 7" }]);
     const report: ReportDefinition = {
       ...REPORT,
       code: "PRICE_LIST_COMPARISON",
@@ -54,5 +68,98 @@ describe("GenericReportRuntime", () => {
     render(<GenericReportRuntime report={report} />);
     expect(screen.getByText("Selecciona dos listas distintas.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("serializes repeatable rows, renders the backend builder dataset, and invalidates the snapshot after edits", async () => {
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "COTIZACION",
+      data_source_type: "HANDLER",
+      parameters: [{ name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: 7, display_order: 0, configuration_json: { options_source: "price_lists" } }],
+      parameter_groups: [{
+        name: "items", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id", min_items: 1, max_items: 10, display_order: 0,
+        fields: [
+          { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" } },
+          { name: "quantity", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: "0", exclusive_minimum: true } },
+          { name: "discount", label: "Descuento", data_type: "decimal", input_type: "number", required: false, default_value: "0", display_order: 2, configuration_json: { minimum: "0", maximum: "100" } },
+        ],
+      }],
+    };
+    getReportParameterOptions.mockImplementation((_code, name) => Promise.resolve(
+      name === "price_list_id"
+        ? [{ value: 7, label: "Donaldson · 2025-10-20" }]
+        : [{ value: 101, label: "P-001 · Filtro" }, { value: 202, label: "P-002 · Aceite" }],
+    ));
+    executeReport.mockResolvedValue({
+      columns: [
+        { key: "sku", label: "SKU", data_type: "string", format_type: "text" },
+        { key: "total", label: "Total", data_type: "decimal", format_type: "currency" },
+      ],
+      rows: [{ sku: "P-001", total: "208.79" }, { sku: "P-002", total: "580.00" }],
+      totals: { total: "788.79" }, row_count: 2, truncated: false,
+    });
+    downloadReportData.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "cotizacion.xlsx" });
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={report} />);
+    const firstProduct = await screen.findByLabelText("Producto *");
+    await user.selectOptions(firstProduct, "101");
+    await user.clear(screen.getByLabelText("Cantidad *"));
+    await user.type(screen.getByLabelText("Cantidad *"), "2");
+    await user.clear(screen.getByLabelText("Descuento (%)"));
+    await user.type(screen.getByLabelText("Descuento (%)"), "10");
+    await user.click(screen.getByRole("button", { name: "Agregar renglón" }));
+    await user.selectOptions(screen.getAllByLabelText("Producto *")[1], "202");
+    await user.clear(screen.getAllByLabelText("Cantidad *")[1]);
+    await user.type(screen.getAllByLabelText("Cantidad *")[1], "5");
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+
+    await waitFor(() => expect(executeReport).toHaveBeenCalledWith("COTIZACION", {
+      price_list_id: 7,
+      items: [
+        { product_id: 101, quantity: 2, discount: "10" },
+        { product_id: 202, quantity: 5, discount: "0" },
+      ],
+    }, expect.anything()));
+    expect(await screen.findByRole("columnheader", { name: "SKU" })).toBeTruthy();
+    expect(screen.getAllByText("$788.79")).toHaveLength(1);
+    expect(screen.queryByTestId("generic-viewer")).toBeNull();
+    expect(screen.getByRole("button", { name: "Descargar XLSX" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Descargar XLSX" }));
+    await waitFor(() => expect(downloadReportData).toHaveBeenCalledWith("COTIZACION", "xlsx", {
+      price_list_id: 7,
+      items: [
+        { product_id: 101, quantity: 2, discount: "10" },
+        { product_id: 202, quantity: 5, discount: "0" },
+      ],
+    }, expect.anything()));
+    expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "cotizacion.xlsx");
+
+    await user.clear(screen.getAllByLabelText("Cantidad *")[0]);
+    await user.type(screen.getAllByLabelText("Cantidad *")[0], "3");
+    expect(screen.queryByRole("columnheader", { name: "SKU" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar XLSX" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Regenerar reporte" })).toBeTruthy();
+  });
+
+  it("places structured backend errors on the affected repeatable field", async () => {
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "ROWS",
+      parameters: [],
+      parameter_groups: [{
+        name: "items", label: "Items", resolver_key: "products_by_price_list", context_parameter: "unused",
+        min_items: 1, max_items: null, display_order: 0,
+        fields: [{ name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: 101, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "unused" } }],
+      }],
+    };
+    // The missing scalar context means no options request; inject a text field instead
+    // to exercise the backend's row-location mapping without coupling this assertion to catalogs.
+    report.parameter_groups[0].fields[0] = { name: "notes", label: "Notas", data_type: "string", input_type: "text", required: true, default_value: "x", display_order: 0, configuration_json: null };
+    executeReport.mockRejectedValue(new ApiError(422, [{ loc: ["items", 0, "notes"], msg: "valor rechazado" }]));
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={report} />);
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    expect(await screen.findByText("valor rechazado")).toBeTruthy();
+    expect(screen.getByText("items.0.notes: valor rechazado")).toBeTruthy();
   });
 });

@@ -28,6 +28,7 @@ const REPORT: ReportDefinition = {
   data_source_type: "SQL_QUERY",
   active_template_version: 2,
   parameters: [],
+  parameter_groups: [],
   created_at: "2026-08-26T12:00:00Z",
   updated_at: "2026-08-26T12:00:00Z",
 };

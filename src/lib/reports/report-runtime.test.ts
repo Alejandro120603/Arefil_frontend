@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  backendRowErrors,
+  initialRuntimeGroupValues,
   initialRuntimeValues,
   orderedReportParameters,
+  validateRuntimeForm,
   validateRuntimeParameters,
 } from "./report-runtime";
-import type { ReportParameter } from "@/types/api";
+import type { ReportParameter, ReportParameterGroup } from "@/types/api";
 
 function parameter(overrides: Partial<ReportParameter> & Pick<ReportParameter, "name" | "input_type" | "data_type">): ReportParameter {
   return {
@@ -73,5 +76,56 @@ describe("generic report runtime parameters", () => {
     expect(validateRuntimeParameters("PRICE_LIST_COMPARISON", selects, {
       price_list_a_id: "7", price_list_b_id: "7",
     })).toMatchObject({ valid: false, formError: "Selecciona dos listas distintas." });
+  });
+});
+
+describe("repeatable report runtime parameters", () => {
+  const scalar = parameter({
+    name: "price_list_id", label: "Lista de precios", data_type: "integer", input_type: "select", required: true,
+    configuration_json: { options_source: "price_lists" },
+  });
+  const group: ReportParameterGroup = {
+    name: "items", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id",
+    min_items: 1, max_items: 2, display_order: 0,
+    fields: [
+      { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" } },
+      { name: "quantity", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: "0", exclusive_minimum: true } },
+      { name: "discount", label: "Descuento", data_type: "decimal", input_type: "number", required: false, default_value: "0", display_order: 2, configuration_json: { minimum: "0", maximum: "100" } },
+    ],
+  };
+
+  it("initializes the required rows and serializes items in stable order", () => {
+    const groups = initialRuntimeGroupValues([group]);
+    expect(groups.items).toHaveLength(1);
+    expect(groups.items[0].values).toEqual({ product_id: "", quantity: "1", discount: "0" });
+    groups.items[0].values.product_id = "101";
+    groups.items.push({ id: "second", values: { product_id: "202", quantity: "5", discount: "12.50" } });
+    const result = validateRuntimeForm("COTIZACION", [scalar], [group], { price_list_id: "7" }, groups);
+    expect(result.valid).toBe(true);
+    expect(result.parameters).toEqual({
+      price_list_id: 7,
+      items: [
+        { product_id: 101, quantity: 1, discount: "0" },
+        { product_id: 202, quantity: 5, discount: "12.50" },
+      ],
+    });
+  });
+
+  it("reports empty groups and row-level numeric constraints", () => {
+    const empty = validateRuntimeForm("COTIZACION", [scalar], [group], { price_list_id: "7" }, { items: [] });
+    expect(empty.groupErrors.items).toContain("al menos 1");
+    const invalid = validateRuntimeForm("COTIZACION", [scalar], [group], { price_list_id: "7" }, {
+      items: [{ id: "bad", values: { product_id: "101", quantity: "0", discount: "101" } }],
+    });
+    expect(invalid.rowErrors.items[0]).toEqual({
+      quantity: "Debe ser mayor que 0.",
+      discount: "Debe ser menor o igual que 100.",
+    });
+  });
+
+  it("maps structured backend validation errors to their row and field", () => {
+    expect(backendRowErrors([{ loc: ["items", 1, "product_id"], msg: "no pertenece a la lista" }], [group])).toEqual({
+      items: { 1: { product_id: "no pertenece a la lista" } },
+    });
   });
 });

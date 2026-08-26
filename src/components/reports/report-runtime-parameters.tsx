@@ -50,7 +50,7 @@ export function ReportRuntimeParameters({
     void Promise.all(
       selects.map(async (parameter) => [
         parameter.name,
-        await getReportParameterOptions(code, parameter.name, { signal: controller.signal }),
+        await getReportParameterOptions(code, parameter.name, undefined, { signal: controller.signal }),
       ] as const),
     ).then((entries) => {
       if (!controller.signal.aborted) setOptions(Object.fromEntries(entries));

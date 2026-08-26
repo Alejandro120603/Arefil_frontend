@@ -6,6 +6,8 @@ import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportBuilderPreviewTable } from "@/components/reports/report-builder-preview-table";
 import { ReportColumnEditor } from "@/components/reports/report-column-editor";
 import { ReportExcelLayoutEditor } from "@/components/reports/report-excel-layout-editor";
+import { ReportParameterGroupEditor } from "@/components/reports/report-parameter-group-editor";
+import { ReportRepeatableParameters } from "@/components/reports/report-repeatable-parameters";
 import { ReportRuntimeParameters } from "@/components/reports/report-runtime-parameters";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -28,7 +30,9 @@ import {
 } from "@/lib/reports/report-builder";
 import {
   initialRuntimeValues,
-  validateRuntimeParameters,
+  initialRuntimeGroupValues,
+  validateRuntimeForm,
+  type RuntimeGroupValues,
   type RuntimeParameterValues,
 } from "@/lib/reports/report-runtime";
 import type {
@@ -37,6 +41,7 @@ import type {
   ReportExcelLayout,
   ReportFieldDescriptor,
   ReportParameter,
+  ReportParameterGroup,
 } from "@/types/api";
 
 /**
@@ -45,15 +50,17 @@ import type {
  * data. Nothing in this tree imports Stimulsoft; the legacy Viewer/Designer
  * flow keeps living beside it untouched.
  *
- * Repeatable line items (`items[]`) are explicitly out of scope here; they
- * arrive with Backend #13 / Frontend #14.
+ * Repeatable line items are configured beside the logical shell and saved in
+ * the same transaction, so formula sources and runtime metadata cannot drift.
  */
 export function ReportBuilderWorkspace({
   code,
   parameters,
+  dataSourceKey,
 }: {
   code: string;
   parameters: ReportParameter[];
+  dataSourceKey: string | null;
 }) {
   const [value, setValue] = useState<ReportBuilderFormValue | null>(null);
   const [fields, setFields] = useState<ReportFieldDescriptor[] | null>(null);
@@ -70,7 +77,15 @@ export function ReportBuilderWorkspace({
   const [runtimeValues, setRuntimeValues] = useState<RuntimeParameterValues>(
     () => initialRuntimeValues(parameters),
   );
+  const [runtimeGroupValues, setRuntimeGroupValues] = useState<RuntimeGroupValues>({});
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({});
+  const [runtimeGroupErrors, setRuntimeGroupErrors] = useState<Record<string, string>>({});
+  const [runtimeRowErrors, setRuntimeRowErrors] = useState<Record<string, Record<number, Record<string, string>>>>({});
+  const [scalarOptionsReady, setScalarOptionsReady] = useState(
+    () => parameters.every((parameter) => parameter.input_type !== "select"),
+  );
+  const [groupOptionsReady, setGroupOptionsReady] = useState(true);
+  const optionsReady = scalarOptionsReady && groupOptionsReady;
   const [preview, setPreview] = useState<ReportBuilderPreviewResponse | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -78,12 +93,16 @@ export function ReportBuilderWorkspace({
   useEffect(() => {
     const controller = new AbortController();
     void getReportBuilder(code, { signal: controller.signal })
-      .then((builder) => { if (!controller.signal.aborted) setValue(builderFormFromDefinition(builder)); })
+      .then((builder) => {
+        if (controller.signal.aborted) return;
+        setValue(builderFormFromDefinition(builder));
+        setRuntimeGroupValues(initialRuntimeGroupValues(builder.parameter_groups));
+      })
       .catch((error) => {
         if (controller.signal.aborted) return;
         // Without a builder there is nothing to edit *and* nothing to lose, so
         // fall back to an empty shell rather than blocking the whole screen.
-        setValue({ columns: [], layout: emptyExcelLayout() });
+        setValue({ columns: [], parameterGroups: [], layout: emptyExcelLayout() });
         setLoadError(getUserErrorMessage(error, "No se pudo cargar la configuración del constructor."));
       });
     return () => controller.abort();
@@ -103,10 +122,26 @@ export function ReportBuilderWorkspace({
 
   const changeRuntime = useCallback((name: string, next: string | boolean) => {
     setRuntimeValues((current) => ({ ...current, [name]: next }));
+    setPreview(null);
+    setPreviewError(null);
+  }, []);
+
+  const changeRuntimeGroups = useCallback((next: RuntimeGroupValues) => {
+    setRuntimeGroupValues(next);
+    setPreview(null);
+    setPreviewError(null);
   }, []);
 
   function changeColumns(columns: ReportColumn[]) {
-    setValue((current) => current && { columns, layout: pruneTotals(current.layout, columns) });
+    setValue((current) => current && { ...current, columns, layout: pruneTotals(current.layout, columns) });
+    setDirty(true);
+    setSaved(false);
+    setPreview(null);
+  }
+
+  function changeParameterGroups(parameterGroups: ReportParameterGroup[]) {
+    setValue((current) => current && { ...current, parameterGroups });
+    setRuntimeGroupValues(initialRuntimeGroupValues(parameterGroups));
     setDirty(true);
     setSaved(false);
     setPreview(null);
@@ -134,6 +169,7 @@ export function ReportBuilderWorkspace({
       // Re-seed from the persisted response, so what stays on screen is what
       // the backend actually stored (normalized keys, ordering, totals).
       setValue(builderFormFromDefinition(builder));
+      setRuntimeGroupValues(initialRuntimeGroupValues(builder.parameter_groups));
       setDirty(false);
       setSaved(true);
     } catch (error) {
@@ -146,12 +182,14 @@ export function ReportBuilderWorkspace({
   }
 
   async function handlePreview() {
-    if (previewing || dirty) return;
-    const validation = validateRuntimeParameters(code, parameters, runtimeValues);
+    if (previewing || dirty || value == null) return;
+    const validation = validateRuntimeForm(code, parameters, value.parameterGroups, runtimeValues, runtimeGroupValues);
     setRuntimeErrors(validation.fieldErrors);
+    setRuntimeGroupErrors(validation.groupErrors);
+    setRuntimeRowErrors(validation.rowErrors);
     setPreviewError(validation.formError);
     setPreview(null);
-    if (!validation.valid) return;
+    if (!validation.valid || !optionsReady) return;
 
     setPreviewing(true);
     try {
@@ -195,6 +233,17 @@ export function ReportBuilderWorkspace({
         </Alert>
       )}
 
+
+      {dataSourceKey === "repeatable_rows" && (
+        <Card>
+          <CardHeader><CardTitle>Renglones repetibles</CardTitle></CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <p className="text-sm text-muted-foreground">Define los datos que el usuario capturará una vez por producto. El backend resolverá producto, lista y precio.</p>
+            <ReportParameterGroupEditor groups={value.parameterGroups} parameters={parameters} disabled={saving} onChange={changeParameterGroups} />
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader><CardTitle>Columnas del reporte</CardTitle></CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -219,6 +268,7 @@ export function ReportBuilderWorkspace({
                 columns={value.columns}
                 fields={fields}
                 parameters={parameters}
+                parameterGroups={value.parameterGroups}
                 disabled={saving}
                 onChange={changeColumns}
               />
@@ -267,13 +317,25 @@ export function ReportBuilderWorkspace({
             values={runtimeValues}
             disabled={previewing}
             errors={runtimeErrors}
+            onOptionsStateChange={({ ready }) => setScalarOptionsReady(ready)}
             onChange={changeRuntime}
+          />
+          <ReportRepeatableParameters
+            code={code}
+            groups={value.parameterGroups}
+            scalarValues={runtimeValues}
+            values={runtimeGroupValues}
+            disabled={previewing}
+            errors={runtimeRowErrors}
+            groupErrors={runtimeGroupErrors}
+            onOptionsStateChange={({ ready }) => setGroupOptionsReady(ready)}
+            onChange={changeRuntimeGroups}
           />
           <div>
             <Button
               type="button"
               variant="outline"
-              disabled={dirty || previewing || !columnsConfigured}
+              disabled={dirty || previewing || !columnsConfigured || !optionsReady}
               onClick={handlePreview}
             >
               {previewing ? <Loader2 className="animate-spin" /> : <Play />}
