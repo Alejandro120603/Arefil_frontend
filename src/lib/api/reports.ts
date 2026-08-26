@@ -2,6 +2,10 @@ import { browserApiClient } from "./browser-client";
 import type { RequestOptions } from "./client";
 import type {
   ReportAdminDefinition,
+  ReportBuilderDefinition,
+  ReportBuilderPreviewResponse,
+  ReportBuilderWriteRequest,
+  ReportFieldDescriptor,
   ReportCreateRequest,
   ReportDefinition,
   ReportOption,
@@ -113,4 +117,51 @@ export function downloadReportData(
   options?: RequestOptions,
 ): Promise<BlobDownload> {
   return browserApiClient.apiPostBlob(reportPath(code, `/export/${format}`), parameters, options);
+}
+
+/**
+ * Report Builder — Backend #12.
+ *
+ * These four calls are all the new builder needs; none of them touches
+ * Stimulsoft. Formula parsing, field allow-listing and cycle detection stay on
+ * the backend, so the UI's job is to send valid references and surface the
+ * backend's own message when it refuses.
+ */
+
+/** Allow-listed business fields a FIELD column may bind to. */
+export function getReportFieldCatalog(options?: RequestOptions): Promise<ReportFieldDescriptor[]> {
+  return browserApiClient.apiGet<ReportFieldDescriptor[]>("/report-builder/fields", options);
+}
+
+export function getReportBuilder(code: string, options?: RequestOptions): Promise<ReportBuilderDefinition> {
+  return browserApiClient.apiGet<ReportBuilderDefinition>(reportPath(code, "/builder"), options);
+}
+
+/**
+ * Columns and layout are replaced together in a single transactional PUT -
+ * never save a builder column by column, a partial write would leave totals
+ * pointing at columns that no longer exist.
+ */
+export function saveReportBuilder(
+  code: string,
+  request: ReportBuilderWriteRequest,
+  options?: RequestOptions,
+): Promise<ReportBuilderDefinition> {
+  return browserApiClient.apiPutJson<ReportBuilderDefinition>(reportPath(code, "/builder"), request, options);
+}
+
+/**
+ * Renders the saved builder against real data. The request body is the bare
+ * parameter map (FastAPI declares it as the whole body), not a wrapper object.
+ */
+export function previewReportBuilder(
+  code: string,
+  parameters: Record<string, unknown>,
+  options?: RequestOptions,
+): Promise<ReportBuilderPreviewResponse> {
+  return browserApiClient.apiPostJson<ReportBuilderPreviewResponse>(
+    reportPath(code, "/builder/preview"),
+    parameters,
+    options,
+  );
 }

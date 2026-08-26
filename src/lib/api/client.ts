@@ -52,6 +52,7 @@ export interface ApiClient {
   apiGetText(path: string, options?: RequestOptions): Promise<string>;
   apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
   apiPatchJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T>;
+  apiPutJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T>;
   apiPostBlob(path: string, body: unknown, options?: RequestOptions): Promise<BlobDownload>;
   apiPutText<T>(path: string, body: string, options?: RequestOptions): Promise<T>;
   apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T>;
@@ -93,6 +94,16 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
   async function apiPatchJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
     const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
       method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
+  async function apiPutJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "PUT",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
       signal: options?.signal,
@@ -144,7 +155,7 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return { blob, filename: disposition ? extractFilename(disposition) : null };
   }
 
-  return { apiGet, apiGetText, apiPostJson, apiPatchJson, apiPostBlob, apiPutText, apiUpload, apiDownloadBlob };
+  return { apiGet, apiGetText, apiPostJson, apiPatchJson, apiPutJson, apiPostBlob, apiPutText, apiUpload, apiDownloadBlob };
 }
 
 export interface BlobDownload {

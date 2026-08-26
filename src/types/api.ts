@@ -316,3 +316,100 @@ export interface ReportTemplateVersion {
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * Report Builder — mirrored from Backend #12
+ * (`Arefil_backend/backend/app/schemas/reports.py`, `app/db/enums.py`).
+ *
+ * The builder describes the *logical shell* of a report: which columns exist,
+ * where each one takes its value from, and how the Excel export is laid out.
+ * It is deliberately independent of Stimulsoft — nothing here loads a Viewer
+ * or a Designer.
+ */
+export type ReportColumnType = "FIELD" | "PARAMETER" | "FORMULA";
+
+/**
+ * `ReportFormatType` is the *presentation* enum and is intentionally narrower
+ * than `ReportParameterDataType`: the backend has no `integer`/`decimal`
+ * format, both render through `number`. Never mirror data types into here.
+ */
+export type ReportFormatType = "text" | "number" | "currency" | "percent" | "date" | "datetime";
+
+/**
+ * One allow-listed business field the builder may bind a FIELD column to.
+ * `key` is the technical reference the backend validates (`product.part_number`);
+ * `group` is the human bucket the UI renders it under ("Producto").
+ */
+export interface ReportFieldDescriptor {
+  key: string;
+  label: string;
+  data_type: ReportParameterDataType;
+  group: string;
+  required_context: string;
+}
+
+export interface ReportColumn {
+  key: string;
+  label: string;
+  column_type: ReportColumnType;
+  /** Set only when `column_type === "FIELD"`; a key from the field catalog. */
+  source_field: string | null;
+  /** Set only when `column_type === "PARAMETER"`; a declared parameter name. */
+  source_parameter: string | null;
+  /** Set only when `column_type === "FORMULA"`; validated by the backend. */
+  formula_definition: string | null;
+  data_type: ReportParameterDataType;
+  format_type: ReportFormatType | null;
+  display_order: number;
+  visible: boolean;
+  width: number | null;
+}
+
+/** SUM is the only operation Backend #12 implements — do not widen locally. */
+export interface ReportTotalConfiguration {
+  column_key: string;
+  operation: "SUM";
+}
+
+export interface ReportExcelLayout {
+  sheet_name: string;
+  title: string | null;
+  show_report_name: boolean;
+  show_generated_at: boolean;
+  show_parameters: boolean;
+  freeze_header: boolean;
+  header_row: number;
+  totals: ReportTotalConfiguration[];
+}
+
+/** `excel_layout` is null until the builder has been saved at least once. */
+export interface ReportBuilderDefinition {
+  report: ReportAdminDefinition;
+  columns: ReportColumn[];
+  excel_layout: ReportExcelLayout | null;
+}
+
+/** Body of `PUT /reports/{code}/builder` — columns and layout save together. */
+export interface ReportBuilderWriteRequest {
+  columns: ReportColumn[];
+  excel_layout: ReportExcelLayout;
+}
+
+export interface ReportBuilderPreviewColumn {
+  key: string;
+  label: string;
+  data_type: ReportParameterDataType;
+  format_type: ReportFormatType | null;
+}
+
+/**
+ * Only visible columns reach `columns`/`rows`. Decimal cells and `totals`
+ * values arrive as strings, like every other backend Decimal.
+ */
+export interface ReportBuilderPreviewResponse {
+  columns: ReportBuilderPreviewColumn[];
+  rows: Record<string, unknown>[];
+  totals: Record<string, DecimalString | null>;
+  row_count: number;
+  truncated: boolean;
+}

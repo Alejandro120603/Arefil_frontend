@@ -1,5 +1,6 @@
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
+import { ReportBuilderWorkspace } from "@/components/reports/report-builder-workspace";
 import { ReportDefinitionForm } from "@/components/reports/report-definition-form";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { getAdminReportDefinition } from "@/lib/api/report-catalog";
@@ -24,10 +25,19 @@ export default async function ConfigureReportPage({ params }: ConfigureReportPag
       <Breadcrumbs items={[{ label: "Dashboard", href: "/" }, { label: "Administración" }, { label: "Reportes", href: "/administracion/reportes" }, { label: report?.name ?? code }, { label: "Configurar" }]} />
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{report ? `Configurar ${report.name}` : "Configurar reporte"}</h1>
-        <p className="text-sm text-muted-foreground">Edita metadata, datasource y parámetros usando el contrato administrativo.</p>
+        <p className="text-sm text-muted-foreground">Edita metadata, parámetros, columnas, fórmulas y formato Excel usando el contrato administrativo.</p>
       </div>
       {errorMessage && <ErrorAlert title="No se pudo abrir la configuración" message={errorMessage} />}
-      {report && <ReportDefinitionForm report={report} />}
+      {report && (
+        <>
+          <ReportDefinitionForm report={report} />
+          {/* The builder edits the *saved* parameters: a PARAMETER column or a
+              formula reference the backend has not persisted yet would be
+              rejected on save. Editing parameters above and saving refreshes
+              this server component with the new list. */}
+          <ReportBuilderWorkspace code={report.code} parameters={report.parameters} />
+        </>
+      )}
     </div>
   );
 }

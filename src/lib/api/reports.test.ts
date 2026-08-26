@@ -11,6 +11,10 @@ import {
   getReportTemplate,
   saveReportTemplate,
   updateReport,
+  getReportBuilder,
+  getReportFieldCatalog,
+  previewReportBuilder,
+  saveReportBuilder,
 } from "./reports";
 import { ApiError, getUserErrorMessage } from "./errors";
 import type { PriceListComparisonResponse } from "@/types/api";
@@ -244,5 +248,87 @@ describe("getUserErrorMessage", () => {
       "No fue posible generar la comparación.",
     );
     expect(getUserErrorMessage({ stack: "Traceback..." }, "generico")).toBe("generico");
+  });
+});
+
+describe("report builder API", () => {
+  it("reads the field catalog from the backend, never from a local constant", async () => {
+    const catalog = [
+      { key: "product.part_number", label: "Número de parte", data_type: "string", group: "Producto", required_context: "product" },
+    ];
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(catalog));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getReportFieldCatalog()).resolves.toEqual(catalog);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/report-builder/fields",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("loads a builder through the same-origin proxy", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ report: {}, columns: [], excel_layout: null }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getReportBuilder("COTIZACION");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/builder",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("saves columns and layout in a single transactional PUT", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ report: {}, columns: [], excel_layout: null }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = {
+      columns: [{
+        key: "sku", label: "SKU", column_type: "FIELD" as const,
+        source_field: "product.part_number", source_parameter: null, formula_definition: null,
+        data_type: "string" as const, format_type: "text" as const, display_order: 0, visible: true, width: 18,
+      }],
+      excel_layout: {
+        sheet_name: "Data", title: null, show_report_name: true, show_generated_at: true,
+        show_parameters: true, freeze_header: true, header_row: 1, totals: [],
+      },
+    };
+    await saveReportBuilder("COTIZACION", request);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/builder",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify(request) }),
+    );
+  });
+
+  it("posts the bare parameter map to the builder preview", async () => {
+    const payload = { columns: [], rows: [], totals: {}, row_count: 0, truncated: false };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(previewReportBuilder("COTIZACION", { quantity: 3 })).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/builder/preview",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ quantity: 3 }) }),
+    );
+  });
+
+  it("surfaces the backend's own formula message instead of a generic one", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ detail: "Las fórmulas contienen una dependencia cíclica." }, { status: 422 }),
+    ));
+
+    const error = await saveReportBuilder("COTIZACION", {
+      columns: [],
+      excel_layout: {
+        sheet_name: "Data", title: null, show_report_name: true, show_generated_at: true,
+        show_parameters: true, freeze_header: true, header_row: 1, totals: [],
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(getUserErrorMessage(error, "fallback")).toBe("Las fórmulas contienen una dependencia cíclica.");
   });
 });
