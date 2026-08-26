@@ -297,6 +297,13 @@ export interface ReportPreviewResponse {
   truncated: boolean;
 }
 
+/** Generic payload returned by POST /reports/{code}/data for SQL_QUERY reports. */
+export interface SQLReportExecutionResponse {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  row_count: number;
+}
+
 export interface ReportOption {
   value: number | string;
   label: string;

@@ -7,19 +7,11 @@ import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportRuntimeParameters, initialRuntimeValues } from "@/components/reports/report-runtime-parameters";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
-import { getPriceListComparison, getReportTemplate, previewReport, saveReportTemplate } from "@/lib/api/reports";
-import { describePriceList, validateComparisonSelection } from "@/lib/reports/comparison";
-import {
-  PRICE_LIST_COMPARISON_REPORT_CODE,
-  toArefilReportData,
-} from "@/lib/reports/stimulsoft-dataset";
-import { coerceRuntimeValue } from "@/lib/reports/report-form";
-import type { PriceList, ReportDefinition } from "@/types/api";
-
-const SELECT_CLASS =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30";
+import { executeReport, getReportTemplate, previewReport, saveReportTemplate } from "@/lib/api/reports";
+import { adaptReportDataset, ReportDatasetAdapterError } from "@/lib/reports/report-dataset";
+import { validateRuntimeParameters } from "@/lib/reports/report-runtime";
+import type { ReportDefinition } from "@/types/api";
 
 function DesignerPlaceholder() {
   return (
@@ -53,66 +45,12 @@ class PreviewError extends Error {
   }
 }
 
-function parseSelection(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function PreviewListPicker({
-  id,
-  label,
-  priceLists,
-  value,
-  disabled,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  priceLists: PriceList[];
-  value: number | null;
-  disabled: boolean;
-  onChange: (value: number | null) => void;
-}) {
-  const selected = priceLists.find((priceList) => priceList.id === value) ?? null;
-  return (
-    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        className={SELECT_CLASS}
-        value={value == null ? "" : String(value)}
-        disabled={disabled}
-        onChange={(event) => onChange(parseSelection(event.target.value))}
-      >
-        <option value="">Selecciona una lista</option>
-        {priceLists.map((priceList) => (
-          <option key={priceList.id} value={priceList.id}>
-            {describePriceList(priceList)}
-          </option>
-        ))}
-      </select>
-      <p className="min-h-4 truncate text-xs text-muted-foreground" title={selected?.source_filename}>
-        {selected?.source_filename ?? ""}
-      </p>
-    </div>
-  );
-}
-
-export function ReportDesignerWorkspace({
-  reportDefinition,
-  priceLists,
-}: {
-  reportDefinition: ReportDefinition;
-  priceLists: PriceList[];
-}) {
+export function ReportDesignerWorkspace({ reportDefinition }: { reportDefinition: ReportDefinition }) {
   const { code } = reportDefinition;
-  const comparisonPreview = code === PRICE_LIST_COMPARISON_REPORT_CODE;
   const sqlPreview = reportDefinition.data_source_type === "SQL_QUERY";
   const [loadState, setLoadState] = useState<TemplateLoadState | null>(null);
   const [activeVersion, setActiveVersion] = useState(reportDefinition.active_template_version);
   const [saveState, setSaveState] = useState<SaveState>({ status: "idle", message: null });
-  const [priceListAId, setPriceListAId] = useState<number | null>(null);
-  const [priceListBId, setPriceListBId] = useState<number | null>(null);
   const [runtimeValues, setRuntimeValues] = useState<Record<string, string | boolean>>(
     () => initialRuntimeValues(reportDefinition.parameters),
   );
@@ -178,36 +116,30 @@ export function ReportDesignerWorkspace({
     setPreviewMessage(null);
     setPreviewError(null);
     try {
-      if (comparisonPreview) {
-        const selectionError = validateComparisonSelection(priceListAId, priceListBId);
-        if (selectionError || priceListAId == null || priceListBId == null) {
-          throw new PreviewError(selectionError ?? "Selecciona dos listas para previsualizar.");
-        }
-        const comparison = await getPriceListComparison({
-          price_list_a_id: priceListAId,
-          price_list_b_id: priceListBId,
-        });
-        setPreviewMessage("Datos de preview cargados desde Arefil.");
-        return toArefilReportData(comparison);
+      const validation = validateRuntimeParameters(code, reportDefinition.parameters, runtimeValues);
+      if (!validation.valid) {
+        throw new PreviewError(
+          validation.formError ?? Object.values(validation.fieldErrors)[0] ?? "Completa los parámetros del Preview.",
+        );
       }
       if (sqlPreview) {
-        const parameters = Object.fromEntries(reportDefinition.parameters.flatMap((parameter) => {
-          const coerced = coerceRuntimeValue(parameter, runtimeValues[parameter.name] ?? "");
-          return coerced === undefined ? [] : [[parameter.name, coerced]];
-        }));
-        const result = await previewReport(code, parameters);
+        const result = await previewReport(code, validation.parameters);
         setPreviewMessage(`Preview cargado: ${result.row_count} filas${result.truncated ? " (limitado)" : ""}.`);
-        return { Data: result.rows };
+        return adaptReportDataset(reportDefinition, validation.parameters, result).data;
       }
-      throw new PreviewError("Este handler no tiene un adaptador de Preview en el frontend.");
+      const result = await executeReport(code, validation.parameters);
+      setPreviewMessage("Datos de Preview cargados desde Arefil.");
+      return adaptReportDataset(reportDefinition, validation.parameters, result).data;
     } catch (error) {
       throw new PreviewError(
-        getUserErrorMessage(error, "No se pudieron cargar los datos para previsualizar el reporte."),
+        error instanceof PreviewError || error instanceof ReportDatasetAdapterError
+          ? error.message
+          : getUserErrorMessage(error, "No se pudieron cargar los datos para previsualizar el reporte."),
       );
     } finally {
       setIsLoadingPreview(false);
     }
-  }, [code, comparisonPreview, priceListAId, priceListBId, reportDefinition.parameters, runtimeValues, sqlPreview]);
+  }, [code, reportDefinition, runtimeValues, sqlPreview]);
 
   const handleEventError = useCallback((error: unknown) => {
     if (error instanceof PreviewError) {
@@ -216,12 +148,6 @@ export function ReportDesignerWorkspace({
     }
     setDesignerError("Stimulsoft no pudo procesar la plantilla. Recarga la página e intenta de nuevo.");
   }, []);
-
-  const handleSelectionChange = (setter: (value: number | null) => void) => (value: number | null) => {
-    setter(value);
-    setPreviewMessage(null);
-    setPreviewError(null);
-  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -239,46 +165,17 @@ export function ReportDesignerWorkspace({
             </p>
           </div>
 
-          {!comparisonPreview && !sqlPreview ? (
-            <p className="text-sm text-muted-foreground">
-              Este handler puede editarse y guardarse, pero no tiene Preview configurado en el frontend.
-            </p>
-          ) : sqlPreview ? (
-            <ReportRuntimeParameters
-              code={code}
-              parameters={reportDefinition.parameters}
-              values={runtimeValues}
-              disabled={isLoadingPreview}
-              onChange={(name, value) => {
-                setRuntimeValues((current) => ({ ...current, [name]: value }));
-                setPreviewMessage(null);
-                setPreviewError(null);
-              }}
-            />
-          ) : priceLists.length >= 2 ? (
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <PreviewListPicker
-                id="designer-price-list-a"
-                label="Lista base (A)"
-                priceLists={priceLists}
-                value={priceListAId}
-                disabled={isLoadingPreview}
-                onChange={handleSelectionChange(setPriceListAId)}
-              />
-              <PreviewListPicker
-                id="designer-price-list-b"
-                label="Lista comparación (B)"
-                priceLists={priceLists}
-                value={priceListBId}
-                disabled={isLoadingPreview}
-                onChange={handleSelectionChange(setPriceListBId)}
-              />
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Se necesitan al menos dos listas de precios para usar Preview. La plantilla todavía puede editarse.
-            </p>
-          )}
+          <ReportRuntimeParameters
+            code={code}
+            parameters={reportDefinition.parameters}
+            values={runtimeValues}
+            disabled={isLoadingPreview}
+            onChange={(name, value) => {
+              setRuntimeValues((current) => ({ ...current, [name]: value }));
+              setPreviewMessage(null);
+              setPreviewError(null);
+            }}
+          />
 
           {isLoadingPreview && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -26,8 +26,21 @@ describe("ReportCatalogCards", () => {
 
     expect(screen.getAllByRole("button", { name: /Diseñar/ })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: /Configurar/ })).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Ver" }).getAttribute("href")).toBe("/donaldson/reports/PRICE_LIST_COMPARISON");
-    expect(screen.getByRole("button", { name: /Descargar datos/ })).toBeTruthy();
-    expect(screen.getByText(/Runner de Frontend #12/)).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Ver" }).map((button) => button.getAttribute("href"))).toEqual([
+      "/donaldson/reports/PRICE_LIST_COMPARISON",
+      "/donaldson/reports/PRODUCT_CATALOG",
+    ]);
+    expect(screen.getAllByRole("button", { name: /Descargar datos/ })).toHaveLength(2);
+    expect(screen.queryByText(/Runner de Frontend #12/)).toBeNull();
+  });
+
+  it("blocks runtime actions for disabled definitions without blocking design and configuration", () => {
+    render(<ReportCatalogCards reports={[
+      { ...BASE, code: "DISABLED", name: "Deshabilitado", data_source_type: "SQL_QUERY", enabled: false },
+    ]} />);
+    expect((screen.getByRole("button", { name: "Ver" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Descargar datos/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /Diseñar/ }).getAttribute("href")).toBe("/administracion/reportes/DISABLED/designer");
+    expect(screen.getByText(/está deshabilitado/)).toBeTruthy();
   });
 });

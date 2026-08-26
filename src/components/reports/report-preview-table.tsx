@@ -9,12 +9,20 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
-export function ReportPreviewTable({ preview }: { preview: ReportPreviewResponse }) {
+export function ReportPreviewTable({
+  preview,
+  title = "Muestra de datos",
+  note = "Que el preview devuelva filas no garantiza por sí solo que el reporte final sea correcto.",
+}: {
+  preview: ReportPreviewResponse;
+  title?: string;
+  note?: string | null;
+}) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-3 overflow-x-auto">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-medium">Muestra de datos</p>
+          <p className="text-sm font-medium">{title}</p>
           <div className="flex items-center gap-2">
             <Badge variant="outline">{preview.row_count} filas</Badge>
             <Badge variant="secondary">Preview limitado{preview.truncated ? " · truncado" : ""}</Badge>
@@ -36,9 +44,7 @@ export function ReportPreviewTable({ preview }: { preview: ReportPreviewResponse
             </TableBody>
           </Table>
         )}
-        <p className="text-xs text-muted-foreground">
-          Que el preview devuelva filas no garantiza por sí solo que el reporte final sea correcto.
-        </p>
+        {note && <p className="text-xs text-muted-foreground">{note}</p>}
       </CardContent>
     </Card>
   );

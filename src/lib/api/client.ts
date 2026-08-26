@@ -153,6 +153,14 @@ export interface BlobDownload {
 }
 
 function extractFilename(disposition: string): string | null {
-  const match = /filename="?([^";]+)"?/i.exec(disposition);
-  return match ? match[1] : null;
+  const encodedMatch = /filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i.exec(disposition);
+  const plainMatch = /filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;]+)/i.exec(disposition);
+  const raw = encodedMatch?.[1] ?? plainMatch?.[1] ?? plainMatch?.[2];
+  if (raw == null) return null;
+  const unquoted = raw.trim().replace(/^"|"$/g, "");
+  try {
+    return decodeURIComponent(unquoted).replace(/[\\/]/g, "_");
+  } catch {
+    return unquoted.replace(/[\\/]/g, "_");
+  }
 }

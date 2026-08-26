@@ -5,10 +5,8 @@ import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportDesignerWorkspace } from "@/components/reports/report-designer-workspace";
 import { Button } from "@/components/ui/button";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
-import { listAllPriceLists } from "@/lib/api/price-lists";
 import { getReportDefinition } from "@/lib/api/report-catalog";
-import { PRICE_LIST_COMPARISON_REPORT_CODE } from "@/lib/reports/stimulsoft-dataset";
-import type { PriceList, ReportDefinition } from "@/types/api";
+import type { ReportDefinition } from "@/types/api";
 
 export const metadata = {
   title: "Diseñador de reportes | Arefil",
@@ -22,8 +20,6 @@ export default async function ReportDesignerPage({ params }: DesignerPageProps) 
   const { code } = await params;
   let report: ReportDefinition | null = null;
   let reportError: string | null = null;
-  let priceLists: PriceList[] = [];
-  let previewError: string | null = null;
 
   try {
     report = await getReportDefinition(code);
@@ -34,17 +30,6 @@ export default async function ReportDesignerPage({ params }: DesignerPageProps) 
         ? "El reporte solicitado no existe."
         : "No se pudo consultar la definición del reporte.",
     );
-  }
-
-  if (report?.code === PRICE_LIST_COMPARISON_REPORT_CODE) {
-    try {
-      priceLists = await listAllPriceLists();
-    } catch (error) {
-      previewError = getUserErrorMessage(
-        error,
-        "No se pudieron cargar las listas para Preview. La edición y el guardado siguen disponibles.",
-      );
-    }
   }
 
   return (
@@ -75,8 +60,7 @@ export default async function ReportDesignerPage({ params }: DesignerPageProps) 
       </div>
 
       {reportError && <ErrorAlert title="No se pudo abrir el reporte" message={reportError} />}
-      {previewError && <ErrorAlert title="Preview no disponible" message={previewError} />}
-      {report != null && <ReportDesignerWorkspace reportDefinition={report} priceLists={priceLists} />}
+      {report != null && <ReportDesignerWorkspace reportDefinition={report} />}
     </div>
   );
 }

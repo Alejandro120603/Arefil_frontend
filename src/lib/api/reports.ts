@@ -6,6 +6,7 @@ import type {
   ReportDefinition,
   ReportOption,
   ReportPreviewResponse,
+  SQLReportExecutionResponse,
   ReportUpdateRequest,
   PriceListComparisonRequest,
   PriceListComparisonResponse,
@@ -83,6 +84,15 @@ export function previewReport(
   options?: RequestOptions,
 ): Promise<ReportPreviewResponse> {
   return browserApiClient.apiPostJson<ReportPreviewResponse>(reportPath(code, "/preview"), parameters, options);
+}
+
+/** Executes any enabled report through Report Engine v2's generic endpoint. */
+export function executeReport<T = SQLReportExecutionResponse>(
+  code: string,
+  parameters: Record<string, unknown>,
+  options?: RequestOptions,
+): Promise<T> {
+  return browserApiClient.apiPostJson<T>(reportPath(code, "/data"), parameters, options);
 }
 
 export function getReportParameterOptions(

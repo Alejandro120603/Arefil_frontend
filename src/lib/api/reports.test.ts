@@ -5,6 +5,7 @@ import {
   getPriceListComparison,
   createReport,
   downloadReportData,
+  executeReport,
   getReportParameterOptions,
   previewReport,
   getReportTemplate,
@@ -37,6 +38,27 @@ afterEach(() => {
 });
 
 describe("report manager API", () => {
+  it("executes any report through the generic data endpoint", async () => {
+    const payload = { columns: ["id"], rows: [{ id: 1 }], row_count: 1 };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(executeReport("PRODUCT CATALOG", { supplier_id: 8 })).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/PRODUCT%20CATALOG/data",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ supplier_id: 8 }) }),
+    );
+  });
+
+  it("prefers an RFC 5987 backend filename and removes path separators", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response("csv", {
+      headers: { "Content-Disposition": "attachment; filename=fallback.csv; filename*=UTF-8''reporte%20agosto%2Ffinal.csv" },
+    })));
+    await expect(downloadReportData("REPORT", "csv", {})).resolves.toMatchObject({
+      filename: "reporte agosto_final.csv",
+    });
+  });
+
   it("creates, previews, updates, and exports through the browser proxy", async () => {
     const definition = {
       code: "PRODUCT_CATALOG",

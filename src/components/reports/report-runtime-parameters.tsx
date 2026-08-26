@@ -1,43 +1,50 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getReportParameterOptions } from "@/lib/api/reports";
 import { getUserErrorMessage } from "@/lib/api/errors";
+import {
+  orderedReportParameters,
+  type RuntimeParameterValues,
+} from "@/lib/reports/report-runtime";
 import type { ReportOption, ReportParameter } from "@/types/api";
+
+export { initialRuntimeValues } from "@/lib/reports/report-runtime";
 
 const CONTROL_CLASS =
   "h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
-
-export function initialRuntimeValues(parameters: ReportParameter[]): Record<string, string | boolean> {
-  return Object.fromEntries(parameters.map((parameter) => [
-    parameter.name,
-    parameter.default_value == null ? (parameter.data_type === "boolean" ? false : "") : parameter.default_value,
-  ])) as Record<string, string | boolean>;
-}
 
 export function ReportRuntimeParameters({
   code,
   parameters,
   values,
   disabled = false,
+  errors = {},
+  onOptionsStateChange,
   onChange,
 }: {
   code: string;
   parameters: ReportParameter[];
-  values: Record<string, string | boolean>;
+  values: RuntimeParameterValues;
   disabled?: boolean;
+  errors?: Record<string, string>;
+  onOptionsStateChange?: (state: { loading: boolean; ready: boolean }) => void;
   onChange: (name: string, value: string | boolean) => void;
 }) {
   const [options, setOptions] = useState<Record<string, ReportOption[]>>({});
   const [optionsError, setOptionsError] = useState<string | null>(null);
-  const selectParameters = parameters.filter((parameter) => parameter.input_type === "select");
+  const orderedParameters = useMemo(() => orderedReportParameters(parameters), [parameters]);
+  const selectParameters = orderedParameters.filter((parameter) => parameter.input_type === "select");
   const loadingOptions = optionsError == null && selectParameters.some((parameter) => options[parameter.name] == null);
+  const optionsReady = !loadingOptions && optionsError == null && selectParameters.every((parameter) =>
+    !parameter.required || (options[parameter.name]?.length ?? 0) > 0,
+  );
 
   useEffect(() => {
-    const selects = parameters.filter((parameter) => parameter.input_type === "select");
+    const selects = orderedReportParameters(parameters).filter((parameter) => parameter.input_type === "select");
     if (selects.length === 0) return;
     const controller = new AbortController();
     void Promise.all(
@@ -55,8 +62,12 @@ export function ReportRuntimeParameters({
     return () => controller.abort();
   }, [code, parameters]);
 
+  useEffect(() => {
+    onOptionsStateChange?.({ loading: loadingOptions, ready: optionsReady });
+  }, [loadingOptions, onOptionsStateChange, optionsReady]);
+
   if (parameters.length === 0) {
-    return <p className="text-sm text-muted-foreground">Este reporte no requiere parámetros para el preview.</p>;
+    return <p className="text-sm text-muted-foreground">Este reporte no requiere parámetros.</p>;
   }
 
   return (
@@ -68,9 +79,10 @@ export function ReportRuntimeParameters({
       )}
       {optionsError && <p className="text-sm text-destructive">{optionsError}</p>}
       <div className="grid gap-4 md:grid-cols-2">
-        {parameters.map((parameter) => {
+        {orderedParameters.map((parameter) => {
           const id = `runtime-${parameter.name}`;
           const value = values[parameter.name] ?? (parameter.data_type === "boolean" ? false : "");
+          const error = errors[parameter.name];
           return (
             <div key={parameter.name} className="grid gap-1.5">
               {parameter.input_type === "checkbox" ? (
@@ -80,6 +92,8 @@ export function ReportRuntimeParameters({
                     type="checkbox"
                     checked={Boolean(value)}
                     disabled={disabled}
+                    aria-invalid={error != null}
+                    aria-describedby={error ? `${id}-error` : undefined}
                     onChange={(event) => onChange(parameter.name, event.target.checked)}
                   />
                   {parameter.label}{parameter.required ? " *" : ""}
@@ -93,6 +107,8 @@ export function ReportRuntimeParameters({
                       className={CONTROL_CLASS}
                       value={String(value)}
                       disabled={disabled || loadingOptions}
+                      aria-invalid={error != null}
+                      aria-describedby={error ? `${id}-error` : undefined}
                       onChange={(event) => onChange(parameter.name, event.target.value)}
                     >
                       <option value="">Selecciona una opción</option>
@@ -110,11 +126,17 @@ export function ReportRuntimeParameters({
                       step={parameter.data_type === "decimal" ? "any" : undefined}
                       value={String(value)}
                       disabled={disabled}
+                      aria-invalid={error != null}
+                      aria-describedby={error ? `${id}-error` : undefined}
                       onChange={(event) => onChange(parameter.name, event.target.value)}
                     />
                   )}
                 </>
               )}
+              {parameter.input_type === "select" && !loadingOptions && optionsError == null && (options[parameter.name]?.length ?? 0) === 0 && (
+                <p className="text-xs text-muted-foreground">No hay opciones disponibles.</p>
+              )}
+              {error && <p id={`${id}-error`} className="text-xs text-destructive">{error}</p>}
             </div>
           );
         })}

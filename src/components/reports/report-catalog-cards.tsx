@@ -3,14 +3,12 @@ import { Download, Eye, PencilRuler, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PRICE_LIST_COMPARISON_CODE } from "@/lib/reports/report-constants";
 import type { ReportDefinition } from "@/types/api";
 
 export function ReportCatalogCards({ reports }: { reports: ReportDefinition[] }) {
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       {reports.map((report) => {
-        const supportsOperation = report.code === PRICE_LIST_COMPARISON_CODE;
         const operationHref = `/donaldson/reports/${encodeURIComponent(report.code)}`;
         return (
           <Card key={report.code}>
@@ -30,12 +28,17 @@ export function ReportCatalogCards({ reports }: { reports: ReportDefinition[] })
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="flex flex-wrap gap-2">
-                {supportsOperation && (
+                {report.enabled ? (
                   <>
                     <Button size="sm" nativeButton={false} render={<Link href={operationHref} />}><Eye /> Ver</Button>
-                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`${operationHref}#ejecucion`} />}>
+                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`${operationHref}#descargas`} />}>
                       <Download /> Descargar datos
                     </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button size="sm" disabled><Eye /> Ver</Button>
+                    <Button size="sm" variant="outline" disabled><Download /> Descargar datos</Button>
                   </>
                 )}
                 <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/designer`} />}>
@@ -45,9 +48,9 @@ export function ReportCatalogCards({ reports }: { reports: ReportDefinition[] })
                   <Settings /> Configurar
                 </Button>
               </div>
-              {!supportsOperation && (
+              {!report.enabled && (
                 <p className="text-xs text-muted-foreground">
-                  La ejecución y descarga genéricas de este reporte se habilitarán con el Runner de Frontend #12.
+                  Este reporte está deshabilitado; puedes diseñarlo o configurarlo, pero no ejecutarlo.
                 </p>
               )}
             </CardContent>
