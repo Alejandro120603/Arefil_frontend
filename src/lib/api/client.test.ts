@@ -96,4 +96,18 @@ describe("createApiClient", () => {
     expect(result.filename).toBe("arefil.db");
     await expect(result.blob.text()).resolves.toBe("backup");
   });
+
+  it("supports JSON PATCH and JSON POST downloads through the shared client", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ enabled: false }))
+      .mockResolvedValueOnce(new Response("csv", { headers: { "Content-Disposition": 'attachment; filename="report.csv"' } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createApiClient(() => "/backend-api");
+
+    await expect(api.apiPatchJson("/reports/TEST", { enabled: false })).resolves.toEqual({ enabled: false });
+    await expect(api.apiPostBlob("/reports/TEST/export/csv", { supplier_id: 1 })).resolves.toMatchObject({ filename: "report.csv" });
+
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "PATCH", body: JSON.stringify({ enabled: false }) });
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "POST", body: JSON.stringify({ supplier_id: 1 }) });
+  });
 });

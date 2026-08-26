@@ -51,6 +51,8 @@ export interface ApiClient {
   apiGet<T>(path: string, options?: RequestOptions): Promise<T>;
   apiGetText(path: string, options?: RequestOptions): Promise<string>;
   apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
+  apiPatchJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T>;
+  apiPostBlob(path: string, body: unknown, options?: RequestOptions): Promise<BlobDownload>;
   apiPutText<T>(path: string, body: string, options?: RequestOptions): Promise<T>;
   apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T>;
   apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload>;
@@ -88,6 +90,29 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return parseJson<T>(response);
   }
 
+  async function apiPatchJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
+  async function apiPostBlob(path: string, body: unknown, options?: RequestOptions): Promise<BlobDownload> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+    await ensureOk(response);
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition");
+    return { blob, filename: disposition ? extractFilename(disposition) : null };
+  }
+
   async function apiPutText<T>(path: string, body: string, options?: RequestOptions): Promise<T> {
     const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
       method: "PUT",
@@ -119,7 +144,7 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return { blob, filename: disposition ? extractFilename(disposition) : null };
   }
 
-  return { apiGet, apiGetText, apiPostJson, apiPutText, apiUpload, apiDownloadBlob };
+  return { apiGet, apiGetText, apiPostJson, apiPatchJson, apiPostBlob, apiPutText, apiUpload, apiDownloadBlob };
 }
 
 export interface BlobDownload {

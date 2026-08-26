@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PencilRuler } from "lucide-react";
+import { PencilRuler, Plus, Settings } from "lucide-react";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { Badge } from "@/components/ui/badge";
@@ -31,11 +31,16 @@ export default async function AdminReportsPage() {
       <Breadcrumbs
         items={[{ label: "Dashboard", href: "/" }, { label: "Administración" }, { label: "Reportes" }]}
       />
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Administración de reportes</h1>
-        <p className="text-sm text-muted-foreground">
-          Catálogo y plantillas de presentación administradas por Arefil.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Administración de reportes</h1>
+          <p className="text-sm text-muted-foreground">
+            Catálogo, fuentes de datos, parámetros y plantillas administradas por Arefil.
+          </p>
+        </div>
+        <Button nativeButton={false} render={<Link href="/administracion/reportes/nuevo" />}>
+          <Plus /> Nuevo reporte
+        </Button>
       </div>
 
       {errorMessage && <ErrorAlert title="No se pudo cargar el catálogo" message={errorMessage} />}
@@ -80,14 +85,24 @@ export default async function AdminReportsPage() {
                       {report.active_template_version == null ? "Sin plantilla" : `Versión ${report.active_template_version}`}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        nativeButton={false}
-                        render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/designer`} />}
-                      >
-                        <PencilRuler /> Diseñar
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          nativeButton={false}
+                          render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}`} />}
+                        >
+                          <Settings /> Configurar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          nativeButton={false}
+                          render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/designer`} />}
+                        >
+                          <PencilRuler /> Diseñar
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

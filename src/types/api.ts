@@ -244,9 +244,62 @@ export interface ReportDefinition {
   description: string | null;
   category: string | null;
   enabled: boolean;
+  data_source_type: ReportDataSourceType;
   active_template_version: number | null;
+  parameters: ReportParameter[];
   created_at: string;
   updated_at: string;
+}
+
+export type ReportDataSourceType = "HANDLER" | "SQL_QUERY";
+export type ReportParameterDataType = "integer" | "string" | "decimal" | "boolean" | "date" | "datetime";
+export type ReportParameterInputType = "text" | "number" | "date" | "datetime" | "checkbox" | "select";
+export type ReportOptionsSource = "price_lists" | "suppliers";
+
+export interface ReportParameterConfiguration {
+  options_source: ReportOptionsSource;
+}
+
+export interface ReportParameter {
+  name: string;
+  label: string;
+  data_type: ReportParameterDataType;
+  input_type: ReportParameterInputType;
+  required: boolean;
+  default_value: unknown | null;
+  display_order: number;
+  configuration_json: ReportParameterConfiguration | null;
+}
+
+export interface ReportAdminDefinition extends ReportDefinition {
+  data_source_key: string | null;
+  query_text: string | null;
+}
+
+export interface ReportCreateRequest {
+  code: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  data_source_type: ReportDataSourceType;
+  data_source_key: string | null;
+  query_text: string | null;
+  enabled: boolean;
+  parameters: ReportParameter[];
+}
+
+export type ReportUpdateRequest = Omit<ReportCreateRequest, "code">;
+
+export interface ReportPreviewResponse {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  row_count: number;
+  truncated: boolean;
+}
+
+export interface ReportOption {
+  value: number | string;
+  label: string;
 }
 
 export interface ReportTemplateVersion {

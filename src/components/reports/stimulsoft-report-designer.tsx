@@ -14,13 +14,13 @@ import {
   applyStimulsoftLicense,
   registerStimulsoftData,
 } from "@/lib/reports/stimulsoft-runtime";
-import { AREFIL_DATA_SOURCE_NAME, type ArefilReportData } from "@/lib/reports/stimulsoft-dataset";
+import { AREFIL_DATA_SOURCE_NAME } from "@/lib/reports/stimulsoft-dataset";
 
 export interface StimulsoftReportDesignerProps {
-  template: string;
+  template: string | null;
   designerId: string;
   onSaveTemplate: (template: string) => Promise<void>;
-  loadPreviewData: () => Promise<ArefilReportData>;
+  loadPreviewData: () => Promise<unknown>;
   onEventError: (error: unknown) => void;
 }
 
@@ -82,8 +82,10 @@ export default function StimulsoftReportDesigner({
   const built = useMemo(() => {
     try {
       applyStimulsoftLicense(Stimulsoft);
-      const nextReport = new Stimulsoft.Report.StiReport();
-      nextReport.load(template);
+      const nextReport = template == null
+        ? Stimulsoft.Report.StiReport.createNewReport()
+        : new Stimulsoft.Report.StiReport();
+      if (template != null) nextReport.load(template);
       // Discard any connection persisted in a template before it reaches either
       // Designer preview or a subsequent save.
       nextReport.dictionary.databases.clear();

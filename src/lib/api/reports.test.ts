@@ -3,8 +3,13 @@ import {
   PRICE_LIST_COMPARISON_PATH,
   SAME_PRICE_LIST_MESSAGE,
   getPriceListComparison,
+  createReport,
+  downloadReportData,
+  getReportParameterOptions,
+  previewReport,
   getReportTemplate,
   saveReportTemplate,
+  updateReport,
 } from "./reports";
 import { ApiError, getUserErrorMessage } from "./errors";
 import type { PriceListComparisonResponse } from "@/types/api";
@@ -29,6 +34,68 @@ const EMPTY_COMPARISON: PriceListComparisonResponse = {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+describe("report manager API", () => {
+  it("creates, previews, updates, and exports through the browser proxy", async () => {
+    const definition = {
+      code: "PRODUCT_CATALOG",
+      name: "Catálogo",
+      description: null,
+      category: null,
+      enabled: false,
+      data_source_type: "SQL_QUERY" as const,
+      active_template_version: null,
+      parameters: [],
+      created_at: "2026-08-25T12:00:00Z",
+      updated_at: "2026-08-25T12:00:00Z",
+    };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(definition, { status: 201 }))
+      .mockResolvedValueOnce(Response.json({ columns: ["id"], rows: [{ id: 1 }], row_count: 1, truncated: false }))
+      .mockResolvedValueOnce(Response.json([{ value: 1, label: "Donaldson" }]))
+      .mockResolvedValueOnce(Response.json({ ...definition, enabled: true }))
+      .mockResolvedValueOnce(new Response("csv", { headers: { "Content-Disposition": 'attachment; filename="product-catalog.csv"' } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const createRequest = {
+      code: definition.code,
+      name: definition.name,
+      description: null,
+      category: null,
+      data_source_type: "SQL_QUERY" as const,
+      data_source_key: null,
+      query_text: "SELECT id FROM products",
+      enabled: false,
+      parameters: [],
+    };
+    await expect(createReport(createRequest)).resolves.toEqual(definition);
+    await expect(previewReport(definition.code, {})).resolves.toMatchObject({ row_count: 1 });
+    await expect(getReportParameterOptions(definition.code, "supplier_id")).resolves.toEqual([{ value: 1, label: "Donaldson" }]);
+    await expect(updateReport(definition.code, { ...createRequest, enabled: true })).resolves.toMatchObject({ enabled: true });
+    await expect(downloadReportData(definition.code, "csv", {})).resolves.toMatchObject({ filename: "product-catalog.csv" });
+
+    expect(fetchMock.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
+      ["/backend-api/reports", "POST"],
+      ["/backend-api/reports/PRODUCT_CATALOG/preview", "POST"],
+      ["/backend-api/reports/PRODUCT_CATALOG/parameters/supplier_id/options", "GET"],
+      ["/backend-api/reports/PRODUCT_CATALOG", "PATCH"],
+      ["/backend-api/reports/PRODUCT_CATALOG/export/csv", "POST"],
+    ]);
+  });
+
+  it("does not turn create or preview backend errors into success", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ detail: "El reporte DUPLICATE ya existe." }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ detail: "near FROM: syntax error" }, { status: 422 })));
+    const request = {
+      code: "DUPLICATE", name: "Duplicate", description: null, category: null,
+      data_source_type: "SQL_QUERY" as const, data_source_key: null, query_text: "SELECT 1",
+      enabled: false, parameters: [],
+    };
+    await expect(createReport(request)).rejects.toMatchObject({ status: 409 });
+    await expect(previewReport("DUPLICATE", {})).rejects.toMatchObject({ status: 422 });
+  });
 });
 
 describe("getPriceListComparison", () => {

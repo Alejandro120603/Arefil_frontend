@@ -6,6 +6,7 @@ import { ArrowLeftRight, FileText, Loader2 } from "lucide-react";
 import { ComparisonSummary } from "@/components/donaldson/comparison-summary";
 import { ComparisonTable } from "@/components/donaldson/comparison-table";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
+import { ReportDataDownloadButtons } from "@/components/reports/report-data-download-buttons";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -232,7 +233,7 @@ export function PriceListComparison({ priceLists }: PriceListComparisonProps) {
       {error && <ErrorAlert title="No fue posible generar la comparación" message={error} />}
 
       {comparison && (
-        <div className="flex flex-col gap-6">
+        <div id="ejecucion" className="flex scroll-mt-6 flex-col gap-6">
           <div className="flex flex-col gap-1">
             <h2 className="text-lg font-semibold tracking-tight">
               Comparación de listas · {comparison.supplier.name}
@@ -242,6 +243,11 @@ export function PriceListComparison({ priceLists }: PriceListComparisonProps) {
           </div>
 
           <ComparisonSummary summary={comparison.summary} />
+
+          <ReportDataDownloadButtons
+            code="PRICE_LIST_COMPARISON"
+            parameters={{ price_list_a_id: comparison.list_a.id, price_list_b_id: comparison.list_b.id }}
+          />
 
           {comparison.items.length === 0 ? (
             <Card>

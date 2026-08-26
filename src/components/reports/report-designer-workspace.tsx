@@ -4,17 +4,18 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleCheck, Loader2 } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
+import { ReportRuntimeParameters, initialRuntimeValues } from "@/components/reports/report-runtime-parameters";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
-import { getPriceListComparison, getReportTemplate, saveReportTemplate } from "@/lib/api/reports";
+import { getPriceListComparison, getReportTemplate, previewReport, saveReportTemplate } from "@/lib/api/reports";
 import { describePriceList, validateComparisonSelection } from "@/lib/reports/comparison";
 import {
   PRICE_LIST_COMPARISON_REPORT_CODE,
   toArefilReportData,
-  type ArefilReportData,
 } from "@/lib/reports/stimulsoft-dataset";
+import { coerceRuntimeValue } from "@/lib/reports/report-form";
 import type { PriceList, ReportDefinition } from "@/types/api";
 
 const SELECT_CLASS =
@@ -105,12 +106,16 @@ export function ReportDesignerWorkspace({
   priceLists: PriceList[];
 }) {
   const { code } = reportDefinition;
-  const previewSupported = code === PRICE_LIST_COMPARISON_REPORT_CODE;
+  const comparisonPreview = code === PRICE_LIST_COMPARISON_REPORT_CODE;
+  const sqlPreview = reportDefinition.data_source_type === "SQL_QUERY";
   const [loadState, setLoadState] = useState<TemplateLoadState | null>(null);
   const [activeVersion, setActiveVersion] = useState(reportDefinition.active_template_version);
   const [saveState, setSaveState] = useState<SaveState>({ status: "idle", message: null });
   const [priceListAId, setPriceListAId] = useState<number | null>(null);
   const [priceListBId, setPriceListBId] = useState<number | null>(null);
+  const [runtimeValues, setRuntimeValues] = useState<Record<string, string | boolean>>(
+    () => initialRuntimeValues(reportDefinition.parameters),
+  );
   const [previewMessage, setPreviewMessage] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [designerError, setDesignerError] = useState<string | null>(null);
@@ -126,11 +131,15 @@ export function ReportDesignerWorkspace({
         if (!controller.signal.aborted) setLoadState({ code, template, error: null });
       } catch (error) {
         if (controller.signal.aborted) return;
-        const fallback =
-          error instanceof ApiError && error.status === 404
-            ? "Este reporte no tiene una plantilla activa. Backend #10 debe registrar una plantilla antes de diseñarla."
-            : "No se pudo cargar la plantilla desde el backend. Verifica que el servicio esté disponible.";
-        setLoadState({ code, template: null, error: getUserErrorMessage(error, fallback) });
+        if (error instanceof ApiError && error.status === 404) {
+          setLoadState({ code, template: null, error: null });
+          return;
+        }
+        setLoadState({
+          code,
+          template: null,
+          error: getUserErrorMessage(error, "No se pudo cargar la plantilla desde el backend. Verifica que el servicio esté disponible."),
+        });
       }
     }
     void load();
@@ -164,24 +173,33 @@ export function ReportDesignerWorkspace({
     [code],
   );
 
-  const loadPreviewData = useCallback(async (): Promise<ArefilReportData> => {
-    if (!previewSupported) {
-      throw new PreviewError("Este reporte todavía no tiene un adaptador de Preview en el frontend.");
-    }
-    const selectionError = validateComparisonSelection(priceListAId, priceListBId);
-    if (selectionError || priceListAId == null || priceListBId == null) {
-      throw new PreviewError(selectionError ?? "Selecciona dos listas para previsualizar.");
-    }
+  const loadPreviewData = useCallback(async (): Promise<unknown> => {
     setIsLoadingPreview(true);
     setPreviewMessage(null);
     setPreviewError(null);
     try {
-      const comparison = await getPriceListComparison({
-        price_list_a_id: priceListAId,
-        price_list_b_id: priceListBId,
-      });
-      setPreviewMessage("Datos de preview cargados desde Arefil.");
-      return toArefilReportData(comparison);
+      if (comparisonPreview) {
+        const selectionError = validateComparisonSelection(priceListAId, priceListBId);
+        if (selectionError || priceListAId == null || priceListBId == null) {
+          throw new PreviewError(selectionError ?? "Selecciona dos listas para previsualizar.");
+        }
+        const comparison = await getPriceListComparison({
+          price_list_a_id: priceListAId,
+          price_list_b_id: priceListBId,
+        });
+        setPreviewMessage("Datos de preview cargados desde Arefil.");
+        return toArefilReportData(comparison);
+      }
+      if (sqlPreview) {
+        const parameters = Object.fromEntries(reportDefinition.parameters.flatMap((parameter) => {
+          const coerced = coerceRuntimeValue(parameter, runtimeValues[parameter.name] ?? "");
+          return coerced === undefined ? [] : [[parameter.name, coerced]];
+        }));
+        const result = await previewReport(code, parameters);
+        setPreviewMessage(`Preview cargado: ${result.row_count} filas${result.truncated ? " (limitado)" : ""}.`);
+        return { Data: result.rows };
+      }
+      throw new PreviewError("Este handler no tiene un adaptador de Preview en el frontend.");
     } catch (error) {
       throw new PreviewError(
         getUserErrorMessage(error, "No se pudieron cargar los datos para previsualizar el reporte."),
@@ -189,7 +207,7 @@ export function ReportDesignerWorkspace({
     } finally {
       setIsLoadingPreview(false);
     }
-  }, [previewSupported, priceListAId, priceListBId]);
+  }, [code, comparisonPreview, priceListAId, priceListBId, reportDefinition.parameters, runtimeValues, sqlPreview]);
 
   const handleEventError = useCallback((error: unknown) => {
     if (error instanceof PreviewError) {
@@ -213,7 +231,7 @@ export function ReportDesignerWorkspace({
             <div>
               <p className="text-sm font-medium">Datos para Preview</p>
               <p className="text-xs text-muted-foreground">
-                El Designer solicitará la comparación al backend al abrir la pestaña Preview.
+                El Designer solicitará datos controlados al backend al abrir la pestaña Preview.
               </p>
             </div>
             <p className="text-sm text-muted-foreground">
@@ -221,10 +239,22 @@ export function ReportDesignerWorkspace({
             </p>
           </div>
 
-          {!previewSupported ? (
+          {!comparisonPreview && !sqlPreview ? (
             <p className="text-sm text-muted-foreground">
-              Este código puede editarse y guardarse, pero todavía no tiene Preview configurado en el frontend.
+              Este handler puede editarse y guardarse, pero no tiene Preview configurado en el frontend.
             </p>
+          ) : sqlPreview ? (
+            <ReportRuntimeParameters
+              code={code}
+              parameters={reportDefinition.parameters}
+              values={runtimeValues}
+              disabled={isLoadingPreview}
+              onChange={(name, value) => {
+                setRuntimeValues((current) => ({ ...current, [name]: value }));
+                setPreviewMessage(null);
+                setPreviewError(null);
+              }}
+            />
           ) : priceLists.length >= 2 ? (
             <div className="flex flex-col gap-3 sm:flex-row">
               <PreviewListPicker
@@ -281,7 +311,7 @@ export function ReportDesignerWorkspace({
       {currentLoad?.error && <ErrorAlert title="No se pudo abrir el Designer" message={currentLoad.error} />}
 
       {currentLoad == null && <DesignerPlaceholder />}
-      {currentLoad?.template != null && (
+      {currentLoad != null && currentLoad.error == null && (
         <div className="h-[calc(100dvh-17rem)] min-h-[42rem] overflow-hidden rounded-xl border bg-card [&>div]:h-full">
           <StimulsoftReportDesigner
             designerId={`arefil-designer-${code.toLowerCase().replaceAll("_", "-")}`}
