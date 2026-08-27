@@ -65,7 +65,7 @@ Esto:
 3. Corre `alembic upgrade head` sobre el backend.
 4. Corre el seed idempotente de Donaldson (`python -m app.db.seed`).
 5. Levanta FastAPI con `--reload` en `:8000`.
-6. Levanta Next.js dev en `:3000`.
+6. Levanta Next.js dev en `:3001`.
 7. Muestra los logs de ambos procesos en la misma terminal.
 8. `Ctrl+C` detiene ambos limpiamente; si uno de los dos procesos muere, el
    script detiene el otro y termina con código de error. No quedan procesos
@@ -74,7 +74,7 @@ Esto:
 Variables configurables (todas con default razonable):
 
 ```bash
-make run_panel BACKEND_DIR=../Arefil_backend/backend BACKEND_PORT=8000 FRONTEND_PORT=3000
+make run_panel BACKEND_DIR=../Arefil_backend/backend BACKEND_PORT=8000 FRONTEND_PORT=3001
 ```
 
 ### `make setup_panel`
@@ -89,7 +89,7 @@ make setup_panel
 
 ## URLs
 
-- Frontend: <http://localhost:3000>
+- Frontend: <http://localhost:3001>
 - Backend: <http://localhost:8000>
 - Swagger / OpenAPI: <http://localhost:8000/docs>
 
@@ -197,7 +197,7 @@ copies una base SQLite/WAL activa. Para un respaldo consistente usa
 
 Los defaults son:
 
-- Frontend: <http://localhost:3000>
+- Frontend: <http://localhost:3001>
 - Backend: <http://localhost:8000>
 - Swagger: <http://localhost:8000/docs>
 
@@ -236,11 +236,11 @@ imagen.
 Desde otra laptop en la misma LAN abre:
 
 ```text
-http://IP-DE-LAPTOP-SERVIDOR:3000
+http://IP-DE-LAPTOP-SERVIDOR:3001
 ```
 
 No uses `localhost` en la laptop cliente: apuntaría a esa laptop, no al servidor.
-Compose publica 3000 y 8000 en las interfaces del host; permitir tráfico en el
+Compose publica 3001 y 8000 en las interfaces del host; permitir tráfico en el
 firewall/red local es responsabilidad del operador. Los scripts no modifican
 reglas de firewall.
 

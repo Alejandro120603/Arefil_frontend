@@ -4,7 +4,7 @@
 BACKEND_DIR ?= ../Arefil_backend/backend
 FRONTEND_DIR ?= .
 BACKEND_PORT ?= 8000
-FRONTEND_PORT ?= 3000
+FRONTEND_PORT ?= 3001
 BACKEND_DATA_DIR ?= ../Arefil_backend/backend/data
 COMPOSE_PROJECT_NAME ?= arefil
 

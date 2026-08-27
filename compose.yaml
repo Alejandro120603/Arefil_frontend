@@ -12,7 +12,7 @@ services:
       UPLOADS_DIR: /app/data/uploads
       BACKUPS_DIR: /app/data/backups
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000"]}'
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3001","http://127.0.0.1:3001"]}'
     volumes:
       - type: bind
         source: ${BACKEND_DATA_DIR:-../Arefil_backend/backend/data}
@@ -33,7 +33,7 @@ services:
     environment:
       API_INTERNAL_URL: http://backend:8000/api
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${FRONTEND_PORT:-3001}:3000"
     depends_on:
       backend:
         condition: service_healthy
