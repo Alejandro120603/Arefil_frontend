@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PencilRuler, Plus, Settings } from "lucide-react";
+import { Plus, Settings } from "lucide-react";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +35,7 @@ export default async function AdminReportsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Administración de reportes</h1>
           <p className="text-sm text-muted-foreground">
-            Catálogo, fuentes de datos, parámetros y plantillas administradas por Arefil.
+            Catálogo, fuentes de datos, parámetros, columnas y formato Excel administrados por Arefil.
           </p>
         </div>
         <Button nativeButton={false} render={<Link href="/administracion/reportes/nuevo" />}>
@@ -63,7 +63,6 @@ export default async function AdminReportsPage() {
                   <TableHead>Código</TableHead>
                   <TableHead>Categoría</TableHead>
                   <TableHead>Estado</TableHead>
-                  <TableHead>Template</TableHead>
                   <TableHead className="text-right">Acción</TableHead>
                 </TableRow>
               </TableHeader>
@@ -81,9 +80,6 @@ export default async function AdminReportsPage() {
                         {report.enabled ? "Habilitado" : "Deshabilitado"}
                       </Badge>
                     </TableCell>
-                    <TableCell>
-                      {report.active_template_version == null ? "Sin plantilla" : `Versión ${report.active_template_version}`}
-                    </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button
@@ -93,14 +89,6 @@ export default async function AdminReportsPage() {
                           render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}`} />}
                         >
                           <Settings /> Configurar
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          nativeButton={false}
-                          render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/designer`} />}
-                        >
-                          <PencilRuler /> Diseñar
                         </Button>
                       </div>
                     </TableCell>

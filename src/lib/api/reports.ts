@@ -10,60 +10,12 @@ import type {
   ReportDefinition,
   ReportOption,
   ReportPreviewResponse,
-  SQLReportExecutionResponse,
   ReportUpdateRequest,
-  PriceListComparisonRequest,
-  PriceListComparisonResponse,
-  ReportTemplateVersion,
 } from "@/types/api";
 import type { BlobDownload } from "./client";
-import { PRICE_LIST_COMPARISON_CODE } from "@/lib/reports/report-constants";
-
-export { PRICE_LIST_COMPARISON_CODE };
-export const PRICE_LIST_COMPARISON_PATH = `/reports/${PRICE_LIST_COMPARISON_CODE}/data`;
 
 function reportPath(code: string, suffix = ""): string {
   return `/reports/${encodeURIComponent(code)}${suffix}`;
-}
-
-/**
- * A == B is rejected by the backend with a 422 whose message is written for
- * developers, so the UI blocks the request before it leaves the browser and
- * this guard exists only as the last line of defence for direct callers.
- */
-export const SAME_PRICE_LIST_MESSAGE = "Selecciona dos listas distintas.";
-
-export class SamePriceListError extends Error {
-  constructor() {
-    super(SAME_PRICE_LIST_MESSAGE);
-    this.name = "SamePriceListError";
-  }
-}
-
-/**
- * Runs on the browser through the same-origin `/backend-api/*` proxy - the
- * internal Docker hostname is never resolved client side (see `browser-client`).
- */
-export function getPriceListComparison(
-  request: PriceListComparisonRequest,
-  options?: RequestOptions,
-): Promise<PriceListComparisonResponse> {
-  if (request.price_list_a_id === request.price_list_b_id) {
-    return Promise.reject(new SamePriceListError());
-  }
-  return browserApiClient.apiPostJson<PriceListComparisonResponse>(PRICE_LIST_COMPARISON_PATH, request, options);
-}
-
-export function getReportTemplate(code: string, options?: RequestOptions): Promise<string> {
-  return browserApiClient.apiGetText(reportPath(code, "/template"), options);
-}
-
-export function saveReportTemplate(
-  code: string,
-  template: string,
-  options?: RequestOptions,
-): Promise<ReportTemplateVersion> {
-  return browserApiClient.apiPutText<ReportTemplateVersion>(reportPath(code, "/template"), template, options);
 }
 
 export function createReport(request: ReportCreateRequest, options?: RequestOptions): Promise<ReportDefinition> {
@@ -90,8 +42,8 @@ export function previewReport(
   return browserApiClient.apiPostJson<ReportPreviewResponse>(reportPath(code, "/preview"), parameters, options);
 }
 
-/** Executes any enabled report through Report Engine v2's generic endpoint. */
-export function executeReport<T = SQLReportExecutionResponse>(
+/** Executes any enabled report; callers must narrow the response before rendering it. */
+export function executeReport<T = unknown>(
   code: string,
   parameters: Record<string, unknown>,
   options?: RequestOptions,
@@ -123,8 +75,8 @@ export function downloadReportData(
 /**
  * Report Builder — Backend #12.
  *
- * These four calls are all the new builder needs; none of them touches
- * Stimulsoft. Formula parsing, field allow-listing and cycle detection stay on
+ * These four calls are all the builder needs. Formula parsing, field
+ * allow-listing and cycle detection stay on
  * the backend, so the UI's job is to send valid references and surface the
  * backend's own message when it refuses.
  */

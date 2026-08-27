@@ -46,7 +46,7 @@ const QUANTITY: ReportParameter = {
 
 const REPORT = {
   code: "COTIZACION", name: "Cotización", description: null, category: null, enabled: true,
-  data_source_type: "SQL_QUERY" as const, active_template_version: null, parameters: [QUANTITY],
+  data_source_type: "SQL_QUERY" as const, parameters: [QUANTITY],
   parameter_groups: [],
   created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
   data_source_key: null, query_text: "SELECT 1",
@@ -273,7 +273,7 @@ describe("ReportBuilderWorkspace", () => {
     expect(await screen.findByText("Constructor guardado")).toBeTruthy();
   });
 
-  it("renders the builder preview without loading Stimulsoft", async () => {
+  it("renders the builder preview natively", async () => {
     const preview: ReportBuilderPreviewResponse = {
       columns: [
         { key: "part_number", label: "SKU", data_type: "string", format_type: "text" },
@@ -296,8 +296,6 @@ describe("ReportBuilderWorkspace", () => {
     expect(screen.getByText("P181050")).toBeTruthy();
     expect(screen.getAllByText("$300.00")).toHaveLength(2); // row + totals row
     expect(screen.getByText("Resultado truncado")).toBeTruthy();
-    // No Stimulsoft asset is ever requested for the builder preview.
-    expect(document.querySelector("script[src*='stimulsoft']")).toBeNull();
   });
 
   it("reports an empty preview instead of pretending it failed", async () => {

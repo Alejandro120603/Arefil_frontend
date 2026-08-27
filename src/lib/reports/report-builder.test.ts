@@ -333,7 +333,7 @@ describe("serialization", () => {
     const builder: ReportBuilderDefinition = {
       report: {
         code: "COTIZACION", name: "Cotización", description: null, category: null, enabled: true,
-        data_source_type: "SQL_QUERY", active_template_version: null, parameters: [QUANTITY],
+        data_source_type: "SQL_QUERY", parameters: [QUANTITY],
         created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
         data_source_key: null, query_text: "SELECT 1", parameter_groups: [],
       },
@@ -350,7 +350,7 @@ describe("serialization", () => {
     const value = builderFormFromDefinition({
       report: {
         code: "NEW", name: "Nuevo", description: null, category: null, enabled: false,
-        data_source_type: "SQL_QUERY", active_template_version: null, parameters: [],
+        data_source_type: "SQL_QUERY", parameters: [],
         created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
         data_source_key: null, query_text: null, parameter_groups: [],
       },

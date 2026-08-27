@@ -7,6 +7,9 @@ import { getUserErrorMessage } from "@/lib/api/errors";
 import { downloadReportData } from "@/lib/api/reports";
 import { triggerBrowserDownload } from "@/lib/download";
 
+/** The backend format keys stay technical; the user only ever reads "Excel". */
+const DOWNLOAD_LABELS = { xlsx: "Excel", csv: "CSV" } as const;
+
 export function ReportDataDownloadButtons({
   code,
   parameters,
@@ -54,7 +57,7 @@ export function ReportDataDownloadButtons({
         {(["xlsx", "csv"] as const).map((format) => (
           <Button key={format} type="button" size="sm" variant={format === "xlsx" ? "default" : "outline"} disabled={disabled || active != null} onClick={() => download(format)}>
             {active === format ? <Loader2 className="animate-spin" /> : <Download />}
-            {active === format ? "Descargando..." : `Descargar ${format.toUpperCase()}`}
+            {active === format ? "Descargando..." : `Descargar ${DOWNLOAD_LABELS[format]}`}
           </Button>
         ))}
         {active != null && (

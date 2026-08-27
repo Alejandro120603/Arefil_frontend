@@ -1,10 +1,12 @@
 import { PRICE_LIST_COMPARISON_CODE } from "@/lib/reports/report-constants";
 import type {
+  PriceListComparisonResponse,
   ReportBuilderPreviewResponse,
   ReportNumericConfiguration,
   ReportParameter,
   ReportParameterGroup,
   ReportParameterGroupField,
+  SQLReportExecutionResponse,
 } from "@/types/api";
 
 export type RuntimeParameterValue = string | boolean;
@@ -66,8 +68,18 @@ function initialValue(parameter: ReportParameter | ReportParameterGroupField): R
   return serialized;
 }
 
-export function initialRuntimeValues(parameters: ReportParameter[]): RuntimeParameterValues {
-  return Object.fromEntries(parameters.map((parameter) => [parameter.name, initialValue(parameter)]));
+export function initialRuntimeValues(
+  parameters: ReportParameter[],
+  overrides: Record<string, unknown> = {},
+): RuntimeParameterValues {
+  return Object.fromEntries(parameters.map((parameter) => {
+    const override = overrides[parameter.name];
+    if (override == null) return [parameter.name, initialValue(parameter)];
+    if (parameter.data_type === "boolean" || parameter.input_type === "checkbox") {
+      return [parameter.name, typeof override === "boolean" ? override : override === "true" || override === "1"];
+    }
+    return [parameter.name, String(override)];
+  }));
 }
 
 export function initialRuntimeGroupValues(groups: ReportParameterGroup[]): RuntimeGroupValues {
@@ -287,4 +299,25 @@ export function isReportBuilderPreviewResponse(value: unknown): value is ReportB
     && typeof candidate.totals === "object"
     && typeof candidate.row_count === "number"
     && typeof candidate.truncated === "boolean";
+}
+
+export function isSQLReportExecutionResponse(value: unknown): value is SQLReportExecutionResponse {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SQLReportExecutionResponse>;
+  return Array.isArray(candidate.columns)
+    && candidate.columns.every((column) => typeof column === "string")
+    && Array.isArray(candidate.rows)
+    && candidate.rows.every((row) => row != null && typeof row === "object" && !Array.isArray(row))
+    && typeof candidate.row_count === "number";
+}
+
+export function isPriceListComparisonResponse(value: unknown): value is PriceListComparisonResponse {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<PriceListComparisonResponse>;
+  return candidate.report?.code === PRICE_LIST_COMPARISON_CODE
+    && candidate.supplier != null
+    && candidate.list_a != null
+    && candidate.list_b != null
+    && candidate.summary != null
+    && Array.isArray(candidate.items);
 }

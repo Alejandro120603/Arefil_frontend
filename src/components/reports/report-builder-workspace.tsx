@@ -47,8 +47,7 @@ import type {
 /**
  * The Report Builder: configures the *logical shell* of a report — columns,
  * their sources, formulas and the Excel layout — and previews it against real
- * data. Nothing in this tree imports Stimulsoft; the legacy Viewer/Designer
- * flow keeps living beside it untouched.
+ * data. Preview and export both use the saved builder contract.
  *
  * Repeatable line items are configured beside the logical shell and saved in
  * the same transaction, so formula sources and runtime metadata cannot drift.
@@ -301,7 +300,7 @@ export function ReportBuilderWorkspace({
         <CardHeader><CardTitle>Vista previa</CardTitle></CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            El backend calcula las fórmulas y devuelve solo las columnas visibles. Esta vista previa no usa Stimulsoft.
+            El backend calcula las fórmulas y devuelve solo las columnas visibles.
           </p>
           {dirty && (
             <p className="text-sm text-muted-foreground">

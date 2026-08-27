@@ -6,12 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GenericReportRuntime } from "./generic-report-runtime";
 import { ApiError } from "@/lib/api/errors";
 import type { ReportDefinition } from "@/types/api";
-
-vi.mock("@/components/reports/generic-report-viewer", () => ({
-  GenericReportViewer: ({ parameters }: { parameters: Record<string, unknown> }) => (
-    <div data-testid="generic-viewer">{JSON.stringify(parameters)}</div>
-  ),
-}));
 const { executeReport, getReportParameterOptions, downloadReportData, triggerBrowserDownload } = vi.hoisted(() => ({
   executeReport: vi.fn(), getReportParameterOptions: vi.fn(), downloadReportData: vi.fn(), triggerBrowserDownload: vi.fn(),
 }));
@@ -29,7 +23,6 @@ const REPORT: ReportDefinition = {
   category: null,
   enabled: true,
   data_source_type: "SQL_QUERY",
-  active_template_version: null,
   parameters: [],
   parameter_groups: [],
   created_at: "2026-08-26T12:00:00Z",
@@ -47,11 +40,12 @@ describe("GenericReportRuntime", () => {
     executeReport.mockResolvedValue({ columns: [], rows: [], row_count: 0 });
     render(<GenericReportRuntime report={REPORT} />);
     expect(screen.getByText("Este reporte no requiere parámetros.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Descargar XLSX" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar Excel" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Generar reporte" }));
     await waitFor(() => expect(executeReport).toHaveBeenCalledWith("NO_PARAMETERS", {}, expect.anything()));
-    expect((await screen.findByTestId("generic-viewer")).textContent).toBe("{}");
-    expect(screen.getByRole("button", { name: "Descargar XLSX" })).toBeTruthy();
+    expect(await screen.findByText("Vista previa del reporte")).toBeTruthy();
+    expect(screen.getByText("La consulta no devolvió filas de muestra.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Descargar Excel" })).toBeTruthy();
   });
 
   it("blocks invalid required values and A/B with the same list", () => {
@@ -122,9 +116,8 @@ describe("GenericReportRuntime", () => {
     }, expect.anything()));
     expect(await screen.findByRole("columnheader", { name: "SKU" })).toBeTruthy();
     expect(screen.getAllByText("$788.79")).toHaveLength(1);
-    expect(screen.queryByTestId("generic-viewer")).toBeNull();
-    expect(screen.getByRole("button", { name: "Descargar XLSX" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Descargar XLSX" }));
+    expect(screen.getByRole("button", { name: "Descargar Excel" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Descargar Excel" }));
     await waitFor(() => expect(downloadReportData).toHaveBeenCalledWith("COTIZACION", "xlsx", {
       price_list_id: 7,
       items: [
@@ -137,7 +130,7 @@ describe("GenericReportRuntime", () => {
     await user.clear(screen.getAllByLabelText("Cantidad *")[0]);
     await user.type(screen.getAllByLabelText("Cantidad *")[0], "3");
     expect(screen.queryByRole("columnheader", { name: "SKU" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Descargar XLSX" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar Excel" })).toBeNull();
     expect(screen.getByRole("button", { name: "Regenerar reporte" })).toBeTruthy();
   });
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileText, PencilRuler, Settings } from "lucide-react";
+import { FileText, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,12 +18,7 @@ export function ReportCatalogCards({ reports }: { reports: ReportDefinition[] })
                   <CardTitle>{report.name}</CardTitle>
                   <p className="mt-1 text-sm text-muted-foreground">{report.description ?? "Sin descripción"}</p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {report.category && <Badge variant="outline">{report.category}</Badge>}
-                  <Badge variant={report.active_template_version == null ? "outline" : "secondary"}>
-                    {report.active_template_version == null ? "Sin plantilla" : `Template v${report.active_template_version}`}
-                  </Badge>
-                </div>
+                {report.category && <Badge variant="outline">{report.category}</Badge>}
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -43,13 +38,10 @@ export function ReportCatalogCards({ reports }: { reports: ReportDefinition[] })
                     </Button>
                   </>
                 )}
-                <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/designer`} />}>
-                  <PencilRuler /> Diseñar
-                </Button>
               </div>
               {!report.enabled && (
                 <p className="text-xs text-muted-foreground">
-                  Este reporte está deshabilitado; puedes diseñarlo o configurarlo, pero no ejecutarlo.
+                  Este reporte está deshabilitado; puedes configurarlo, pero no ejecutarlo.
                 </p>
               )}
             </CardContent>

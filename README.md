@@ -108,6 +108,34 @@ src/
     api.ts                # contrato TypeScript espejo de app/schemas del backend
 ```
 
+## Reportes
+
+La experiencia oficial de reportes es **Report Builder → vista previa web →
+Excel**. No hay diseñador de plantillas ni visor embebido: el backend es la
+única autoridad sobre columnas, fórmulas, totales y el archivo generado.
+
+Operación (`/donaldson/reports`), con dos acciones por reporte:
+
+- **Generar** abre `/donaldson/reports/[code]`, captura los parámetros
+  escalares y los renglones repetibles del reporte, ejecuta
+  `POST /reports/{code}/data` y renderiza la vista previa en HTML.
+- **Configurar** abre `/administracion/reportes/[code]`, donde vive el Report
+  Builder (definición, parámetros, grupos repetibles, columnas, fórmulas,
+  layout Excel y vista previa).
+
+La vista previa es React: consume `columns`, `rows` y `totals` tal como los
+devuelve el backend y respeta etiquetas, orden, visibilidad y `format_type`.
+El frontend **no** recalcula fórmulas ni reconstruye totales.
+
+La exportación principal es **Descargar Excel**: el frontend envía los mismos
+parámetros de la vista previa, recibe el blob y respeta el nombre de
+`Content-Disposition`. CSV se conserva como acción secundaria. No se usa
+ninguna librería de Excel en el navegador.
+
+Los reportes se configuran en la base de datos, no en el código: `SQL_QUERY` y
+`HANDLER` (incluidos `PRICE_LIST_COMPARISON` y los renglones repetibles que dan
+soporte a cotizaciones) se renderizan con el mismo runtime genérico.
+
 ## API client
 
 `src/lib/api/` es el único punto de acceso al backend (nada de `fetch` suelto

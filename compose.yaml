@@ -30,8 +30,6 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: /backend-api
-        # Empty unless the host exports it; see .env.docker.example.
-        NEXT_PUBLIC_STIMULSOFT_LICENSE_KEY: ${NEXT_PUBLIC_STIMULSOFT_LICENSE_KEY:-}
     environment:
       API_INTERNAL_URL: http://backend:8000/api
     ports:

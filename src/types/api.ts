@@ -167,15 +167,9 @@ export interface HealthStatus {
  *
  * The backend derives this dataset at request time from two price lists that
  * must share supplier and currency (it answers 422 otherwise). Keep this shape
- * stable: Frontend #9 will feed the very same `PriceListComparisonResponse`
- * into the Stimulsoft viewer without a second endpoint.
+ * stable: the native comparison preview and exports consume this same payload.
  */
 export type ComparisonStatus = "INCREASED" | "DECREASED" | "UNCHANGED" | "NEW" | "REMOVED";
-
-export interface PriceListComparisonRequest {
-  price_list_a_id: number;
-  price_list_b_id: number;
-}
 
 export interface ComparisonReportMetadata {
   code: "PRICE_LIST_COMPARISON";
@@ -245,7 +239,6 @@ export interface ReportDefinition {
   category: string | null;
   enabled: boolean;
   data_source_type: ReportDataSourceType;
-  active_template_version: number | null;
   parameters: ReportParameter[];
   parameter_groups: ReportParameterGroup[];
   created_at: string;
@@ -349,22 +342,13 @@ export interface ReportOption {
   label: string;
 }
 
-export interface ReportTemplateVersion {
-  report_code: string;
-  version: number;
-  checksum: string;
-  created_at: string;
-  updated_at: string;
-}
-
 /**
  * Report Builder — mirrored from Backend #12/#13
  * (`Arefil_backend/backend/app/schemas/reports.py`, `app/db/enums.py`).
  *
  * The builder describes the *logical shell* of a report: which columns exist,
  * where each one takes its value from, and how the Excel export is laid out.
- * It is deliberately independent of Stimulsoft — nothing here loads a Viewer
- * or a Designer.
+ * It is the official presentation contract for web preview and Excel output.
  */
 export type ReportColumnType = "FIELD" | "PARAMETER" | "FORMULA";
 

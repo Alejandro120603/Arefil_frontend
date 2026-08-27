@@ -6,9 +6,7 @@ import { formatCurrency, formatNumber, parseDecimal } from "@/lib/format/decimal
 import type { ReportBuilderPreviewColumn, ReportBuilderPreviewResponse } from "@/types/api";
 
 /**
- * Renders `POST /reports/{code}/builder/preview`. Deliberately Stimulsoft-free:
- * the logical shell of a report must be previewable without loading a Viewer
- * or a Designer.
+ * Renders `POST /reports/{code}/builder/preview` as the official web preview.
  *
  * Every numeric cell arrives as a Decimal *string* already computed by the
  * backend's formula engine — nothing here recalculates a monetary value, the

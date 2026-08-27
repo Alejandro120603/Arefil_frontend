@@ -74,27 +74,27 @@ describe("backend API proxy", () => {
     expect(body).not.toContain("backend:8000");
   });
 
-  it("forwards a raw Stimulsoft template and its content type on PUT", async () => {
+  it("forwards a report builder JSON request and its content type on PUT", async () => {
     vi.stubEnv("API_INTERNAL_URL", "http://backend:8000/api");
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ version: 2 }, { status: 201 }));
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ columns: [] }));
     vi.stubGlobal("fetch", fetchMock);
-    const template = '{"ReportVersion":"2026.3.2","Pages":{"0":{}}}';
+    const builder = '{"columns":[],"parameter_groups":[],"excel_layout":{"sheet_name":"Reporte"}}';
     const request = new NextRequest(
-      "http://frontend:3000/backend-api/reports/PRICE_LIST_COMPARISON/template",
-      { method: "PUT", headers: { "Content-Type": "application/json" }, body: template },
+      "http://frontend:3000/backend-api/reports/PRICE_LIST_COMPARISON/builder",
+      { method: "PUT", headers: { "Content-Type": "application/json" }, body: builder },
     );
 
     const response = await PUT(request, {
-      params: Promise.resolve({ path: ["reports", "PRICE_LIST_COMPARISON", "template"] }),
+      params: Promise.resolve({ path: ["reports", "PRICE_LIST_COMPARISON", "builder"] }),
     });
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      "http://backend:8000/api/reports/PRICE_LIST_COMPARISON/template",
+      "http://backend:8000/api/reports/PRICE_LIST_COMPARISON/builder",
     );
     const init = fetchMock.mock.calls[0]?.[1];
     expect(init?.method).toBe("PUT");
     expect((init?.headers as Headers).get("content-type")).toBe("application/json");
-    expect(new TextDecoder().decode(init?.body as ArrayBuffer)).toBe(template);
-    expect(response.status).toBe(201);
+    expect(new TextDecoder().decode(init?.body as ArrayBuffer)).toBe(builder);
+    expect(response.status).toBe(200);
   });
 });

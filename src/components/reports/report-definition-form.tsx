@@ -156,7 +156,7 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
               onBlur={() => creating && change({ code: normalizeReportCode(value.code) })}
               onChange={(event) => change({ code: event.target.value })}
             />
-            {!creating && <p className="text-xs text-muted-foreground">El código es inmutable porque forma parte de URLs y templates.</p>}
+            {!creating && <p className="text-xs text-muted-foreground">El código es inmutable porque forma parte de las URLs del reporte.</p>}
           </div>
           <div className="grid gap-1.5 md:col-span-2">
             <Label htmlFor="report-description">Descripción</Label>

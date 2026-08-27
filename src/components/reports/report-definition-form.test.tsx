@@ -31,7 +31,6 @@ const SQL_REPORT: ReportAdminDefinition = {
   data_source_type: "SQL_QUERY",
   data_source_key: null,
   query_text: "SELECT id FROM products",
-  active_template_version: null,
   parameters: [],
   parameter_groups: [],
   created_at: "2026-08-25T12:00:00Z",

@@ -37,7 +37,7 @@ describe("ReportDataDownloadButtons", () => {
       });
     });
     render(<ReportDataDownloadButtons code="REPORT" parameters={{}} />);
-    await user.click(screen.getByRole("button", { name: "Descargar XLSX" }));
+    await user.click(screen.getByRole("button", { name: "Descargar Excel" }));
     await user.click(await screen.findByRole("button", { name: "Cancelar" }));
     expect(requestSignal?.aborted).toBe(true);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Cancelar" })).toBeNull());

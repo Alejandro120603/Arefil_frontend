@@ -49,12 +49,10 @@ export interface RequestOptions {
 
 export interface ApiClient {
   apiGet<T>(path: string, options?: RequestOptions): Promise<T>;
-  apiGetText(path: string, options?: RequestOptions): Promise<string>;
   apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
   apiPatchJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T>;
   apiPutJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T>;
   apiPostBlob(path: string, body: unknown, options?: RequestOptions): Promise<BlobDownload>;
-  apiPutText<T>(path: string, body: string, options?: RequestOptions): Promise<T>;
   apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T>;
   apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload>;
 }
@@ -68,17 +66,6 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
       cache: "no-store",
     });
     return parseJson<T>(response);
-  }
-
-  async function apiGetText(path: string, options?: RequestOptions): Promise<string> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: options?.signal,
-      cache: "no-store",
-    });
-    await ensureOk(response);
-    return response.text();
   }
 
   async function apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
@@ -124,16 +111,6 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return { blob, filename: disposition ? extractFilename(disposition) : null };
   }
 
-  async function apiPutText<T>(path: string, body: string, options?: RequestOptions): Promise<T> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body,
-      signal: options?.signal,
-    });
-    return parseJson<T>(response);
-  }
-
   async function apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
     const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
       method: "POST",
@@ -155,7 +132,7 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return { blob, filename: disposition ? extractFilename(disposition) : null };
   }
 
-  return { apiGet, apiGetText, apiPostJson, apiPatchJson, apiPutJson, apiPostBlob, apiPutText, apiUpload, apiDownloadBlob };
+  return { apiGet, apiPostJson, apiPatchJson, apiPutJson, apiPostBlob, apiUpload, apiDownloadBlob };
 }
 
 export interface BlobDownload {

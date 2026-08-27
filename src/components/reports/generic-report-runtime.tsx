@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Loader2 } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
-import { GenericReportViewer } from "@/components/reports/generic-report-viewer";
-import { ReportBuilderPreviewTable } from "@/components/reports/report-builder-preview-table";
 import { ReportDataDownloadButtons } from "@/components/reports/report-data-download-buttons";
 import { ReportRepeatableParameters } from "@/components/reports/report-repeatable-parameters";
+import { ReportRuntimePreview } from "@/components/reports/report-runtime-preview";
 import { ReportRuntimeParameters } from "@/components/reports/report-runtime-parameters";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +15,6 @@ import {
   backendRowErrors,
   initialRuntimeGroupValues,
   initialRuntimeValues,
-  isReportBuilderPreviewResponse,
   validateRuntimeForm,
   type RuntimeGroupValues,
   type RuntimeParameterValue,
@@ -29,9 +27,15 @@ interface SuccessfulExecution {
   payload: unknown;
 }
 
-export function GenericReportRuntime({ report }: { report: ReportDefinition }) {
+export function GenericReportRuntime({
+  report,
+  initialParameters = {},
+}: {
+  report: ReportDefinition;
+  initialParameters?: Record<string, unknown>;
+}) {
   const groups = useMemo(() => report.parameter_groups ?? [], [report.parameter_groups]);
-  const [values, setValues] = useState(() => initialRuntimeValues(report.parameters));
+  const [values, setValues] = useState(() => initialRuntimeValues(report.parameters, initialParameters));
   const [groupValues, setGroupValues] = useState<RuntimeGroupValues>(() => initialRuntimeGroupValues(groups));
   const [execution, setExecution] = useState<SuccessfulExecution | null>(null);
   const executionIdRef = useRef(0);
@@ -148,11 +152,7 @@ export function GenericReportRuntime({ report }: { report: ReportDefinition }) {
       {execution != null && (
         <>
           <section id="ejecucion" className="scroll-mt-6">
-            {isReportBuilderPreviewResponse(execution.payload) ? (
-              <ReportBuilderPreviewTable preview={execution.payload} />
-            ) : (
-              <GenericReportViewer key={execution.id} report={report} parameters={execution.parameters} payload={execution.payload} />
-            )}
+            <ReportRuntimePreview key={execution.id} payload={execution.payload} />
           </section>
           <Card id="descargas" className="scroll-mt-6">
             <CardHeader><CardTitle>Descargar reporte</CardTitle></CardHeader>
