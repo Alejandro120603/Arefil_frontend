@@ -1,6 +1,10 @@
 # Arefil frontend — orchestrates the sibling FastAPI backend + this Next.js
 # frontend for local development. See README.md for the full setup story.
 
+# Per-machine overrides (BACKEND_PORT, FRONTEND_PORT, ...). Untracked and
+# optional; Next.js already reads this same file for its runtime env.
+-include .env.local
+
 BACKEND_DIR ?= ../Arefil_backend/backend
 FRONTEND_DIR ?= .
 BACKEND_PORT ?= 8000

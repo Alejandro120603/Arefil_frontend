@@ -6,8 +6,8 @@ set -euo pipefail
 
 : "${BACKEND_DIR:?BACKEND_DIR no definido}"
 : "${FRONTEND_DIR:?FRONTEND_DIR no definido}"
-: "${BACKEND_PORT:?BACKEND_PORT no definido}"
-: "${FRONTEND_PORT:?FRONTEND_PORT no definido}"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-3001}"
 : "${BACKEND_PY:?BACKEND_PY no definido}"
 
 BACKEND_DIR_ABS="$(cd "$BACKEND_DIR" && pwd)"
