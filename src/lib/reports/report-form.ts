@@ -1,16 +1,12 @@
 import type {
   ReportAdminDefinition,
   ReportCreateRequest,
-  ReportDataSourceType,
+  ReportDataSource,
   ReportParameter,
   ReportParameterDataType,
   ReportParameterInputType,
   ReportUpdateRequest,
 } from "@/types/api";
-
-export const KNOWN_REPORT_HANDLER = "price_list_comparison";
-export const REPEATABLE_REPORT_HANDLER = "repeatable_rows";
-export const REPORT_HANDLERS = [KNOWN_REPORT_HANDLER, REPEATABLE_REPORT_HANDLER] as const;
 
 export const DATA_TYPES: ReportParameterDataType[] = [
   "string",
@@ -35,48 +31,18 @@ export interface ReportFormValue {
   name: string;
   description: string;
   category: string;
-  data_source_type: ReportDataSourceType;
-  data_source_key: string | null;
-  query_text: string;
+  data_source_id: number | null;
   enabled: boolean;
   parameters: ReportParameter[];
 }
 
-export function handlerParameters(handler: string = KNOWN_REPORT_HANDLER): ReportParameter[] {
-  if (handler === REPEATABLE_REPORT_HANDLER) {
-    return [{
-      name: "price_list_id",
-      label: "Lista de precios",
-      data_type: "integer",
-      input_type: "select",
-      required: true,
-      default_value: null,
-      display_order: 0,
-      configuration_json: { options_source: "price_lists" },
-    }];
-  }
-  return [
-    {
-      name: "price_list_a_id",
-      label: "Lista base (A)",
-      data_type: "integer",
-      input_type: "select",
-      required: true,
-      default_value: null,
-      display_order: 0,
-      configuration_json: { options_source: "price_lists" },
-    },
-    {
-      name: "price_list_b_id",
-      label: "Lista comparación (B)",
-      data_type: "integer",
-      input_type: "select",
-      required: true,
-      default_value: null,
-      display_order: 1,
-      configuration_json: { options_source: "price_lists" },
-    },
-  ];
+export function parametersFromDataSource(source: ReportDataSource): ReportParameter[] {
+  return source.parameters.map((parameter) => ({
+    ...parameter,
+    configuration_json: parameter.configuration_json
+      ? { ...parameter.configuration_json }
+      : null,
+  }));
 }
 
 export function emptyParameter(displayOrder: number): ReportParameter {
@@ -98,10 +64,8 @@ export function emptyReportForm(): ReportFormValue {
     name: "",
     description: "",
     category: "",
-    data_source_type: "SQL_QUERY",
-    data_source_key: null,
-    query_text: "",
-    enabled: false,
+    data_source_id: null,
+    enabled: true,
     parameters: [],
   };
 }
@@ -112,9 +76,7 @@ export function reportFormFromDefinition(report: ReportAdminDefinition): ReportF
     name: report.name,
     description: report.description ?? "",
     category: report.category ?? "",
-    data_source_type: report.data_source_type,
-    data_source_key: report.data_source_key,
-    query_text: report.query_text ?? "",
+    data_source_id: report.data_source_id,
     enabled: report.enabled,
     parameters: report.parameters.map((parameter) => ({ ...parameter })),
   };
@@ -131,11 +93,8 @@ export function validateReportForm(value: ReportFormValue, creating: boolean): s
     errors.push("El código debe iniciar con una letra y contener solo letras, números o _. ");
   }
   if (!value.name.trim()) errors.push("El nombre es requerido.");
-  if (value.data_source_type === "SQL_QUERY" && !value.query_text.trim()) {
-    errors.push("Los reportes SQL_QUERY requieren una consulta.");
-  }
-  if (value.data_source_type === "HANDLER" && !REPORT_HANDLERS.includes(value.data_source_key as typeof REPORT_HANDLERS[number])) {
-    errors.push("Selecciona un handler permitido.");
+  if (value.data_source_id == null || value.data_source_id <= 0) {
+    errors.push("Selecciona una fuente de datos.");
   }
 
   const names = new Set<string>();
@@ -174,10 +133,8 @@ export function toReportRequest(value: ReportFormValue): ReportCreateRequest {
     name: value.name.trim(),
     description: value.description.trim() || null,
     category: value.category.trim() || null,
-    data_source_type: value.data_source_type,
-    data_source_key: value.data_source_type === "HANDLER" ? value.data_source_key : null,
-    query_text: value.data_source_type === "SQL_QUERY" ? value.query_text.trim() : null,
-    enabled: value.data_source_type === "SQL_QUERY" ? false : value.enabled,
+    data_source_id: value.data_source_id as number,
+    enabled: value.enabled,
     parameters: normalizedParameters(value.parameters),
   };
 }
@@ -188,9 +145,7 @@ export function toReportUpdate(value: ReportFormValue): ReportUpdateRequest {
     name: request.name,
     description: request.description,
     category: request.category,
-    data_source_type: request.data_source_type,
-    data_source_key: request.data_source_key,
-    query_text: request.query_text,
+    data_source_id: request.data_source_id,
     enabled: value.enabled,
     parameters: request.parameters,
   };

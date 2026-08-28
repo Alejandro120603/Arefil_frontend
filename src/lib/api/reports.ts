@@ -8,6 +8,7 @@ import type {
   ReportFieldDescriptor,
   ReportCreateRequest,
   ReportDefinition,
+  ReportDataSource,
   ReportOption,
   ReportPreviewResponse,
   ReportUpdateRequest,
@@ -20,6 +21,17 @@ function reportPath(code: string, suffix = ""): string {
 
 export function createReport(request: ReportCreateRequest, options?: RequestOptions): Promise<ReportDefinition> {
   return browserApiClient.apiPostJson<ReportDefinition>("/reports", request, options);
+}
+
+export function listReportDataSources(options?: RequestOptions): Promise<ReportDataSource[]> {
+  return browserApiClient.apiGet<ReportDataSource[]>("/report-data-sources", options);
+}
+
+export function getReportDataSource(code: string, options?: RequestOptions): Promise<ReportDataSource> {
+  return browserApiClient.apiGet<ReportDataSource>(
+    `/report-data-sources/${encodeURIComponent(code)}`,
+    options,
+  );
 }
 
 export function updateReport(
@@ -82,8 +94,8 @@ export function downloadReportData(
  */
 
 /** Allow-listed business fields a FIELD column may bind to. */
-export function getReportFieldCatalog(options?: RequestOptions): Promise<ReportFieldDescriptor[]> {
-  return browserApiClient.apiGet<ReportFieldDescriptor[]>("/report-builder/fields", options);
+export function getReportFieldCatalog(code: string, options?: RequestOptions): Promise<ReportFieldDescriptor[]> {
+  return browserApiClient.apiGet<ReportFieldDescriptor[]>(reportPath(code, "/builder/fields"), options);
 }
 
 export function getReportBuilder(code: string, options?: RequestOptions): Promise<ReportBuilderDefinition> {

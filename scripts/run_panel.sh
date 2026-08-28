@@ -25,15 +25,33 @@ echo "[run_panel] Ejecutando seed Donaldson (idempotente)..."
 BACKEND_PID=""
 FRONTEND_PID=""
 
+# SIGTERM, luego un margen acotado, y SIGKILL solo si hace falta. Esperar
+# indefinidamente a un hijo que ignoró SIGTERM dejaría la terminal colgada y
+# los puertos ocupados. Solo se señaliza a los dos PID que arrancó este script.
+stop_child() {
+  local pid="$1"
+  local attempt
+
+  [[ -n "$pid" ]] || return 0
+  kill -0 "$pid" 2>/dev/null || return 0
+
+  kill -TERM "$pid" 2>/dev/null || true
+
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+
+  echo "[run_panel] El proceso $pid ignoró SIGTERM; enviando SIGKILL."
+  kill -KILL "$pid" 2>/dev/null || true
+}
+
 cleanup() {
   trap - INT TERM EXIT
   echo ""
   echo "[run_panel] Deteniendo procesos..."
-  for pid in "$FRONTEND_PID" "$BACKEND_PID"; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid" 2>/dev/null || true
-    fi
-  done
+  stop_child "$FRONTEND_PID"
+  stop_child "$BACKEND_PID"
   for pid in "$FRONTEND_PID" "$BACKEND_PID"; do
     [[ -n "$pid" ]] && wait "$pid" 2>/dev/null || true
   done

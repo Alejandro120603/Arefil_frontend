@@ -55,11 +55,11 @@ import type {
 export function ReportBuilderWorkspace({
   code,
   parameters,
-  dataSourceKey,
+  dataSourceCapabilities,
 }: {
   code: string;
   parameters: ReportParameter[];
-  dataSourceKey: string | null;
+  dataSourceCapabilities: string[];
 }) {
   const [value, setValue] = useState<ReportBuilderFormValue | null>(null);
   const [fields, setFields] = useState<ReportFieldDescriptor[] | null>(null);
@@ -109,7 +109,7 @@ export function ReportBuilderWorkspace({
 
   useEffect(() => {
     const controller = new AbortController();
-    void getReportFieldCatalog({ signal: controller.signal })
+    void getReportFieldCatalog(code, { signal: controller.signal })
       .then((catalog) => { if (!controller.signal.aborted) setFields(catalog); })
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -117,7 +117,7 @@ export function ReportBuilderWorkspace({
         setCatalogError(getUserErrorMessage(error, "No se pudo cargar el catálogo de campos."));
       });
     return () => controller.abort();
-  }, []);
+  }, [code]);
 
   const changeRuntime = useCallback((name: string, next: string | boolean) => {
     setRuntimeValues((current) => ({ ...current, [name]: next }));
@@ -233,7 +233,7 @@ export function ReportBuilderWorkspace({
       )}
 
 
-      {dataSourceKey === "repeatable_rows" && (
+      {dataSourceCapabilities.includes("REPEATABLE_ROWS") && (
         <Card>
           <CardHeader><CardTitle>Renglones repetibles</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-4">

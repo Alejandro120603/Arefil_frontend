@@ -57,7 +57,7 @@ export function ReportParameterEditor({
 
       {locked && (
         <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-          El contrato del handler fija estos parámetros; sus nombres, tipos y fuentes no pueden modificarse.
+          La fuente fija las claves, tipos y obligatoriedad de adquisición. Puedes ajustar etiquetas, controles y valores predeterminados para la presentación del reporte.
         </p>
       )}
 
@@ -85,7 +85,6 @@ export function ReportParameterEditor({
                   <Input
                     id={`parameter-label-${index}`}
                     value={parameter.label}
-                    disabled={locked}
                     placeholder="Fecha inicial"
                     onChange={(event) => replace(index, { ...parameter, label: event.target.value })}
                   />
@@ -117,7 +116,6 @@ export function ReportParameterEditor({
                     id={`parameter-input-${index}`}
                     className={CONTROL_CLASS}
                     value={parameter.input_type}
-                    disabled={locked}
                     onChange={(event) => {
                       const input_type = event.target.value as ReportParameterInputType;
                       replace(index, {
@@ -139,14 +137,14 @@ export function ReportParameterEditor({
                       id={`parameter-source-${index}`}
                       className={CONTROL_CLASS}
                       value={parameter.configuration_json?.options_source ?? "price_lists"}
-                      disabled={locked}
                       onChange={(event) => replace(index, {
                         ...parameter,
-                        configuration_json: { options_source: event.target.value as "price_lists" | "suppliers" },
+                        configuration_json: { options_source: event.target.value as "price_lists" | "suppliers" | "products" },
                       })}
                     >
                       <option value="price_lists">Listas de precios</option>
                       <option value="suppliers">Proveedores</option>
+                      <option value="products">Productos</option>
                     </select>
                   </div>
                 )}
@@ -157,7 +155,6 @@ export function ReportParameterEditor({
                       id={`parameter-default-${index}`}
                       className={CONTROL_CLASS}
                       value={parameter.default_value == null ? "" : String(parameter.default_value)}
-                      disabled={locked}
                       onChange={(event) => replace(index, {
                         ...parameter,
                         default_value: event.target.value === "" ? null : event.target.value === "true",
@@ -172,7 +169,6 @@ export function ReportParameterEditor({
                       id={`parameter-default-${index}`}
                       type={parameter.data_type === "date" ? "date" : parameter.data_type === "datetime" ? "datetime-local" : "text"}
                       value={parameter.default_value == null ? "" : String(parameter.default_value)}
-                      disabled={locked}
                       onChange={(event) => replace(index, { ...parameter, default_value: event.target.value || null })}
                     />
                   )}

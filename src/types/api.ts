@@ -238,17 +238,17 @@ export interface ReportDefinition {
   description: string | null;
   category: string | null;
   enabled: boolean;
-  data_source_type: ReportDataSourceType;
+  data_source_id: number;
+  data_source: ReportDataSourceSummary;
   parameters: ReportParameter[];
   parameter_groups: ReportParameterGroup[];
   created_at: string;
   updated_at: string;
 }
 
-export type ReportDataSourceType = "HANDLER" | "SQL_QUERY";
 export type ReportParameterDataType = "integer" | "string" | "decimal" | "boolean" | "date" | "datetime";
 export type ReportParameterInputType = "text" | "number" | "date" | "datetime" | "checkbox" | "select";
-export type ReportOptionsSource = "price_lists" | "suppliers" | "products_by_price_list";
+export type ReportOptionsSource = "price_lists" | "suppliers" | "products" | "products_by_price_list";
 export type ReportScalarOptionsSource = Exclude<ReportOptionsSource, "products_by_price_list">;
 
 export interface ReportParameterConfiguration {
@@ -304,19 +304,28 @@ export interface ReportParameterGroup {
   fields: ReportParameterGroupField[];
 }
 
-export interface ReportAdminDefinition extends ReportDefinition {
-  data_source_key: string | null;
-  query_text: string | null;
+export interface ReportDataSourceSummary {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  capabilities: string[];
 }
+
+export interface ReportDataSource extends ReportDataSourceSummary {
+  parameters: ReportParameter[];
+  fields: ReportFieldDescriptor[];
+}
+
+export type ReportAdminDefinition = ReportDefinition;
 
 export interface ReportCreateRequest {
   code: string;
   name: string;
   description: string | null;
   category: string | null;
-  data_source_type: ReportDataSourceType;
-  data_source_key: string | null;
-  query_text: string | null;
+  data_source_id: number;
   enabled: boolean;
   parameters: ReportParameter[];
 }
@@ -330,7 +339,7 @@ export interface ReportPreviewResponse {
   truncated: boolean;
 }
 
-/** Generic payload returned by POST /reports/{code}/data for SQL_QUERY reports. */
+/** Generic tabular payload returned by reusable tabular data sources. */
 export interface SQLReportExecutionResponse {
   columns: string[];
   rows: Record<string, unknown>[];

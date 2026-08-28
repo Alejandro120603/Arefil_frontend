@@ -2,35 +2,68 @@
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportDefinitionForm } from "./report-definition-form";
-import type { ReportAdminDefinition, ReportDefinition } from "@/types/api";
+import type { ReportAdminDefinition, ReportDataSource, ReportDefinition } from "@/types/api";
 
-const { push, refresh, createReport, updateReport, previewReport } = vi.hoisted(() => ({
+const { push, refresh, createReport, updateReport, listReportDataSources } = vi.hoisted(() => ({
   push: vi.fn(),
   refresh: vi.fn(),
   createReport: vi.fn(),
   updateReport: vi.fn(),
-  previewReport: vi.fn(),
+  listReportDataSources: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
 vi.mock("@/lib/api/reports", () => ({
   createReport,
   updateReport,
-  previewReport,
-  getReportParameterOptions: vi.fn().mockResolvedValue([]),
+  listReportDataSources,
 }));
 
-const SQL_REPORT: ReportAdminDefinition = {
+const PRODUCT_SOURCE: ReportDataSource = {
+  id: 1,
   code: "PRODUCT_CATALOG",
+  name: "Catálogo de productos",
+  description: "Catálogo actual de productos disponibles.",
+  enabled: true,
+  capabilities: [],
+  parameters: [],
+  fields: [
+    { key: "product.part_number", label: "Número de parte", data_type: "string", group: "Producto", required_context: "product" },
+  ],
+};
+
+const HISTORY_SOURCE: ReportDataSource = {
+  id: 2,
+  code: "PRICE_HISTORY",
+  name: "Historial de precios",
+  description: "Evolución cronológica del precio.",
+  enabled: true,
+  capabilities: [],
+  parameters: [{
+    name: "product_id",
+    label: "Producto",
+    data_type: "integer",
+    input_type: "select",
+    required: true,
+    default_value: null,
+    display_order: 0,
+    configuration_json: { options_source: "products" },
+  }],
+  fields: [
+    { key: "price_history.absolute_change", label: "Cambio absoluto", data_type: "decimal", group: "Historial", required_context: "price_history" },
+  ],
+};
+
+const REPORT: ReportAdminDefinition = {
+  code: "PRODUCT_REPORT",
   name: "Catálogo",
   description: "Productos",
   category: "Catálogo",
-  enabled: false,
-  data_source_type: "SQL_QUERY",
-  data_source_key: null,
-  query_text: "SELECT id FROM products",
+  enabled: true,
+  data_source_id: PRODUCT_SOURCE.id,
+  data_source: PRODUCT_SOURCE,
   parameters: [],
   parameter_groups: [],
   created_at: "2026-08-25T12:00:00Z",
@@ -42,34 +75,70 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+beforeEach(() => {
+  listReportDataSources.mockResolvedValue([PRODUCT_SOURCE, HISTORY_SOURCE]);
+});
+
 describe("ReportDefinitionForm", () => {
-  it("creates a SQL report once and navigates only after backend confirmation", async () => {
-    const user = userEvent.setup();
-    createReport.mockResolvedValue({ ...SQL_REPORT } satisfies ReportDefinition);
+  it("loads reusable sources and never renders technical executors or SQL", async () => {
     render(<ReportDefinitionForm />);
 
+    expect(await screen.findByRole("option", { name: "Catálogo de productos" })).toBeTruthy();
+    expect(screen.queryByText("SQL_QUERY")).toBeNull();
+    expect(screen.queryByText("HANDLER")).toBeNull();
+    expect(screen.queryByLabelText("Consulta")).toBeNull();
+    expect(listReportDataSources).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects a source, shows metadata, and creates without query_text", async () => {
+    const user = userEvent.setup();
+    createReport.mockResolvedValue({ ...REPORT } satisfies ReportDefinition);
+    render(<ReportDefinitionForm />);
+
+    await screen.findByRole("option", { name: "Catálogo de productos" });
     await user.type(screen.getByLabelText("Nombre"), "Catálogo");
-    await user.type(screen.getByLabelText("Código"), "product-catalog");
-    await user.type(screen.getByLabelText("Consulta"), "SELECT id FROM products");
+    await user.type(screen.getByLabelText("Código"), "product-report");
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(PRODUCT_SOURCE.id));
+
+    expect(screen.getByText(PRODUCT_SOURCE.description!)).toBeTruthy();
+    expect(screen.getByText("Número de parte")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Crear reporte" }));
 
     await waitFor(() => expect(createReport).toHaveBeenCalledTimes(1));
-    expect(createReport.mock.calls[0]?.[0]).toMatchObject({
-      code: "PRODUCT_CATALOG",
-      data_source_type: "SQL_QUERY",
-      enabled: false,
-    });
-    expect(push).toHaveBeenCalledWith("/administracion/reportes/PRODUCT_CATALOG");
+    expect(createReport.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      code: "PRODUCT_REPORT",
+      data_source_id: PRODUCT_SOURCE.id,
+      enabled: true,
+      parameters: [],
+    }));
+    expect(createReport.mock.calls[0]?.[0]).not.toHaveProperty("query_text");
+    expect(createReport.mock.calls[0]?.[0]).not.toHaveProperty("data_source_type");
+    expect(push).toHaveBeenCalledWith("/administracion/reportes/PRODUCT_REPORT");
   });
 
-  it("preserves form data and never announces success when creation fails", async () => {
+  it("loads source parameters from backend metadata", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+    render(<ReportDefinitionForm />);
+    await screen.findByRole("option", { name: "Historial de precios" });
+
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(HISTORY_SOURCE.id));
+
+    expect(screen.getByDisplayValue("product_id")).toBeTruthy();
+    expect(screen.getByText("Cambio absoluto")).toBeTruthy();
+    expect((screen.getByDisplayValue("product_id") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Etiqueta") as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it("preserves form data and surfaces catalog and create errors", async () => {
     const user = userEvent.setup();
     createReport.mockRejectedValue(new Error("network"));
     render(<ReportDefinitionForm />);
+    await screen.findByRole("option", { name: "Catálogo de productos" });
 
     await user.type(screen.getByLabelText("Nombre"), "Sin guardar");
     await user.type(screen.getByLabelText("Código"), "FAILED_REPORT");
-    await user.type(screen.getByLabelText("Consulta"), "SELECT 1");
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(PRODUCT_SOURCE.id));
     await user.click(screen.getByRole("button", { name: "Crear reporte" }));
 
     expect(await screen.findByText("No se pudo guardar el reporte. Tus cambios siguen en el formulario.")).toBeTruthy();
@@ -77,46 +146,11 @@ describe("ReportDefinitionForm", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("previews a persisted clean SQL definition and identifies the limited sample", async () => {
-    const user = userEvent.setup();
-    previewReport.mockResolvedValue({ columns: ["id"], rows: [{ id: 1 }], row_count: 1, truncated: false });
-    render(<ReportDefinitionForm report={SQL_REPORT} />);
+  it("shows a migrated report whose source is now disabled", async () => {
+    listReportDataSources.mockResolvedValue([HISTORY_SOURCE]);
+    render(<ReportDefinitionForm report={{ ...REPORT, data_source: { ...PRODUCT_SOURCE, enabled: false } }} />);
 
-    await user.click(screen.getByRole("button", { name: "Probar consulta" }));
-
-    expect(await screen.findByText("Muestra de datos")).toBeTruthy();
-    expect(screen.getByText("Preview limitado")).toBeTruthy();
-    expect(previewReport).toHaveBeenCalledWith("PRODUCT_CATALOG", {});
-  });
-
-  it("switches to the only allow-listed handler and locks its contract", async () => {
-    const user = userEvent.setup();
-    render(<ReportDefinitionForm />);
-
-    await user.selectOptions(screen.getByLabelText("Tipo de fuente"), "HANDLER");
-
-    expect((screen.getByDisplayValue("price_list_a_id") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByDisplayValue("price_list_b_id") as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByText(/No se aceptan nombres de función/)).toBeTruthy();
-    expect(screen.queryByLabelText("Consulta")).toBeNull();
-  });
-
-  it("creates the repeatable_rows handler with an editable price-list context", async () => {
-    const user = userEvent.setup();
-    vi.spyOn(globalThis, "confirm").mockReturnValue(true);
-    createReport.mockResolvedValue({ ...SQL_REPORT, code: "COTIZACION", name: "Cotización", data_source_type: "HANDLER", enabled: true });
-    render(<ReportDefinitionForm />);
-    await user.type(screen.getByLabelText("Nombre"), "Cotización");
-    await user.type(screen.getByLabelText("Código"), "COTIZACION");
-    await user.selectOptions(screen.getByLabelText("Tipo de fuente"), "HANDLER");
-    await user.selectOptions(screen.getByLabelText("Handler permitido"), "repeatable_rows");
-
-    expect((screen.getByDisplayValue("price_list_id") as HTMLInputElement).disabled).toBe(false);
-    expect(screen.queryByDisplayValue("price_list_a_id")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Crear reporte" }));
-    await waitFor(() => expect(createReport).toHaveBeenCalledWith(expect.objectContaining({
-      code: "COTIZACION", data_source_type: "HANDLER", data_source_key: "repeatable_rows", enabled: true,
-      parameters: [expect.objectContaining({ name: "price_list_id", configuration_json: { options_source: "price_lists" } })],
-    })));
+    expect(await screen.findByText("Fuente deshabilitada")).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Catálogo de productos.*no disponible/ })).toBeTruthy();
   });
 });

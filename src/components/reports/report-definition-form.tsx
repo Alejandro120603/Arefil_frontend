@@ -1,33 +1,29 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CircleCheck, Loader2, Play, Save } from "lucide-react";
+import { CircleCheck, Database, Loader2, Save } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportParameterEditor } from "@/components/reports/report-parameter-editor";
-import { ReportPreviewTable } from "@/components/reports/report-preview-table";
-import { ReportRuntimeParameters, initialRuntimeValues } from "@/components/reports/report-runtime-parameters";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getUserErrorMessage } from "@/lib/api/errors";
-import { createReport, previewReport, updateReport } from "@/lib/api/reports";
+import { createReport, listReportDataSources, updateReport } from "@/lib/api/reports";
 import {
-  KNOWN_REPORT_HANDLER,
-  REPEATABLE_REPORT_HANDLER,
-  coerceRuntimeValue,
   emptyReportForm,
-  handlerParameters,
   normalizeReportCode,
+  parametersFromDataSource,
   reportFormFromDefinition,
   toReportRequest,
   toReportUpdate,
   validateReportForm,
   type ReportFormValue,
 } from "@/lib/reports/report-form";
-import type { ReportAdminDefinition, ReportDataSourceType, ReportPreviewResponse } from "@/types/api";
+import type { ReportAdminDefinition, ReportDataSource } from "@/types/api";
 
 const CONTROL_CLASS =
   "h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
@@ -36,45 +32,46 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
   const creating = report == null;
   const router = useRouter();
   const [value, setValue] = useState<ReportFormValue>(() => report ? reportFormFromDefinition(report) : emptyReportForm());
+  const [sources, setSources] = useState<ReportDataSource[] | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
-  const [runtimeValues, setRuntimeValues] = useState<Record<string, string | boolean>>(
-    () => initialRuntimeValues(report?.parameters ?? []),
-  );
-  const [preview, setPreview] = useState<ReportPreviewResponse | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewing, setPreviewing] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setSourceError(null);
+    listReportDataSources({ signal: controller.signal })
+      .then(setSources)
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setSourceError(getUserErrorMessage(error, "No se pudo cargar el catálogo de fuentes de datos."));
+        }
+      });
+    return () => controller.abort();
+  }, []);
+
+  const selectedSource = sources?.find((source) => source.id === value.data_source_id) ?? null;
+  const unavailableCurrentSource = report && value.data_source_id === report.data_source_id && !selectedSource
+    ? report.data_source
+    : null;
 
   function change(patch: Partial<ReportFormValue>) {
     setValue((current) => ({ ...current, ...patch }));
     setDirty(true);
     setSuccessMessage(null);
-    setPreview(null);
   }
 
-  function changeSource(next: ReportDataSourceType) {
-    if (next === value.data_source_type) return;
-    const hasConfiguration = value.query_text.trim() !== "" || value.parameters.length > 0;
-    if (hasConfiguration && !globalThis.confirm("Cambiar el tipo de fuente descartará la consulta y los parámetros actuales. ¿Continuar?")) {
+  function changeSource(rawId: string) {
+    const next = sources?.find((source) => source.id === Number(rawId));
+    if (!next || next.id === value.data_source_id) return;
+    if (value.parameters.length > 0 && !globalThis.confirm("Cambiar la fuente reemplazará los parámetros actuales por el contrato de la nueva fuente. ¿Continuar?")) {
       return;
     }
-    change({
-      data_source_type: next,
-      data_source_key: next === "HANDLER" ? KNOWN_REPORT_HANDLER : null,
-      query_text: "",
-      enabled: next === "HANDLER",
-      parameters: next === "HANDLER" ? handlerParameters() : [],
-    });
-  }
-
-  function changeHandler(next: string) {
-    if (next === value.data_source_key) return;
-    if (value.parameters.length > 0 && !globalThis.confirm("Cambiar el handler reemplazará los parámetros actuales. ¿Continuar?")) return;
-    change({ data_source_key: next, parameters: handlerParameters(next), enabled: true });
+    change({ data_source_id: next.id, parameters: parametersFromDataSource(next) });
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -94,9 +91,8 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
         return;
       }
       const updated = await updateReport(value.code, toReportUpdate(value));
-      setValue((current) => ({ ...current, enabled: updated.enabled, parameters: updated.parameters }));
+      setValue(reportFormFromDefinition(updated));
       setDirty(false);
-      setRuntimeValues(initialRuntimeValues(updated.parameters));
       setSuccessMessage("La configuración se guardó con la confirmación del backend.");
       router.refresh();
     } catch (error) {
@@ -104,24 +100,6 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
     } finally {
       savingRef.current = false;
       setSaving(false);
-    }
-  }
-
-  async function handlePreview() {
-    if (creating || dirty || value.data_source_type !== "SQL_QUERY" || previewing) return;
-    const parameters = Object.fromEntries(value.parameters.flatMap((parameter) => {
-      const coerced = coerceRuntimeValue(parameter, runtimeValues[parameter.name] ?? "");
-      return coerced === undefined ? [] : [[parameter.name, coerced]];
-    }));
-    setPreviewing(true);
-    setPreviewError(null);
-    setPreview(null);
-    try {
-      setPreview(await previewReport(value.code, parameters));
-    } catch (error) {
-      setPreviewError(getUserErrorMessage(error, "No se pudo probar la consulta."));
-    } finally {
-      setPreviewing(false);
     }
   }
 
@@ -152,7 +130,7 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
               className="font-mono"
               value={value.code}
               disabled={!creating}
-              placeholder="PRODUCT_CATALOG"
+              placeholder="MI_REPORTE"
               onBlur={() => creating && change({ code: normalizeReportCode(value.code) })}
               onChange={(event) => change({ code: event.target.value })}
             />
@@ -166,78 +144,96 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
             <Label htmlFor="report-category">Categoría</Label>
             <Input id="report-category" value={value.category} onChange={(event) => change({ category: event.target.value })} />
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="report-source">Tipo de fuente</Label>
-            <select id="report-source" className={CONTROL_CLASS} value={value.data_source_type} onChange={(event) => changeSource(event.target.value as ReportDataSourceType)}>
-              <option value="SQL_QUERY">SQL_QUERY</option>
-              <option value="HANDLER">HANDLER</option>
-            </select>
-          </div>
-          <label className="flex items-center gap-2 text-sm md:col-span-2">
-            <input
-              type="checkbox"
-              checked={value.enabled}
-              disabled={creating && value.data_source_type === "SQL_QUERY"}
-              onChange={(event) => change({ enabled: event.target.checked })}
-            />
+          <label className="flex items-center gap-2 self-end pb-2 text-sm">
+            <input type="checkbox" checked={value.enabled} onChange={(event) => change({ enabled: event.target.checked })} />
             Reporte habilitado
           </label>
-          {creating && value.data_source_type === "SQL_QUERY" && (
-            <p className="text-xs text-muted-foreground md:col-span-2">
-              El backend crea consultas nuevas deshabilitadas. Guárdala, pruébala y habilítala desde Configuración.
-            </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="flex items-center gap-2"><Database /> Fuente de datos</CardTitle></CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {sourceError && <ErrorAlert title="No se cargaron las fuentes" message={sourceError} />}
+          <div className="grid max-w-xl gap-1.5">
+            <Label htmlFor="report-data-source">Fuente de datos</Label>
+            <select
+              id="report-data-source"
+              className={CONTROL_CLASS}
+              value={value.data_source_id ?? ""}
+              disabled={sources == null || sources.length === 0}
+              onChange={(event) => changeSource(event.target.value)}
+            >
+              <option value="">Seleccionar fuente</option>
+              {unavailableCurrentSource && (
+                <option value={unavailableCurrentSource.id} disabled>
+                  {unavailableCurrentSource.name} (no disponible)
+                </option>
+              )}
+              {sources?.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}
+            </select>
+            {sources == null && !sourceError && <p className="text-xs text-muted-foreground">Cargando fuentes disponibles…</p>}
+          </div>
+
+          {(selectedSource || unavailableCurrentSource) && (
+            <div className="grid gap-4 rounded-xl border bg-muted/20 p-4">
+              <div>
+                <p className="font-medium">{selectedSource?.name ?? unavailableCurrentSource?.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  {selectedSource?.description ?? unavailableCurrentSource?.description ?? "Sin descripción."}
+                </p>
+              </div>
+              {unavailableCurrentSource && (
+                <Alert variant="destructive">
+                  <AlertTitle>Fuente deshabilitada</AlertTitle>
+                  <AlertDescription>Este reporte conserva su relación, pero la fuente ya no puede seleccionarse para reportes nuevos ni ejecutarse.</AlertDescription>
+                </Alert>
+              )}
+              {selectedSource && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <p className="mb-2 text-sm font-medium">Parámetros requeridos</p>
+                    {selectedSource.parameters.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No requiere parámetros.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {selectedSource.parameters.map((parameter) => (
+                          <Badge key={parameter.name} variant="outline">
+                            {parameter.label}{parameter.required ? " · requerido" : ""}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="mb-2 text-sm font-medium">Campos disponibles</p>
+                    {selectedSource.fields.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">La fuente migrada no declara un catálogo para Builder.</p>
+                    ) : (
+                      <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
+                        {selectedSource.fields.map((field) => <Badge key={field.key} variant="secondary">{field.label}</Badge>)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Fuente de datos</CardTitle></CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {value.data_source_type === "HANDLER" ? (
-            <div className="grid max-w-xl gap-1.5">
-              <Label htmlFor="report-handler">Handler permitido</Label>
-              <select id="report-handler" className={CONTROL_CLASS} value={value.data_source_key ?? KNOWN_REPORT_HANDLER} onChange={(event) => changeHandler(event.target.value)}>
-                <option value={KNOWN_REPORT_HANDLER}>Comparación de listas de precios</option>
-                <option value={REPEATABLE_REPORT_HANDLER}>Renglones repetibles por producto</option>
-              </select>
-              <p className="text-xs text-muted-foreground">No se aceptan nombres de función ni import paths arbitrarios.</p>
-            </div>
-          ) : (
-            <div className="grid gap-1.5">
-              <Label htmlFor="report-query">Consulta</Label>
-              <textarea
-                id="report-query"
-                className={`${CONTROL_CLASS} min-h-64 py-3 font-mono leading-6`}
-                value={value.query_text}
-                spellCheck={false}
-                placeholder="SELECT ...\nFROM ...\nWHERE supplier_id = :supplier_id"
-                onChange={(event) => change({ query_text: event.target.value })}
-              />
-              <p className="text-xs text-muted-foreground">La validación de seguridad y ejecución siempre ocurre en el backend.</p>
-            </div>
-          )}
+        <CardContent>
+          <ReportParameterEditor
+            parameters={value.parameters}
+            locked={value.data_source_id != null}
+            onChange={(parameters) => change({ parameters })}
+          />
         </CardContent>
       </Card>
 
-      <Card><CardContent><ReportParameterEditor parameters={value.parameters} locked={value.data_source_type === "HANDLER" && value.data_source_key === KNOWN_REPORT_HANDLER} onChange={(parameters) => change({ parameters })} /></CardContent></Card>
-
-      {!creating && value.data_source_type === "SQL_QUERY" && (
-        <Card>
-          <CardHeader><CardTitle>Probar consulta</CardTitle></CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {dirty && <p className="text-sm text-muted-foreground">Guarda los cambios antes de probar para que el backend ejecute esta misma definición.</p>}
-            <ReportRuntimeParameters code={value.code} parameters={value.parameters} values={runtimeValues} disabled={previewing} onChange={(name, runtimeValue) => setRuntimeValues((current) => ({ ...current, [name]: runtimeValue }))} />
-            <div><Button type="button" variant="outline" disabled={dirty || previewing} onClick={handlePreview}>
-              {previewing ? <Loader2 className="animate-spin" /> : <Play />}{previewing ? "Probando..." : "Probar consulta"}
-            </Button></div>
-            {previewError && <ErrorAlert title="El preview devolvió un error" message={previewError} />}
-            {preview && <ReportPreviewTable preview={preview} />}
-          </CardContent>
-        </Card>
-      )}
-
       <div className="flex justify-end">
-        <Button type="submit" disabled={saving}>
+        <Button type="submit" disabled={saving || sources == null}>
           {saving ? <Loader2 className="animate-spin" /> : <Save />}{saving ? "Guardando..." : creating ? "Crear reporte" : "Guardar cambios"}
         </Button>
       </div>
