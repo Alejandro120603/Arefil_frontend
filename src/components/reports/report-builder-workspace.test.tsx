@@ -46,10 +46,14 @@ const QUANTITY: ReportParameter = {
 
 const REPORT = {
   code: "COTIZACION", name: "Cotización", description: null, category: null, enabled: true,
-  data_source_type: "SQL_QUERY" as const, parameters: [QUANTITY],
+  data_source_id: 5,
+  data_source: {
+    id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización",
+    description: null, enabled: true, capabilities: ["REPEATABLE_ROWS"],
+  },
+  parameters: [QUANTITY],
   parameter_groups: [],
   created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
-  data_source_key: null, query_text: "SELECT 1",
 };
 
 const EMPTY_BUILDER: ReportBuilderDefinition = { report: REPORT, columns: [], parameter_groups: [], excel_layout: null };
@@ -80,8 +84,14 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function renderWorkspace(dataSourceKey: string | null = null) {
-  return render(<ReportBuilderWorkspace code="COTIZACION" parameters={[QUANTITY]} dataSourceKey={dataSourceKey} />);
+function renderWorkspace(dataSourceCapabilities: string[] = []) {
+  return render(
+    <ReportBuilderWorkspace
+      code="COTIZACION"
+      parameters={[QUANTITY]}
+      dataSourceCapabilities={dataSourceCapabilities}
+    />,
+  );
 }
 
 async function addFieldColumn(user: ReturnType<typeof userEvent.setup>, fieldKey: string) {
@@ -226,7 +236,7 @@ describe("ReportBuilderWorkspace", () => {
 
   it("configures and saves repeatable metadata in the same transactional builder request", async () => {
     const user = userEvent.setup();
-    renderWorkspace("repeatable_rows");
+    renderWorkspace(["REPEATABLE_ROWS"]);
     await user.click(await screen.findByRole("button", { name: "Agregar grupo repetible" }));
     expect((screen.getByLabelText("Nombre interno", { selector: "#group-name" }) as HTMLInputElement).value).toBe("items");
     expect(screen.getByDisplayValue("Producto")).toBeTruthy();

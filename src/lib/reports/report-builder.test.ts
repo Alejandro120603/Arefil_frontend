@@ -333,9 +333,11 @@ describe("serialization", () => {
     const builder: ReportBuilderDefinition = {
       report: {
         code: "COTIZACION", name: "Cotización", description: null, category: null, enabled: true,
-        data_source_type: "SQL_QUERY", parameters: [QUANTITY],
+        data_source_id: 5,
+        data_source: { id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización", description: null, enabled: true, capabilities: ["REPEATABLE_ROWS"] },
+        parameters: [QUANTITY],
         created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
-        data_source_key: null, query_text: "SELECT 1", parameter_groups: [],
+        parameter_groups: [],
       },
       columns: [column({ key: "b", display_order: 5 }), column({ key: "a", display_order: 1 })],
       parameter_groups: [],
@@ -350,9 +352,11 @@ describe("serialization", () => {
     const value = builderFormFromDefinition({
       report: {
         code: "NEW", name: "Nuevo", description: null, category: null, enabled: false,
-        data_source_type: "SQL_QUERY", parameters: [],
+        data_source_id: 1,
+        data_source: { id: 1, code: "PRODUCT_CATALOG", name: "Catálogo de productos", description: null, enabled: true, capabilities: [] },
+        parameters: [],
         created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
-        data_source_key: null, query_text: null, parameter_groups: [],
+        parameter_groups: [],
       },
       columns: [],
       parameter_groups: [],

@@ -22,7 +22,15 @@ const REPORT: ReportDefinition = {
   description: null,
   category: null,
   enabled: true,
-  data_source_type: "SQL_QUERY",
+  data_source_id: 1,
+  data_source: {
+    id: 1,
+    code: "PRODUCT_CATALOG",
+    name: "Catálogo de productos",
+    description: null,
+    enabled: true,
+    capabilities: [],
+  },
   parameters: [],
   parameter_groups: [],
   created_at: "2026-08-26T12:00:00Z",
@@ -53,7 +61,8 @@ describe("GenericReportRuntime", () => {
     const report: ReportDefinition = {
       ...REPORT,
       code: "PRICE_LIST_COMPARISON",
-      data_source_type: "HANDLER",
+      data_source_id: 4,
+      data_source: { ...REPORT.data_source, id: 4, code: "PRICE_LIST_COMPARISON", name: "Comparación" },
       parameters: [
         { name: "price_list_a_id", label: "Lista A", input_type: "select", data_type: "integer", required: true, default_value: 7, display_order: 0, configuration_json: { options_source: "price_lists" } },
         { name: "price_list_b_id", label: "Lista B", input_type: "select", data_type: "integer", required: true, default_value: 7, display_order: 1, configuration_json: { options_source: "price_lists" } },
@@ -68,7 +77,8 @@ describe("GenericReportRuntime", () => {
     const report: ReportDefinition = {
       ...REPORT,
       code: "COTIZACION",
-      data_source_type: "HANDLER",
+      data_source_id: 5,
+      data_source: { ...REPORT.data_source, id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización", capabilities: ["REPEATABLE_ROWS"] },
       parameters: [{ name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: 7, display_order: 0, configuration_json: { options_source: "price_lists" } }],
       parameter_groups: [{
         name: "items", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id", min_items: 1, max_items: 10, display_order: 0,

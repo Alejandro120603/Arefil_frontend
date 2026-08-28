@@ -5,10 +5,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ReportCatalogCards } from "./report-catalog-cards";
 import type { ReportDefinition } from "@/types/api";
 
-const BASE: Omit<ReportDefinition, "code" | "name" | "data_source_type"> = {
+const BASE: Omit<ReportDefinition, "code" | "name"> = {
   description: null,
   category: null,
   enabled: true,
+  data_source_id: 1,
+  data_source: {
+    id: 1,
+    code: "PRODUCT_CATALOG",
+    name: "Catálogo de productos",
+    description: null,
+    enabled: true,
+    capabilities: [],
+  },
   parameters: [],
   parameter_groups: [],
   created_at: "2026-08-25T12:00:00Z",
@@ -20,8 +29,8 @@ afterEach(cleanup);
 describe("ReportCatalogCards", () => {
   it("keeps A/B operational and exposes capability-aware actions for generic reports", () => {
     render(<ReportCatalogCards reports={[
-      { ...BASE, code: "PRICE_LIST_COMPARISON", name: "Comparación", data_source_type: "HANDLER" },
-      { ...BASE, code: "PRODUCT_CATALOG", name: "Productos", data_source_type: "SQL_QUERY" },
+      { ...BASE, code: "PRICE_LIST_COMPARISON", name: "Comparación" },
+      { ...BASE, code: "PRODUCT_CATALOG", name: "Productos" },
     ]} />);
 
     expect(screen.queryByRole("button", { name: /Diseñar/ })).toBeNull();
@@ -36,7 +45,7 @@ describe("ReportCatalogCards", () => {
 
   it("blocks runtime actions for disabled definitions without blocking configuration", () => {
     render(<ReportCatalogCards reports={[
-      { ...BASE, code: "DISABLED", name: "Deshabilitado", data_source_type: "SQL_QUERY", enabled: false },
+      { ...BASE, code: "DISABLED", name: "Deshabilitado", enabled: false },
     ]} />);
     expect((screen.getByRole("button", { name: "Generar" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("button", { name: /Configurar/ }).getAttribute("href")).toBe("/administracion/reportes/DISABLED");

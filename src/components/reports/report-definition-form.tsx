@@ -34,7 +34,6 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
   const [value, setValue] = useState<ReportFormValue>(() => report ? reportFormFromDefinition(report) : emptyReportForm());
   const [sources, setSources] = useState<ReportDataSource[] | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -43,7 +42,6 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
 
   useEffect(() => {
     const controller = new AbortController();
-    setSourceError(null);
     listReportDataSources({ signal: controller.signal })
       .then(setSources)
       .catch((error) => {
@@ -61,7 +59,6 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
 
   function change(patch: Partial<ReportFormValue>) {
     setValue((current) => ({ ...current, ...patch }));
-    setDirty(true);
     setSuccessMessage(null);
   }
 
@@ -92,7 +89,6 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
       }
       const updated = await updateReport(value.code, toReportUpdate(value));
       setValue(reportFormFromDefinition(updated));
-      setDirty(false);
       setSuccessMessage("La configuración se guardó con la confirmación del backend.");
       router.refresh();
     } catch (error) {
@@ -167,7 +163,7 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
               <option value="">Seleccionar fuente</option>
               {unavailableCurrentSource && (
                 <option value={unavailableCurrentSource.id} disabled>
-                  {unavailableCurrentSource.name} (no disponible)
+                  {unavailableCurrentSource.name} ({unavailableCurrentSource.enabled ? "no seleccionable" : "deshabilitada"})
                 </option>
               )}
               {sources?.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}
@@ -185,8 +181,12 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
               </div>
               {unavailableCurrentSource && (
                 <Alert variant="destructive">
-                  <AlertTitle>Fuente deshabilitada</AlertTitle>
-                  <AlertDescription>Este reporte conserva su relación, pero la fuente ya no puede seleccionarse para reportes nuevos ni ejecutarse.</AlertDescription>
+                  <AlertTitle>{unavailableCurrentSource.enabled ? "Fuente no seleccionable" : "Fuente deshabilitada"}</AlertTitle>
+                  <AlertDescription>
+                    {unavailableCurrentSource.enabled
+                      ? "Este reporte conserva su fuente migrada, pero no está disponible en el catálogo para reportes nuevos."
+                      : "Este reporte conserva su relación, pero la fuente ya no puede seleccionarse para reportes nuevos ni ejecutarse."}
+                  </AlertDescription>
                 </Alert>
               )}
               {selectedSource && (

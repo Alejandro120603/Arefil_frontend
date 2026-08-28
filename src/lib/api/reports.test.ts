@@ -51,14 +51,24 @@ describe("report manager API", () => {
   });
 
   it("creates, previews, updates, and exports through the browser proxy", async () => {
+    const dataSource = {
+      id: 1,
+      code: "PRODUCT_CATALOG",
+      name: "Catálogo de productos",
+      description: null,
+      enabled: true,
+      capabilities: [],
+    };
     const definition = {
       code: "PRODUCT_CATALOG",
       name: "Catálogo",
       description: null,
       category: null,
       enabled: false,
-      data_source_type: "SQL_QUERY" as const,
+      data_source_id: dataSource.id,
+      data_source: dataSource,
       parameters: [],
+      parameter_groups: [],
       created_at: "2026-08-25T12:00:00Z",
       updated_at: "2026-08-25T12:00:00Z",
     };
@@ -75,9 +85,7 @@ describe("report manager API", () => {
       name: definition.name,
       description: null,
       category: null,
-      data_source_type: "SQL_QUERY" as const,
-      data_source_key: null,
-      query_text: "SELECT id FROM products",
+      data_source_id: dataSource.id,
       enabled: false,
       parameters: [],
     };
@@ -102,7 +110,7 @@ describe("report manager API", () => {
       .mockResolvedValueOnce(Response.json({ detail: "near FROM: syntax error" }, { status: 422 })));
     const request = {
       code: "DUPLICATE", name: "Duplicate", description: null, category: null,
-      data_source_type: "SQL_QUERY" as const, data_source_key: null, query_text: "SELECT 1",
+      data_source_id: 1,
       enabled: false, parameters: [],
     };
     await expect(createReport(request)).rejects.toMatchObject({ status: 409 });
@@ -130,9 +138,9 @@ describe("report builder API", () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(catalog));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getReportFieldCatalog()).resolves.toEqual(catalog);
+    await expect(getReportFieldCatalog("COTIZACION")).resolves.toEqual(catalog);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/backend-api/report-builder/fields",
+      "/backend-api/reports/COTIZACION/builder/fields",
       expect.objectContaining({ method: "GET" }),
     );
   });

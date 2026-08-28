@@ -151,6 +151,15 @@ describe("ReportDefinitionForm", () => {
     render(<ReportDefinitionForm report={{ ...REPORT, data_source: { ...PRODUCT_SOURCE, enabled: false } }} />);
 
     expect(await screen.findByText("Fuente deshabilitada")).toBeTruthy();
-    expect(screen.getByRole("option", { name: /Catálogo de productos.*no disponible/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Catálogo de productos.*deshabilitada/ })).toBeTruthy();
+  });
+
+  it("keeps an internal migrated source visible only on its existing report", async () => {
+    listReportDataSources.mockResolvedValue([HISTORY_SOURCE]);
+    render(<ReportDefinitionForm report={REPORT} />);
+
+    expect(await screen.findByText("Fuente no seleccionable")).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Catálogo de productos.*no seleccionable/ })).toBeTruthy();
+    expect(screen.queryByText("SQL_QUERY")).toBeNull();
   });
 });
