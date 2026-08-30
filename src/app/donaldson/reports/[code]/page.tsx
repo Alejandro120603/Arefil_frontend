@@ -4,9 +4,10 @@ import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { GenericReportRuntime } from "@/components/reports/generic-report-runtime";
 import { Button } from "@/components/ui/button";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
-import { getReportDefinition } from "@/lib/api/report-catalog";
+import { getReportBuilderDefinition, getReportDefinition } from "@/lib/api/report-catalog";
+import { normalizeSummaries } from "@/lib/reports/report-builder";
 import { PRICE_LIST_COMPARISON_CODE } from "@/lib/reports/report-constants";
-import type { ReportDefinition } from "@/types/api";
+import type { ReportDefinition, ReportSummaryConfiguration } from "@/types/api";
 
 interface ReportOperationPageProps {
   params: Promise<{ code: string }>;
@@ -23,12 +24,22 @@ export default async function ReportOperationPage({ params, searchParams }: Repo
   const { code } = await params;
   const query = await searchParams;
   let report: ReportDefinition | null = null;
+  let summaries: ReportSummaryConfiguration[] = [];
   let errorMessage: string | null = null;
   try {
     report = await getReportDefinition(code);
     if (!report.enabled) errorMessage = "Este reporte está deshabilitado y no puede ejecutarse.";
   } catch (error) {
     errorMessage = getUserErrorMessage(error, error instanceof ApiError && error.status === 404 ? "El reporte solicitado no existe." : "No se pudo cargar el reporte.");
+  }
+  if (report != null && !errorMessage) {
+    try {
+      // Labels only: a report with no builder still runs, it just has no summary.
+      const builder = await getReportBuilderDefinition(code);
+      summaries = normalizeSummaries(builder.excel_layout?.totals ?? [], builder.columns);
+    } catch {
+      summaries = [];
+    }
   }
 
   return (
@@ -47,6 +58,7 @@ export default async function ReportOperationPage({ params, searchParams }: Repo
       {report != null && !errorMessage && (
         <GenericReportRuntime
           report={report}
+          summaries={summaries}
           initialParameters={code === PRICE_LIST_COMPARISON_CODE ? {
             price_list_a_id: positiveId(query.price_list_a_id ?? query.a),
             price_list_b_id: positiveId(query.price_list_b_id ?? query.b),

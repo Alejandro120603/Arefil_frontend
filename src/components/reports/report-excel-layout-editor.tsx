@@ -6,10 +6,8 @@ import {
   MAX_HEADER_ROW,
   MAX_SHEET_NAME_LENGTH,
   MIN_HEADER_ROW,
-  summableColumns,
-  toggleTotal,
 } from "@/lib/reports/report-builder";
-import type { ReportColumn, ReportExcelLayout } from "@/types/api";
+import type { ReportExcelLayout } from "@/types/api";
 
 const TOGGLES: { key: keyof ReportExcelLayout; label: string; hint: string }[] = [
   { key: "show_report_name", label: "Mostrar nombre del reporte", hint: "Escribe el nombre en la cabecera del archivo." },
@@ -21,23 +19,18 @@ const TOGGLES: { key: keyof ReportExcelLayout; label: string; hint: string }[] =
 /**
  * Edits `ReportExcelLayout` exactly as Backend #12 defines it. This is a
  * layout *contract*, not a spreadsheet designer: there is no canvas, no
- * cell-by-cell editing and no merging — those are out of scope for #13.
+ * cell-by-cell editing and no merging — the document designer is its own
+ * surface. Summaries live in `ReportSummaryEditor`, not here.
  */
 export function ReportExcelLayoutEditor({
   layout,
-  columns,
   disabled = false,
   onChange,
 }: {
   layout: ReportExcelLayout;
-  columns: ReportColumn[];
   disabled?: boolean;
   onChange: (layout: ReportExcelLayout) => void;
 }) {
-  // SUM is refused on hidden or non-numeric columns, so they are never offered.
-  const totalCandidates = summableColumns(columns);
-  const selectedTotals = new Set(layout.totals.map((total) => total.column_key));
-
   return (
     <div className="flex flex-col gap-5">
       <div className="grid gap-4 md:grid-cols-2">
@@ -99,28 +92,6 @@ export function ReportExcelLayoutEditor({
         ))}
       </div>
 
-      <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium">Fila de totales</p>
-        {totalCandidates.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Ninguna columna numérica visible puede totalizarse todavía.
-          </p>
-        ) : (
-          <div className="grid gap-2 md:grid-cols-2">
-            {totalCandidates.map((column) => (
-              <label key={column.key} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selectedTotals.has(column.key)}
-                  disabled={disabled}
-                  onChange={() => onChange(toggleTotal(layout, column.key))}
-                />
-                SUM de {column.label || column.key}
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

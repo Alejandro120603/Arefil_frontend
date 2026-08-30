@@ -45,6 +45,95 @@ export function parametersFromDataSource(source: ReportDataSource): ReportParame
   }));
 }
 
+/**
+ * Names the data source owns. Backend #20 stopped demanding an exact match
+ * between the report and the source contract: the report must declare *at
+ * least* these (with the same data type, and required when the source says
+ * so), and is free to declare its own on top — that split is what lets a
+ * quotation ask for Cliente or IVA % beside `price_list_id`.
+ */
+export function sourceParameterNames(source: ReportDataSource | null): string[] {
+  return source ? source.parameters.map((parameter) => parameter.name) : [];
+}
+
+export function isSourceParameter(name: string, sourceNames: readonly string[]): boolean {
+  return sourceNames.includes(name);
+}
+
+/**
+ * Re-seeds the source half of the list while keeping every manual parameter.
+ * The source contract always comes first so the runtime form reads top-down.
+ */
+export function mergeSourceParameters(
+  parameters: ReportParameter[],
+  source: ReportDataSource,
+  previousSourceNames: readonly string[] = [],
+): ReportParameter[] {
+  const contract = parametersFromDataSource(source);
+  const contractNames = new Set(contract.map((parameter) => parameter.name));
+  const manual = parameters.filter(
+    (parameter) => !contractNames.has(parameter.name) && !previousSourceNames.includes(parameter.name),
+  );
+  return [...contract, ...manual].map((parameter, display_order) => ({ ...parameter, display_order }));
+}
+
+/**
+ * Ready-made general parameters for a quotation-shaped report. They are plain
+ * report parameters with no backend meaning: the admin can rename, reorder or
+ * delete any of them, and nothing here binds the builder to one customer.
+ */
+export interface ReportParameterPreset {
+  key: string;
+  label: string;
+  parameter: Omit<ReportParameter, "display_order">;
+}
+
+function preset(
+  name: string,
+  label: string,
+  data_type: ReportParameterDataType,
+  input_type: ReportParameterInputType,
+): ReportParameterPreset {
+  return {
+    key: name,
+    label,
+    parameter: {
+      name,
+      label,
+      data_type,
+      input_type,
+      required: false,
+      default_value: null,
+      configuration_json: null,
+    },
+  };
+}
+
+export const REPORT_PARAMETER_PRESETS: ReportParameterPreset[] = [
+  preset("customer_name", "Cliente", "string", "text"),
+  preset("customer_email", "Email", "string", "text"),
+  preset("attention_to", "Atención", "string", "text"),
+  preset("requisition", "Requisición", "string", "text"),
+  preset("quotation_date", "Fecha", "date", "date"),
+  preset("commercial_conditions", "Condiciones", "string", "text"),
+  preset("tax_rate", "IVA %", "decimal", "number"),
+];
+
+/** Appends a preset under a name no other parameter is using. */
+export function appendPresetParameter(
+  parameters: ReportParameter[],
+  presetKey: string,
+): ReportParameter[] {
+  const found = REPORT_PARAMETER_PRESETS.find((candidate) => candidate.key === presetKey);
+  if (!found) return parameters;
+  const taken = new Set(parameters.map((parameter) => parameter.name.toLocaleLowerCase()));
+  let name = found.parameter.name;
+  for (let suffix = 2; taken.has(name.toLocaleLowerCase()); suffix += 1) {
+    name = `${found.parameter.name}_${suffix}`;
+  }
+  return [...parameters, { ...found.parameter, name, display_order: parameters.length }];
+}
+
 export function emptyParameter(displayOrder: number): ReportParameter {
   return {
     name: "",
@@ -86,7 +175,11 @@ export function normalizeReportCode(value: string): string {
   return value.trim().replaceAll("-", "_").replace(/\s+/g, "_").toUpperCase();
 }
 
-export function validateReportForm(value: ReportFormValue, creating: boolean): string[] {
+export function validateReportForm(
+  value: ReportFormValue,
+  creating: boolean,
+  source: ReportDataSource | null = null,
+): string[] {
   const errors: string[] = [];
   const code = normalizeReportCode(value.code);
   if (creating && !/^[A-Z][A-Z0-9_]*$/.test(code)) {
@@ -112,6 +205,21 @@ export function validateReportForm(value: ReportFormValue, creating: boolean): s
     }
     if (parameter.input_type === "select" && parameter.configuration_json == null) {
       errors.push(`El select '${parameter.name || position}' requiere una fuente de opciones.`);
+    }
+  }
+
+  // The source contract is a floor, not a ceiling: only its absence is an error.
+  for (const expected of source?.parameters ?? []) {
+    const declared = value.parameters.find((parameter) => parameter.name === expected.name);
+    if (!declared) {
+      errors.push(`La fuente requiere el parámetro '${expected.name}'.`);
+      continue;
+    }
+    if (declared.data_type !== expected.data_type) {
+      errors.push(`El tipo de '${expected.name}' no coincide con el contrato de la fuente.`);
+    }
+    if (expected.required && !declared.required) {
+      errors.push(`El parámetro '${expected.name}' es requerido por la fuente de datos.`);
     }
   }
   return errors;

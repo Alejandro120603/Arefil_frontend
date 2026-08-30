@@ -15,10 +15,11 @@ import { getUserErrorMessage } from "@/lib/api/errors";
 import { createReport, listReportDataSources, updateReport } from "@/lib/api/reports";
 import {
   emptyReportForm,
+  mergeSourceParameters,
   normalizeReportCode,
-  parametersFromDataSource,
   reportFormFromDefinition,
   toReportRequest,
+  sourceParameterNames,
   toReportUpdate,
   validateReportForm,
   type ReportFormValue,
@@ -56,6 +57,12 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
   const unavailableCurrentSource = report && value.data_source_id === report.data_source_id && !selectedSource
     ? report.data_source
     : null;
+  /**
+   * A migrated source is absent from the catalog, so its contract is unknown
+   * and nothing can be locked: the backend stays the one that refuses a report
+   * missing a parameter its source requires.
+   */
+  const contractNames = sourceParameterNames(selectedSource);
 
   function change(patch: Partial<ReportFormValue>) {
     setValue((current) => ({ ...current, ...patch }));
@@ -65,16 +72,21 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
   function changeSource(rawId: string) {
     const next = sources?.find((source) => source.id === Number(rawId));
     if (!next || next.id === value.data_source_id) return;
-    if (value.parameters.length > 0 && !globalThis.confirm("Cambiar la fuente reemplazará los parámetros actuales por el contrato de la nueva fuente. ¿Continuar?")) {
+    // Only the source half is replaced; the report's own parameters survive.
+    const previous = contractNames;
+    if (previous.length > 0 && !globalThis.confirm("Cambiar la fuente reemplazará los parámetros exigidos por la fuente anterior. Los parámetros propios del reporte se conservan. ¿Continuar?")) {
       return;
     }
-    change({ data_source_id: next.id, parameters: parametersFromDataSource(next) });
+    change({
+      data_source_id: next.id,
+      parameters: mergeSourceParameters(value.parameters, next, previous),
+    });
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (savingRef.current) return;
-    const validationErrors = validateReportForm(value, creating);
+    const validationErrors = validateReportForm(value, creating, selectedSource);
     setErrors(validationErrors);
     if (validationErrors.length > 0) return;
     savingRef.current = true;
@@ -226,7 +238,7 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
         <CardContent>
           <ReportParameterEditor
             parameters={value.parameters}
-            locked={value.data_source_id != null}
+            sourceParameterNames={contractNames}
             onChange={(parameters) => change({ parameters })}
           />
         </CardContent>

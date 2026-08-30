@@ -3,7 +3,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDate, formatDateTime } from "@/lib/format/date";
 import { formatCurrency, formatNumber, parseDecimal } from "@/lib/format/decimal";
-import type { ReportBuilderPreviewColumn, ReportBuilderPreviewResponse } from "@/types/api";
+import type {
+  ReportBuilderPreviewColumn,
+  ReportBuilderPreviewResponse,
+  ReportParameter,
+  ReportSummaryConfiguration,
+} from "@/types/api";
 
 /**
  * Renders `POST /reports/{code}/builder/preview` as the official web preview.
@@ -34,14 +39,47 @@ function formatCell(value: unknown, column: ReportBuilderPreviewColumn): string 
   }
 }
 
+/** A summary carries its own format; the row cell formatter handles the rest. */
+function formatSummary(value: unknown, summary: ReportSummaryConfiguration | null): string {
+  return formatCell(value, {
+    key: summary?.key ?? "",
+    label: summary?.label ?? "",
+    data_type: "decimal",
+    format_type: summary?.format_type ?? "number",
+  });
+}
+
 export function ReportBuilderPreviewTable({
   preview,
+  summaries = [],
+  parameters = [],
   title = "Vista previa del reporte",
 }: {
   preview: ReportBuilderPreviewResponse;
+  /** Saved summary configuration, the only place their labels exist. */
+  summaries?: ReportSummaryConfiguration[];
+  /** Report parameters, used to label the values the backend ran with. */
+  parameters?: ReportParameter[];
   title?: string;
 }) {
-  const hasTotals = preview.columns.some((column) => preview.totals[column.key] !== undefined);
+  const values = preview.summary ?? preview.totals;
+  // A pre-#20 layout keys its totals by column, and renders under that column.
+  const legacy = summaries.length === 0
+    && Object.keys(values).every((key) => preview.columns.some((column) => column.key === key));
+  const hasTotals = legacy && preview.columns.some((column) => values[column.key] !== undefined);
+  const summaryRows = legacy
+    ? []
+    : Object.entries(values).map(([key, value]) => {
+      const summary = summaries.find((candidate) => candidate.key === key) ?? null;
+      return { key, label: summary?.label || key, value: formatSummary(value, summary) };
+    });
+  const parameterRows = Object.entries(preview.parameters ?? {})
+    .filter(([, value]) => value != null && value !== "")
+    .map(([name, value]) => ({
+      name,
+      label: parameters.find((parameter) => parameter.name === name)?.label || name,
+      value: typeof value === "boolean" ? (value ? "Sí" : "No") : String(value),
+    }));
 
   return (
     <Card>
@@ -53,6 +91,17 @@ export function ReportBuilderPreviewTable({
             {preview.truncated && <Badge variant="secondary">Resultado truncado</Badge>}
           </div>
         </div>
+
+        {parameterRows.length > 0 && (
+          <dl className="flex flex-wrap gap-x-6 gap-y-1 rounded-lg border bg-muted/20 p-3 text-sm">
+            {parameterRows.map((parameter) => (
+              <div key={parameter.name} className="flex gap-1.5">
+                <dt className="text-muted-foreground">{parameter.label}:</dt>
+                <dd className="font-medium">{parameter.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
 
         {preview.columns.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
@@ -80,7 +129,7 @@ export function ReportBuilderPreviewTable({
               {hasTotals && (
                 <TableRow>
                   {preview.columns.map((column, index) => {
-                    const total = preview.totals[column.key];
+                    const total = values[column.key];
                     return (
                       <TableCell key={column.key} className="font-medium">
                         {total !== undefined ? formatCell(total, column) : index === 0 ? "Totales" : ""}
@@ -91,6 +140,17 @@ export function ReportBuilderPreviewTable({
               )}
             </TableBody>
           </Table>
+        )}
+
+        {summaryRows.length > 0 && (
+          <dl className="ml-auto flex w-full max-w-xs flex-col gap-1 text-sm">
+            {summaryRows.map((summary) => (
+              <div key={summary.key} className="flex justify-between gap-4 border-b py-1 last:border-b-0 last:font-semibold">
+                <dt>{summary.label}</dt>
+                <dd className="tabular-nums">{summary.value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
 
         {preview.truncated && (

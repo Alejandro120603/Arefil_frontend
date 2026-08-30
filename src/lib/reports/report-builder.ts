@@ -13,12 +13,14 @@ import type {
   ReportColumn,
   ReportColumnType,
   ReportExcelLayout,
+  ReportExcelLayoutResponse,
   ReportFieldDescriptor,
   ReportFormatType,
   ReportParameter,
   ReportParameterGroup,
   ReportParameterGroupField,
   ReportParameterDataType,
+  ReportSummaryConfiguration,
   ReportTotalConfiguration,
 } from "@/types/api";
 
@@ -96,7 +98,7 @@ export function builderFormFromDefinition(builder: ReportBuilderDefinition): Rep
       fields: group.fields.map((field) => ({ ...field, configuration_json: field.configuration_json ? { ...field.configuration_json } : null })),
     })),
     layout: builder.excel_layout
-      ? { ...builder.excel_layout, totals: builder.excel_layout.totals.map((total) => ({ ...total })) }
+      ? normalizeLayout(builder.excel_layout, builder.columns)
       : emptyExcelLayout(),
   };
 }
@@ -145,15 +147,141 @@ export function removeColumn(columns: ReportColumn[], index: number): ReportColu
 }
 
 /**
+ * Upgrades the pre-#20 totals row into summaries. A legacy total is a SUM whose
+ * key *is* the column key, so an old report keeps rendering the same number
+ * under the same label without the admin re-declaring anything.
+ */
+export function normalizeSummaries(
+  totals: ReportTotalConfiguration[],
+  columns: ReportColumn[],
+): ReportSummaryConfiguration[] {
+  const columnsByKey = new Map(columns.map((column) => [column.key, column]));
+  return totals.map((total) => {
+    if (isSummaryConfiguration(total)) {
+      return {
+        ...total,
+        column_key: total.operation === "SUM" ? total.column_key : null,
+        formula_definition: total.operation === "FORMULA" ? total.formula_definition : null,
+      };
+    }
+    const column = columnsByKey.get(total.column_key);
+    return {
+      key: total.column_key,
+      label: column?.label || total.column_key,
+      column_key: total.column_key,
+      operation: "SUM" as const,
+      formula_definition: null,
+      format_type: column?.format_type ?? null,
+    };
+  });
+}
+
+export function isSummaryConfiguration(
+  total: ReportTotalConfiguration,
+): total is ReportSummaryConfiguration {
+  return "key" in total;
+}
+
+export function normalizeLayout(
+  layout: ReportExcelLayoutResponse,
+  columns: ReportColumn[],
+): ReportExcelLayout {
+  return { ...layout, totals: normalizeSummaries(layout.totals, columns) };
+}
+
+/** A SUM the backend would refuse: only visible numeric columns can be folded. */
+export function summableColumns(columns: ReportColumn[]): ReportColumn[] {
+  return columns.filter((column) => column.visible && isNumericDataType(column.data_type));
+}
+
+/**
  * Dropping a column must also drop any SUM that pointed at it, otherwise the
- * save fails on a total the admin can no longer see to fix.
+ * save fails on a summary the admin can no longer see to fix. FORMULA
+ * summaries read parameters and other summaries, so columns never orphan them.
  */
 export function pruneTotals(layout: ReportExcelLayout, columns: ReportColumn[]): ReportExcelLayout {
-  const summable = new Set(
-    columns.filter((column) => column.visible && isNumericDataType(column.data_type)).map((column) => column.key),
+  const summable = new Set(summableColumns(columns).map((column) => column.key));
+  const totals = layout.totals.filter(
+    (total) => total.operation !== "SUM" || summable.has(total.column_key ?? ""),
   );
-  const totals = layout.totals.filter((total) => summable.has(total.column_key));
   return totals.length === layout.totals.length ? layout : { ...layout, totals };
+}
+
+function takenSummaryKeys(totals: ReportSummaryConfiguration[]): Set<string> {
+  return new Set(totals.map((total) => total.key.toLocaleLowerCase()));
+}
+
+export function newSumSummary(
+  column: ReportColumn,
+  totals: ReportSummaryConfiguration[],
+): ReportSummaryConfiguration {
+  return {
+    key: uniqueKey(column.key, takenSummaryKeys(totals)),
+    label: column.label || column.key,
+    column_key: column.key,
+    operation: "SUM",
+    formula_definition: null,
+    format_type: column.format_type ?? "number",
+  };
+}
+
+export function newFormulaSummary(totals: ReportSummaryConfiguration[]): ReportSummaryConfiguration {
+  return {
+    key: uniqueKey("resumen", takenSummaryKeys(totals)),
+    label: "Resumen calculado",
+    column_key: null,
+    operation: "FORMULA",
+    formula_definition: "",
+    format_type: "number",
+  };
+}
+
+/** Clears the half of the pair the chosen operation forbids. */
+export function retypeSummary(
+  summary: ReportSummaryConfiguration,
+  operation: ReportSummaryConfiguration["operation"],
+  columns: ReportColumn[],
+): ReportSummaryConfiguration {
+  if (summary.operation === operation) return summary;
+  if (operation === "SUM") {
+    const [candidate] = summableColumns(columns);
+    return { ...summary, operation, column_key: candidate?.key ?? null, formula_definition: null };
+  }
+  return { ...summary, operation, column_key: null, formula_definition: summary.formula_definition ?? "" };
+}
+
+export function moveSummary(
+  totals: ReportSummaryConfiguration[],
+  index: number,
+  direction: -1 | 1,
+): ReportSummaryConfiguration[] {
+  const destination = index + direction;
+  if (destination < 0 || destination >= totals.length) return totals;
+  const next = [...totals];
+  [next[index], next[destination]] = [next[destination], next[index]];
+  return next;
+}
+
+/**
+ * What a summary formula may legally reference: the other summaries and the
+ * report's numeric scalar parameters. Row values are gone by then — a summary
+ * runs once over the whole report, which is why IVA reads `tax_rate`, never a
+ * per-row column.
+ */
+export function allowedSummaryReferences(
+  totals: ReportSummaryConfiguration[],
+  parameters: ReportParameter[],
+  currentKey?: string,
+): FormulaReferenceOption[] {
+  const references: FormulaReferenceOption[] = totals
+    .filter((total) => total.key !== currentKey && COLUMN_KEY_PATTERN.test(total.key))
+    .map((total) => ({ name: total.key, label: total.label || total.key, origin: "column" as const }));
+  const taken = new Set(references.map((reference) => reference.name));
+  for (const parameter of parameters) {
+    if (!isNumericDataType(parameter.data_type) || taken.has(parameter.name)) continue;
+    references.push({ name: parameter.name, label: parameter.label, origin: "parameter" });
+  }
+  return references;
 }
 
 function uniqueKey(candidate: string, taken: Set<string>): string {
@@ -366,18 +494,6 @@ export function allowedFormulaReferences(
   return references;
 }
 
-export function summableColumns(columns: ReportColumn[]): ReportColumn[] {
-  return columns.filter((column) => column.visible && isNumericDataType(column.data_type));
-}
-
-export function toggleTotal(layout: ReportExcelLayout, columnKey: string): ReportExcelLayout {
-  const existing = layout.totals.some((total) => total.column_key === columnKey);
-  const totals: ReportTotalConfiguration[] = existing
-    ? layout.totals.filter((total) => total.column_key !== columnKey)
-    : [...layout.totals, { column_key: columnKey, operation: "SUM" }];
-  return { ...layout, totals };
-}
-
 export function validateBuilderForm(
   value: ReportBuilderFormValue,
   parameters: ReportParameter[],
@@ -538,24 +654,97 @@ export function validateBuilderForm(
     errors.push(`La fila de encabezado debe ser un entero entre ${MIN_HEADER_ROW} y ${MAX_HEADER_ROW}.`);
   }
 
-  const seenTotals = new Set<string>();
-  for (const total of layout.totals) {
-    if (seenTotals.has(total.column_key)) {
-      errors.push(`El total de '${total.column_key}' está duplicado.`);
-      continue;
-    }
-    seenTotals.add(total.column_key);
-    const column = columnsByKey.get(total.column_key);
-    if (!column) {
-      errors.push(`El total referencia la columna inexistente '${total.column_key}'.`);
-    } else if (!isNumericDataType(column.data_type)) {
-      errors.push(`SUM solo puede aplicarse a una columna numérica ('${total.column_key}').`);
-    } else if (!column.visible) {
-      errors.push(`SUM solo puede aplicarse a una columna visible ('${total.column_key}').`);
-    }
-  }
+  errors.push(...validateSummaries(layout.totals, columnsByKey, parametersByName));
 
   return errors;
+}
+
+/**
+ * Mirrors `_validate_layout`: keys are identifiers, unique, never a parameter
+ * name; SUM points at a visible numeric column; FORMULA references only other
+ * summaries and numeric parameters, without cycles.
+ */
+function validateSummaries(
+  totals: ReportSummaryConfiguration[],
+  columnsByKey: Map<string, ReportColumn>,
+  parametersByName: Map<string, ReportParameter>,
+): string[] {
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  const summariesByKey = new Map<string, ReportSummaryConfiguration>();
+
+  for (const [index, total] of totals.entries()) {
+    const name = total.key || `resumen ${index + 1}`;
+    if (!COLUMN_KEY_PATTERN.test(total.key)) {
+      errors.push(`El nombre interno del resumen '${name}' debe iniciar con letra y usar solo letras, números o _.`);
+    }
+    const folded = total.key.toLocaleLowerCase();
+    if (folded && seen.has(folded)) errors.push(`El resumen '${total.key}' está duplicado.`);
+    seen.add(folded);
+    if (!total.label.trim()) errors.push(`El resumen '${name}' requiere una etiqueta.`);
+    if (parametersByName.has(total.key)) {
+      errors.push(`El resumen '${total.key}' entra en conflicto con un parámetro del reporte.`);
+    }
+
+    if (total.operation === "SUM") {
+      const column = total.column_key ? columnsByKey.get(total.column_key) : undefined;
+      if (!total.column_key) {
+        errors.push(`El resumen '${name}' requiere una columna a sumar.`);
+      } else if (!column) {
+        errors.push(`El resumen '${name}' referencia la columna inexistente '${total.column_key}'.`);
+      } else if (!isNumericDataType(column.data_type)) {
+        errors.push(`SUM solo puede aplicarse a una columna numérica ('${total.column_key}').`);
+      } else if (!column.visible) {
+        errors.push(`SUM solo puede aplicarse a una columna visible ('${total.column_key}').`);
+      }
+    } else {
+      const formula = (total.formula_definition ?? "").trim();
+      if (!formula) errors.push(`El resumen '${name}' requiere una fórmula.`);
+      else if (formula.length > MAX_FORMULA_LENGTH) {
+        errors.push(`La fórmula del resumen '${name}' excede ${MAX_FORMULA_LENGTH} caracteres.`);
+      }
+    }
+    if (total.key) summariesByKey.set(total.key, total);
+  }
+
+  const dependencies = new Map<string, string[]>();
+  for (const total of totals) {
+    if (total.operation !== "FORMULA" || !total.key) continue;
+    const references: string[] = [];
+    for (const reference of formulaReferences(total.formula_definition ?? "")) {
+      if (summariesByKey.has(reference)) {
+        references.push(reference);
+        if (reference === total.key) errors.push(`La fórmula del resumen '${total.key}' no puede referenciarse a sí misma.`);
+        continue;
+      }
+      const parameter = parametersByName.get(reference);
+      if (!parameter) {
+        errors.push(`El resumen '${total.key}' referencia '${reference}', que no existe.`);
+      } else if (!isNumericDataType(parameter.data_type)) {
+        errors.push(`El resumen '${total.key}' referencia '${reference}', que no es numérico.`);
+      }
+    }
+    dependencies.set(total.key, references);
+  }
+
+  if (hasSummaryCycle(dependencies)) errors.push("Los resúmenes contienen una dependencia cíclica.");
+  return errors;
+}
+
+function hasSummaryCycle(dependencies: Map<string, string[]>): boolean {
+  const state = new Map<string, 1 | 2>();
+  const visit = (key: string): boolean => {
+    const current = state.get(key);
+    if (current === 1) return true;
+    if (current === 2) return false;
+    state.set(key, 1);
+    for (const dependency of dependencies.get(key) ?? []) {
+      if (visit(dependency)) return true;
+    }
+    state.set(key, 2);
+    return false;
+  };
+  return [...dependencies.keys()].some((key) => visit(key));
 }
 
 export function toBuilderRequest(value: ReportBuilderFormValue): ReportBuilderWriteRequest {
@@ -586,6 +775,15 @@ export function toBuilderRequest(value: ReportBuilderFormValue): ReportBuilderWr
       ...value.layout,
       sheet_name: value.layout.sheet_name.trim(),
       title: value.layout.title?.trim() || null,
+      totals: value.layout.totals.map((total) => ({
+        ...total,
+        key: total.key.trim(),
+        label: total.label.trim(),
+        // The backend forbids the unused half of the pair on each operation.
+        column_key: total.operation === "SUM" ? total.column_key : null,
+        formula_definition:
+          total.operation === "FORMULA" ? (total.formula_definition ?? "").trim() : null,
+      })),
     },
   };
 }

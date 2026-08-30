@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportDefinitionForm } from "./report-definition-form";
@@ -56,6 +56,30 @@ const HISTORY_SOURCE: ReportDataSource = {
   ],
 };
 
+const PRICE_LIST_PARAMETER = {
+  name: "price_list_id",
+  label: "Lista de precios",
+  data_type: "integer" as const,
+  input_type: "select" as const,
+  required: true,
+  default_value: null,
+  display_order: 0,
+  configuration_json: { options_source: "price_lists" as const },
+};
+
+const QUOTATION_SOURCE: ReportDataSource = {
+  id: 3,
+  code: "QUOTATION_ROWS",
+  name: "Renglones de cotización",
+  description: "Renglones capturados por producto.",
+  enabled: true,
+  capabilities: ["REPEATABLE_ROWS"],
+  parameters: [PRICE_LIST_PARAMETER],
+  fields: [
+    { key: "system.row_number", label: "Número de renglón", data_type: "integer", group: "Sistema", required_context: "row" },
+  ],
+};
+
 const REPORT: ReportAdminDefinition = {
   code: "PRODUCT_REPORT",
   name: "Catálogo",
@@ -70,13 +94,22 @@ const REPORT: ReportAdminDefinition = {
   updated_at: "2026-08-25T12:00:00Z",
 };
 
+const QUOTATION_REPORT: ReportAdminDefinition = {
+  ...REPORT,
+  code: "COTIZACION",
+  name: "Cotización",
+  data_source_id: QUOTATION_SOURCE.id,
+  data_source: QUOTATION_SOURCE,
+  parameters: [PRICE_LIST_PARAMETER],
+};
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
 beforeEach(() => {
-  listReportDataSources.mockResolvedValue([PRODUCT_SOURCE, HISTORY_SOURCE]);
+  listReportDataSources.mockResolvedValue([PRODUCT_SOURCE, HISTORY_SOURCE, QUOTATION_SOURCE]);
 });
 
 describe("ReportDefinitionForm", () => {
@@ -116,7 +149,7 @@ describe("ReportDefinitionForm", () => {
     expect(push).toHaveBeenCalledWith("/administracion/reportes/PRODUCT_REPORT");
   });
 
-  it("loads source parameters from backend metadata", async () => {
+  it("loads source parameters from backend metadata and locks their contract", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "confirm").mockReturnValue(true);
     render(<ReportDefinitionForm />);
@@ -124,10 +157,65 @@ describe("ReportDefinitionForm", () => {
 
     await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(HISTORY_SOURCE.id));
 
-    expect(screen.getByDisplayValue("product_id")).toBeTruthy();
+    const sourceSection = screen.getByRole("region", { name: "Parámetros de fuente" });
+    expect(within(sourceSection).getByDisplayValue("product_id")).toBeTruthy();
     expect(screen.getByText("Cambio absoluto")).toBeTruthy();
     expect((screen.getByDisplayValue("product_id") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText("Etiqueta") as HTMLInputElement).disabled).toBe(false);
+    expect(within(screen.getByRole("region", { name: "Parámetros del reporte" }))
+      .getByText(/no declara parámetros propios/)).toBeTruthy();
+  });
+
+  it("separates the source contract from the report's own parameters and saves both", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+    updateReport.mockResolvedValue({ ...QUOTATION_REPORT });
+    render(<ReportDefinitionForm report={QUOTATION_REPORT} />);
+    await screen.findByRole("option", { name: "Renglones de cotización" });
+
+    const sourceSection = screen.getByRole("region", { name: "Parámetros de fuente" });
+    expect((within(sourceSection).getByDisplayValue("price_list_id") as HTMLInputElement).disabled).toBe(true);
+
+    const reportSection = screen.getByRole("region", { name: "Parámetros del reporte" });
+    await user.selectOptions(within(reportSection).getByLabelText("Agregar parámetro común"), "customer_name");
+    await user.selectOptions(within(reportSection).getByLabelText("Agregar parámetro común"), "tax_rate");
+    // A report parameter stays editable, unlike the source contract above.
+    expect((screen.getByDisplayValue("customer_name") as HTMLInputElement).disabled).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
+    expect(updateReport.mock.calls[0]?.[1].parameters).toEqual([
+      expect.objectContaining({ name: "price_list_id", data_type: "integer", required: true, display_order: 0 }),
+      expect.objectContaining({ name: "customer_name", label: "Cliente", data_type: "string", display_order: 1 }),
+      expect.objectContaining({ name: "tax_rate", label: "IVA %", data_type: "decimal", display_order: 2 }),
+    ]);
+  });
+
+  it("keeps the report's own parameters when the data source changes", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+    render(<ReportDefinitionForm report={QUOTATION_REPORT} />);
+    await screen.findByRole("option", { name: "Historial de precios" });
+
+    const reportSection = screen.getByRole("region", { name: "Parámetros del reporte" });
+    await user.selectOptions(within(reportSection).getByLabelText("Agregar parámetro común"), "customer_name");
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(HISTORY_SOURCE.id));
+
+    expect(screen.getByDisplayValue("customer_name")).toBeTruthy();
+    expect(screen.queryByDisplayValue("price_list_id")).toBeNull();
+    expect(screen.getByDisplayValue("product_id")).toBeTruthy();
+  });
+
+  it("refuses to save a report that dropped a parameter its source requires", async () => {
+    const user = userEvent.setup();
+    render(<ReportDefinitionForm report={{ ...QUOTATION_REPORT, parameters: [] }} />);
+    await screen.findByRole("option", { name: "Renglones de cotización" });
+
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    expect(await screen.findByText("La fuente requiere el parámetro 'price_list_id'.")).toBeTruthy();
+    expect(updateReport).not.toHaveBeenCalled();
   });
 
   it("preserves form data and surfaces catalog and create errors", async () => {

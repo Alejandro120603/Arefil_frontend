@@ -19,7 +19,7 @@ import {
   type RuntimeGroupValues,
   type RuntimeParameterValue,
 } from "@/lib/reports/report-runtime";
-import type { ReportDefinition } from "@/types/api";
+import type { ReportDefinition, ReportSummaryConfiguration } from "@/types/api";
 
 interface SuccessfulExecution {
   id: number;
@@ -29,9 +29,12 @@ interface SuccessfulExecution {
 
 export function GenericReportRuntime({
   report,
+  summaries = [],
   initialParameters = {},
 }: {
   report: ReportDefinition;
+  /** Saved summary configuration; the dataset only carries their keys. */
+  summaries?: ReportSummaryConfiguration[];
   initialParameters?: Record<string, unknown>;
 }) {
   const groups = useMemo(() => report.parameter_groups ?? [], [report.parameter_groups]);
@@ -152,7 +155,12 @@ export function GenericReportRuntime({
       {execution != null && (
         <>
           <section id="ejecucion" className="scroll-mt-6">
-            <ReportRuntimePreview key={execution.id} payload={execution.payload} />
+            <ReportRuntimePreview
+              key={execution.id}
+              payload={execution.payload}
+              summaries={summaries}
+              parameters={report.parameters}
+            />
           </section>
           <Card id="descargas" className="scroll-mt-6">
             <CardHeader><CardTitle>Descargar reporte</CardTitle></CardHeader>

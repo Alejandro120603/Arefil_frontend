@@ -2,7 +2,7 @@ import "server-only";
 
 import { serverApiClient } from "./server-client";
 import type { RequestOptions } from "./client";
-import type { ReportAdminDefinition, ReportDefinition } from "@/types/api";
+import type { ReportAdminDefinition, ReportBuilderDefinition, ReportDefinition } from "@/types/api";
 
 function reportPath(code: string): string {
   return `/reports/${encodeURIComponent(code)}`;
@@ -18,4 +18,15 @@ export function getReportDefinition(code: string, options?: RequestOptions): Pro
 
 export function getAdminReportDefinition(code: string, options?: RequestOptions): Promise<ReportAdminDefinition> {
   return serverApiClient.apiGet<ReportAdminDefinition>(`/admin${reportPath(code)}`, options);
+}
+
+/**
+ * The saved builder, read server-side so the runtime can label the summaries
+ * the preview returns: the dataset answers `summary` keyed by key alone.
+ */
+export function getReportBuilderDefinition(
+  code: string,
+  options?: RequestOptions,
+): Promise<ReportBuilderDefinition> {
+  return serverApiClient.apiGet<ReportBuilderDefinition>(`${reportPath(code)}/builder`, options);
 }

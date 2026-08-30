@@ -331,6 +331,81 @@ describe("ReportBuilderWorkspace", () => {
     expect(await screen.findByText("El reporte COTIZACION no tiene builder configurado.")).toBeTruthy();
   });
 
+  it("configures Subtotal and IVA as report-level summaries and saves them with the builder", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await addFieldColumn(user, "price_list_item.unit_price");
+
+    await user.selectOptions(screen.getByLabelText("Agregar suma de columna"), "unit_price");
+    await user.clear(screen.getByLabelText("Etiqueta", { selector: "#summary-label-0" }));
+    await user.type(screen.getByLabelText("Etiqueta", { selector: "#summary-label-0" }), "Subtotal");
+    await user.clear(screen.getByLabelText("Nombre interno", { selector: "#summary-key-0" }));
+    await user.type(screen.getByLabelText("Nombre interno", { selector: "#summary-key-0" }), "subtotal");
+
+    await user.click(screen.getByRole("button", { name: /Agregar resumen calculado/ }));
+    await user.clear(screen.getByLabelText("Nombre interno", { selector: "#summary-key-1" }));
+    await user.type(screen.getByLabelText("Nombre interno", { selector: "#summary-key-1" }), "tax");
+    await user.clear(screen.getByLabelText("Etiqueta", { selector: "#summary-label-1" }));
+    await user.type(screen.getByLabelText("Etiqueta", { selector: "#summary-label-1" }), "IVA");
+    await user.type(screen.getByLabelText("Fórmula", { selector: "#summary-formula-1" }), "subtotal * quantity");
+
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1].excel_layout.totals).toEqual([
+      { key: "subtotal", label: "Subtotal", column_key: "unit_price", operation: "SUM", formula_definition: null, format_type: "number" },
+      { key: "tax", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "subtotal * quantity", format_type: "number" },
+    ]);
+  });
+
+  it("refuses a summary formula the backend would reject", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await addFieldColumn(user, "price_list_item.unit_price");
+    await user.click(screen.getByRole("button", { name: /Agregar resumen calculado/ }));
+    await user.type(screen.getByLabelText("Fórmula", { selector: "#summary-formula-0" }), "unit_price + 1");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    expect(await screen.findByText("El resumen 'resumen' referencia 'unit_price', que no existe.")).toBeTruthy();
+    expect(saveReportBuilderMock).not.toHaveBeenCalled();
+  });
+
+  it("renders the backend summary with the labels the builder declared", async () => {
+    getReportBuilderMock.mockResolvedValue({
+      ...SAVED_BUILDER,
+      excel_layout: {
+        ...SAVED_BUILDER.excel_layout!,
+        totals: [
+          { key: "subtotal", label: "Subtotal", column_key: "part_number", operation: "SUM", formula_definition: null, format_type: "currency" },
+          { key: "tax", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "subtotal * 0.16", format_type: "currency" },
+          { key: "grand_total", label: "Total", column_key: null, operation: "FORMULA", formula_definition: "subtotal + tax", format_type: "currency" },
+        ],
+      },
+    });
+    previewReportBuilderMock.mockResolvedValue({
+      columns: [{ key: "part_number", label: "SKU", data_type: "string", format_type: "text" }],
+      parameters: { quantity: 4 },
+      rows: [{ part_number: "P181050" }],
+      summary: { subtotal: "1000.00", tax: "160.00", grand_total: "1160.00" },
+      totals: { subtotal: "1000.00", tax: "160.00", grand_total: "1160.00" },
+      row_count: 1,
+      truncated: false,
+    } satisfies ReportBuilderPreviewResponse);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(await screen.findByRole("button", { name: /Generar vista previa/ }));
+
+    expect(await screen.findByText("$1,160.00")).toBeTruthy();
+    const summary = screen.getByText("$1,160.00").closest("dl") as HTMLElement;
+    expect(within(summary).getByText("Subtotal")).toBeTruthy();
+    expect(within(summary).getByText("IVA")).toBeTruthy();
+    expect(within(summary).getByText("Total")).toBeTruthy();
+    expect(within(summary).getByText("$160.00")).toBeTruthy();
+    // The parameters the backend actually ran with, labelled by the report.
+    expect(screen.getByText("Cantidad:")).toBeTruthy();
+  });
+
   it("refuses to preview unsaved changes", async () => {
     getReportBuilderMock.mockResolvedValue(SAVED_BUILDER);
     const user = userEvent.setup();

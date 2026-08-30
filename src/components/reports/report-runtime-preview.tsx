@@ -7,9 +7,20 @@ import {
   isReportBuilderPreviewResponse,
   isSQLReportExecutionResponse,
 } from "@/lib/reports/report-runtime";
+import type { ReportParameter, ReportSummaryConfiguration } from "@/types/api";
 
-export function ReportRuntimePreview({ payload }: { payload: unknown }) {
-  if (isReportBuilderPreviewResponse(payload)) return <ReportBuilderPreviewTable preview={payload} />;
+export function ReportRuntimePreview({
+  payload,
+  summaries = [],
+  parameters = [],
+}: {
+  payload: unknown;
+  summaries?: ReportSummaryConfiguration[];
+  parameters?: ReportParameter[];
+}) {
+  if (isReportBuilderPreviewResponse(payload)) {
+    return <ReportBuilderPreviewTable preview={payload} summaries={summaries} parameters={parameters} />;
+  }
   if (isPriceListComparisonResponse(payload)) return <PriceListComparisonPreview comparison={payload} />;
   if (isSQLReportExecutionResponse(payload)) {
     return (

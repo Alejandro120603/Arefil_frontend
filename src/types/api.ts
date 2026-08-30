@@ -398,12 +398,38 @@ export interface ReportColumn {
   width: number | null;
 }
 
-/** SUM is the only operation Backend #12 implements — do not widen locally. */
-export interface ReportTotalConfiguration {
+/**
+ * The pre-#20 totals row: one SUM pinned to a column, rendered under it.
+ * Reports saved before the summary contract still answer in this shape, so the
+ * builder reads it and upgrades it to `ReportSummaryConfiguration` in memory.
+ */
+export interface ReportLegacyTotalConfiguration {
   column_key: string;
   operation: "SUM";
 }
 
+/**
+ * A report-level summary (Backend #20). `SUM` folds one numeric visible column;
+ * `FORMULA` computes from other summaries and numeric report parameters — that
+ * is how IVA and Total exist once per report instead of once per row.
+ *
+ * The backend forbids the unused half of the pair: `SUM` requires `column_key`
+ * and rejects `formula_definition`, `FORMULA` requires the opposite.
+ */
+export interface ReportSummaryConfiguration {
+  key: string;
+  label: string;
+  column_key: string | null;
+  operation: "SUM" | "FORMULA";
+  formula_definition: string | null;
+  format_type: ReportFormatType | null;
+}
+
+export type ReportTotalConfiguration =
+  | ReportLegacyTotalConfiguration
+  | ReportSummaryConfiguration;
+
+/** The layout the UI edits and writes: totals are always the summary shape. */
 export interface ReportExcelLayout {
   sheet_name: string;
   title: string | null;
@@ -412,6 +438,11 @@ export interface ReportExcelLayout {
   show_parameters: boolean;
   freeze_header: boolean;
   header_row: number;
+  totals: ReportSummaryConfiguration[];
+}
+
+/** What the backend answers: a legacy report still returns the old totals. */
+export interface ReportExcelLayoutResponse extends Omit<ReportExcelLayout, "totals"> {
   totals: ReportTotalConfiguration[];
 }
 
@@ -420,7 +451,7 @@ export interface ReportBuilderDefinition {
   report: ReportAdminDefinition;
   columns: ReportColumn[];
   parameter_groups: ReportParameterGroup[];
-  excel_layout: ReportExcelLayout | null;
+  excel_layout: ReportExcelLayoutResponse | null;
 }
 
 /** Body of `PUT /reports/{code}/builder` — columns and layout save together. */
@@ -443,7 +474,12 @@ export interface ReportBuilderPreviewColumn {
  */
 export interface ReportBuilderPreviewResponse {
   columns: ReportBuilderPreviewColumn[];
+  /** Normalized scalar parameters the backend actually ran with (no groups). */
+  parameters?: Record<string, unknown>;
   rows: Record<string, unknown>[];
+  /** Report-level summaries keyed by summary key (Subtotal, IVA, Total…). */
+  summary?: Record<string, DecimalString | null>;
+  /** Same values as `summary`; kept because legacy layouts key it by column. */
   totals: Record<string, DecimalString | null>;
   row_count: number;
   truncated: boolean;

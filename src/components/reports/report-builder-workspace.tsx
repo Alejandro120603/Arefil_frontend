@@ -8,6 +8,7 @@ import { ReportColumnEditor } from "@/components/reports/report-column-editor";
 import { ReportExcelLayoutEditor } from "@/components/reports/report-excel-layout-editor";
 import { ReportParameterGroupEditor } from "@/components/reports/report-parameter-group-editor";
 import { ReportRepeatableParameters } from "@/components/reports/report-repeatable-parameters";
+import { ReportSummaryEditor } from "@/components/reports/report-summary-editor";
 import { ReportRuntimeParameters } from "@/components/reports/report-runtime-parameters";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ import type {
   ReportFieldDescriptor,
   ReportParameter,
   ReportParameterGroup,
+  ReportSummaryConfiguration,
 } from "@/types/api";
 
 /**
@@ -141,6 +143,13 @@ export function ReportBuilderWorkspace({
   function changeParameterGroups(parameterGroups: ReportParameterGroup[]) {
     setValue((current) => current && { ...current, parameterGroups });
     setRuntimeGroupValues(initialRuntimeGroupValues(parameterGroups));
+    setDirty(true);
+    setSaved(false);
+    setPreview(null);
+  }
+
+  function changeSummaries(totals: ReportSummaryConfiguration[]) {
+    setValue((current) => current && { ...current, layout: { ...current.layout, totals } });
     setDirty(true);
     setSaved(false);
     setPreview(null);
@@ -277,14 +286,26 @@ export function ReportBuilderWorkspace({
       </Card>
 
       <Card>
+        <CardHeader><CardTitle>Resumen y totales</CardTitle></CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
+            Valores calculados una sola vez para todo el reporte: Subtotal suma una columna, IVA y Total se derivan
+            de otros resúmenes y de los parámetros numéricos del reporte.
+          </p>
+          <ReportSummaryEditor
+            summaries={value.layout.totals}
+            columns={value.columns}
+            parameters={parameters}
+            disabled={saving}
+            onChange={changeSummaries}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle>Formato Excel</CardTitle></CardHeader>
         <CardContent>
-          <ReportExcelLayoutEditor
-            layout={value.layout}
-            columns={value.columns}
-            disabled={saving}
-            onChange={changeLayout}
-          />
+          <ReportExcelLayoutEditor layout={value.layout} disabled={saving} onChange={changeLayout} />
         </CardContent>
       </Card>
 
@@ -342,7 +363,13 @@ export function ReportBuilderWorkspace({
             </Button>
           </div>
           {previewError && <ErrorAlert title="La vista previa devolvió un error" message={previewError} />}
-          {preview && <ReportBuilderPreviewTable preview={preview} />}
+          {preview && (
+            <ReportBuilderPreviewTable
+              preview={preview}
+              summaries={value.layout.totals}
+              parameters={parameters}
+            />
+          )}
         </CardContent>
       </Card>
     </div>

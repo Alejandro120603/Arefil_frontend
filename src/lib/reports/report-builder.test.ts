@@ -17,8 +17,11 @@ import {
   retypeColumn,
   suggestedKeyFromField,
   summableColumns,
+  newFormulaSummary,
+  newSumSummary,
+  normalizeSummaries,
+  retypeSummary,
   toBuilderRequest,
-  toggleTotal,
   validateBuilderForm,
   withDisplayOrder,
   type ReportBuilderFormValue,
@@ -29,6 +32,7 @@ import type {
   ReportFieldDescriptor,
   ReportParameter,
   ReportParameterGroup,
+  ReportSummaryConfiguration,
 } from "@/types/api";
 
 const FIELDS: ReportFieldDescriptor[] = [
@@ -157,14 +161,19 @@ describe("column list mutation", () => {
     expect(remaining.map((item) => item.display_order)).toEqual([0, 1]);
   });
 
-  it("drops a total whose column no longer qualifies", () => {
+  it("drops a SUM summary whose column no longer qualifies", () => {
     const numeric = withDisplayOrder([column({ key: "total", data_type: "decimal", format_type: "currency" })]);
-    const layout = toggleTotal(emptyExcelLayout(), "total");
-    expect(layout.totals).toEqual([{ column_key: "total", operation: "SUM" }]);
+    const layout = { ...emptyExcelLayout(), totals: [newSumSummary(numeric[0], [])] };
+    expect(layout.totals[0]).toMatchObject({ key: "total", column_key: "total", operation: "SUM" });
     expect(pruneTotals(layout, []).totals).toEqual([]);
     expect(pruneTotals(layout, numeric).totals).toHaveLength(1);
     const hidden = numeric.map((item) => ({ ...item, visible: false }));
     expect(pruneTotals(layout, hidden).totals).toEqual([]);
+  });
+
+  it("keeps a FORMULA summary when the columns change", () => {
+    const layout = { ...emptyExcelLayout(), totals: [newFormulaSummary([])] };
+    expect(pruneTotals(layout, []).totals).toHaveLength(1);
   });
 
   it("offers SUM only on visible numeric columns", () => {
@@ -320,11 +329,103 @@ describe("builder validation", () => {
   it("rejects a total on a hidden column", () => {
     const value: ReportBuilderFormValue = {
       columns: [column({ key: "total", data_type: "decimal", format_type: "number", visible: false })],
-      parameterGroups: [], layout: { ...emptyExcelLayout(), totals: [{ column_key: "total", operation: "SUM" }] },
+      parameterGroups: [],
+      layout: {
+        ...emptyExcelLayout(),
+        totals: [{ key: "subtotal", label: "Subtotal", column_key: "total", operation: "SUM", formula_definition: null, format_type: "currency" }],
+      },
     };
     expect(validateBuilderForm(value, [], FIELDS)).toContain(
       "SUM solo puede aplicarse a una columna visible ('total').",
     );
+  });
+});
+
+describe("summaries", () => {
+  const lineTotal = column({
+    key: "line_total", column_type: "FORMULA", source_field: null,
+    formula_definition: "tax_rate * 2", data_type: "decimal", format_type: "currency",
+  });
+  const TAX_RATE: ReportParameter = {
+    name: "tax_rate", label: "IVA %", data_type: "decimal", input_type: "number",
+    required: true, default_value: null, display_order: 1, configuration_json: null,
+  };
+
+  function quotationSummaries(): ReportSummaryConfiguration[] {
+    return [
+      { key: "subtotal", label: "Subtotal", column_key: "line_total", operation: "SUM" as const, formula_definition: null, format_type: "currency" as const },
+      { key: "tax", label: "IVA", column_key: null, operation: "FORMULA" as const, formula_definition: "subtotal * tax_rate / 100", format_type: "currency" as const },
+      { key: "grand_total", label: "Total", column_key: null, operation: "FORMULA" as const, formula_definition: "subtotal + tax", format_type: "currency" as const },
+    ];
+  }
+
+  it("accepts subtotal, IVA and total for a quotation", () => {
+    const value: ReportBuilderFormValue = {
+      columns: [lineTotal], parameterGroups: [],
+      layout: { ...emptyExcelLayout(), totals: quotationSummaries() },
+    };
+    expect(validateBuilderForm(value, [TAX_RATE], FIELDS)).toEqual([]);
+  });
+
+  it("rejects an unknown or non-numeric reference in a summary formula", () => {
+    const totals = quotationSummaries();
+    totals[1] = { ...totals[1], formula_definition: "subtotal * missing" };
+    const value: ReportBuilderFormValue = {
+      columns: [lineTotal], parameterGroups: [],
+      layout: { ...emptyExcelLayout(), totals },
+    };
+    expect(validateBuilderForm(value, [TAX_RATE], FIELDS)).toContain(
+      "El resumen 'tax' referencia 'missing', que no existe.",
+    );
+  });
+
+  it("rejects duplicated keys, missing labels and parameter collisions", () => {
+    const value: ReportBuilderFormValue = {
+      columns: [lineTotal], parameterGroups: [],
+      layout: {
+        ...emptyExcelLayout(),
+        totals: [
+          { key: "tax_rate", label: "", column_key: "line_total", operation: "SUM", formula_definition: null, format_type: null },
+          { key: "tax_rate", label: "IVA", column_key: "line_total", operation: "SUM", formula_definition: null, format_type: null },
+        ],
+      },
+    };
+    const errors = validateBuilderForm(value, [TAX_RATE], FIELDS);
+    expect(errors).toContain("El resumen 'tax_rate' está duplicado.");
+    expect(errors).toContain("El resumen 'tax_rate' requiere una etiqueta.");
+    expect(errors).toContain("El resumen 'tax_rate' entra en conflicto con un parámetro del reporte.");
+  });
+
+  it("detects a cycle between two summary formulas", () => {
+    const value: ReportBuilderFormValue = {
+      columns: [lineTotal], parameterGroups: [],
+      layout: {
+        ...emptyExcelLayout(),
+        totals: [
+          { key: "a", label: "A", column_key: null, operation: "FORMULA", formula_definition: "b + 1", format_type: null },
+          { key: "b", label: "B", column_key: null, operation: "FORMULA", formula_definition: "a + 1", format_type: null },
+        ],
+      },
+    };
+    expect(validateBuilderForm(value, [], FIELDS)).toContain(
+      "Los resúmenes contienen una dependencia cíclica.",
+    );
+  });
+
+  it("upgrades a legacy totals row into a labelled summary", () => {
+    expect(normalizeSummaries([{ column_key: "line_total", operation: "SUM" }], [lineTotal])).toEqual([{
+      key: "line_total", label: lineTotal.label, column_key: "line_total",
+      operation: "SUM", formula_definition: null, format_type: "currency",
+    }]);
+  });
+
+  it("clears the half the chosen operation forbids", () => {
+    const summary = newSumSummary(lineTotal, []);
+    const asFormula = retypeSummary(summary, "FORMULA", [lineTotal]);
+    expect(asFormula).toMatchObject({ column_key: null, formula_definition: "" });
+    expect(retypeSummary(asFormula, "SUM", [lineTotal])).toMatchObject({
+      column_key: "line_total", formula_definition: null,
+    });
   });
 });
 
@@ -378,5 +479,47 @@ describe("serialization", () => {
       source_field: null, source_parameter: null, display_order: 0,
     });
     expect(request.excel_layout).toMatchObject({ sheet_name: "Cotización", title: null });
+  });
+
+  it("sends only the half of each summary its operation allows", () => {
+    const value: ReportBuilderFormValue = {
+      columns: [column({ key: "line_total", data_type: "decimal", format_type: "currency" })],
+      parameterGroups: [],
+      layout: {
+        ...emptyExcelLayout(),
+        totals: [
+          { key: " subtotal ", label: "  Subtotal ", column_key: "line_total", operation: "SUM", formula_definition: "ignored", format_type: "currency" },
+          { key: "tax", label: "IVA", column_key: "line_total", operation: "FORMULA", formula_definition: " subtotal * 0.16 ", format_type: "currency" },
+        ],
+      },
+    };
+    const [subtotal, tax] = toBuilderRequest(value).excel_layout.totals;
+    expect(subtotal).toEqual({
+      key: "subtotal", label: "Subtotal", column_key: "line_total",
+      operation: "SUM", formula_definition: null, format_type: "currency",
+    });
+    expect(tax).toEqual({
+      key: "tax", label: "IVA", column_key: null,
+      operation: "FORMULA", formula_definition: "subtotal * 0.16", format_type: "currency",
+    });
+  });
+
+  it("upgrades a saved legacy layout when the builder loads", () => {
+    const value = builderFormFromDefinition({
+      report: {
+        code: "LEGACY", name: "Legacy", description: null, category: null, enabled: true,
+        data_source_id: 1,
+        data_source: { id: 1, code: "PRODUCT_CATALOG", name: "Catálogo", description: null, enabled: true, capabilities: [] },
+        parameters: [], parameter_groups: [],
+        created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
+      },
+      columns: [column({ key: "total", label: "Precio total", data_type: "decimal", format_type: "currency" })],
+      parameter_groups: [],
+      excel_layout: { ...emptyExcelLayout(), totals: [{ column_key: "total", operation: "SUM" }] },
+    });
+    expect(value.layout.totals).toEqual([{
+      key: "total", label: "Precio total", column_key: "total",
+      operation: "SUM", formula_definition: null, format_type: "currency",
+    }]);
   });
 });

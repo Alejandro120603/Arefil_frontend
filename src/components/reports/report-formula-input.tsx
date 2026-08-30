@@ -7,6 +7,7 @@ import {
   allowedFormulaReferences,
   formulaReferences,
   isNumericDataType,
+  type FormulaReferenceOption,
 } from "@/lib/reports/report-builder";
 import type { ReportColumn, ReportParameter } from "@/types/api";
 
@@ -40,11 +41,48 @@ export function ReportFormulaInput({
   disabled?: boolean;
   onChange: (formula: string) => void;
 }) {
-  const formula = column.formula_definition ?? "";
-  const references = allowedFormulaReferences(columns, parameters, column.key);
+  return (
+    <ReportFormulaExpressionInput
+      inputId={`column-formula-${index}`}
+      formula={column.formula_definition ?? ""}
+      references={allowedFormulaReferences(columns, parameters, column.key)}
+      hint={
+        parameters.some((parameter) => !isNumericDataType(parameter.data_type))
+          ? "Solo las columnas y parámetros numéricos (entero o decimal) pueden usarse en una fórmula."
+          : null
+      }
+      disabled={disabled}
+      onChange={onChange}
+    />
+  );
+}
+
+/**
+ * The editor itself, reused by column formulas and by report-level summaries:
+ * both send a plain expression the backend tokenizes and evaluates with exact
+ * Decimals — only the set of legal references differs.
+ */
+export function ReportFormulaExpressionInput({
+  inputId,
+  formula,
+  references,
+  label = "Fórmula",
+  placeholder = "price * quantity",
+  hint = null,
+  disabled = false,
+  onChange,
+}: {
+  inputId: string;
+  formula: string;
+  references: FormulaReferenceOption[];
+  label?: string;
+  placeholder?: string;
+  hint?: string | null;
+  disabled?: boolean;
+  onChange: (formula: string) => void;
+}) {
   const known = new Map(references.map((reference) => [reference.name, reference]));
   const unknown = formulaReferences(formula).filter((reference) => !known.has(reference));
-  const inputId = `column-formula-${index}`;
 
   function append(token: string) {
     const separator = formula.length === 0 || formula.endsWith(" ") ? "" : " ";
@@ -53,13 +91,13 @@ export function ReportFormulaInput({
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3">
-      <Label htmlFor={inputId}>Fórmula</Label>
+      <Label htmlFor={inputId}>{label}</Label>
       <Input
         id={inputId}
         className="font-mono"
         value={formula}
         spellCheck={false}
-        placeholder="price * quantity"
+        placeholder={placeholder}
         disabled={disabled}
         aria-invalid={unknown.length > 0}
         aria-describedby={unknown.length > 0 ? `${inputId}-error` : undefined}
@@ -113,10 +151,8 @@ export function ReportFormulaInput({
         </p>
       )}
 
-      {parameters.some((parameter) => !isNumericDataType(parameter.data_type)) && references.length === 0 && (
-        <p className="text-xs text-muted-foreground">
-          Solo las columnas y parámetros numéricos (entero o decimal) pueden usarse en una fórmula.
-        </p>
+      {hint && references.length === 0 && (
+        <p className="text-xs text-muted-foreground">{hint}</p>
       )}
     </div>
   );
