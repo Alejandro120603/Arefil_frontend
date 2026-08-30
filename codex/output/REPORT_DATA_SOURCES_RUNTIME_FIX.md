@@ -5,19 +5,19 @@ Estado: **FIXED**
 
 ## 1. Estado inicial de Frontend
 
-- Ruta: `/home/daniel12/Projects/Arefil_frontend`
-- Árbol de trabajo limpio; sin cambios staged.
+- Ruta: `/home/daniel12/Projects/Arefil_frontend`.
 - Branch: `feat/report-data-sources`.
-- HEAD: `0b81371 (HEAD -> feat/report-data-sources, origin/feat/report-data-sources) prueba`.
-- No había procesos Next de Arefil ni listener en 3000/3001.
+- HEAD: `8b25f24 actualizacion reportes`.
+- Working tree limpio; sin cambios staged y sin stashes reportados.
+- No había una instancia de Arefil, pero Tesis ocupaba el puerto 3000.
 
 ## 2. Estado inicial de Backend
 
-- Ruta: `/home/daniel12/Projects/Arefil_backend`
-- Árbol de trabajo limpio; sin cambios staged.
+- Ruta: `/home/daniel12/Projects/Arefil_backend`.
 - Branch: `feat/report-data-sources`.
-- HEAD: `4c3ab27 (HEAD -> feat/report-data-sources, origin/feat/report-data-sources) prueba`.
-- No había procesos Uvicorn de Arefil ni listener en 8000/8001.
+- HEAD: `474d178 actualizacion de reportes`.
+- Working tree limpio; sin cambios staged y sin stashes reportados.
+- Arefil no estaba levantado. El puerto 8001 estaba ocupado por el backend de Tesis.
 
 ## 3. Branches
 
@@ -25,227 +25,229 @@ Ambos repositorios se confirmaron expresamente en `feat/report-data-sources`. No
 
 ## 4. Commits iniciales
 
-- Frontend: `0b81371 prueba`.
-- Backend: `4c3ab27 prueba`.
-- No se creó ningún commit ni se ejecutó push.
+- Frontend: `8b25f24 actualizacion reportes`.
+- Backend: `474d178 actualizacion de reportes`.
+- No se creó ningún commit ni se ejecutó push o force push.
 
 ## 5. Puertos encontrados
 
-El preflight no encontró listeners en 3000, 3001, 8000 ni 8001. La configuración efectiva de Arefil resultó ser:
+| Puerto | PID/proyecto | Estado |
+|---:|---|---|
+| 3000 | Next.js, Tesis_jmob | Ocupado por proyecto ajeno |
+| 3001 | — | Libre; asignado a Arefil frontend |
+| 8000 | — | Libre; asignado a Arefil backend |
+| 8001 | PID 66052, Tesis_jmob backend | Ocupado por proyecto ajeno |
 
-- Frontend: `127.0.0.1:3001`.
-- Backend: `127.0.0.1:8001`.
-
-Durante `make run_panel`, `ss` confirmó Next en 3001 y Uvicorn en 8001.
+Durante la ejecución, Arefil escuchó exclusivamente en `127.0.0.1:8000` y `:3001`.
 
 ## 6. Procesos encontrados
 
-Inicialmente no había procesos `next` ni `uvicorn`. Durante la validación se identificaron exclusivamente procesos con estos working directories:
+- PID 66052: Uvicorn, CWD `/home/daniel12/Projects/Tesis_jmob/backend`, puerto 8001.
+- PID 66081/66094/66106/66170: Next.js, CWD `/home/daniel12/Projects/Tesis_jmob/frontend`, puerto 3000.
 
-- Next: `/home/daniel12/Projects/Arefil_frontend`.
-- Uvicorn: `/home/daniel12/Projects/Arefil_backend/backend`.
-
-Todos los procesos iniciados para la prueba fueron detenidos mediante el cleanup de `scripts/run_panel.sh`.
+No se envió ninguna señal a esos PID. Los procesos de Arefil iniciados por `make run_panel` tuvieron CWD exclusivamente en los repos de Arefil y se detuvieron mediante el cleanup del script. La comprobación final no encontró procesos de Arefil ni `chromedriver`, y dejó libres 3001, 8000 y 9515. Tesis volvió a estar activo externamente en 8001 (backend) y 3002 (frontend); no se intervino.
 
 ## 7. Configuración `.env` relevante
 
-Frontend `.env.local` existente, ignorado por Git y sin modificaciones:
+El override inicial apuntaba a 8001, ocupado por Tesis. Se corrigió únicamente `.env.local`, ignorado por Git:
 
 ```text
 NEXT_PUBLIC_API_URL=/backend-api
-BACKEND_PORT=8001
+BACKEND_PORT=8000
 FRONTEND_PORT=3001
-API_INTERNAL_URL=http://127.0.0.1:8001/api
+API_INTERNAL_URL=http://127.0.0.1:8000/api
 ```
 
-Backend `.env`:
+`.env.example` ya usa `API_INTERNAL_URL=http://127.0.0.1:8000/api`; no requirió cambios. El backend usa `DATABASE_URL=sqlite:///./data/arefil.db`. No se imprimieron secretos.
 
-```text
-DATABASE_URL=sqlite:///./data/arefil.db
-```
-
-La configuración de proxy era consistente. El fallo de navegador adicional fue una protección de Next.js 16: los assets dev solicitados desde `127.0.0.1` eran bloqueados porque el servidor se inicializa como `localhost`. Se añadió `allowedDevOrigins: ["127.0.0.1"]` siguiendo la documentación incluida en la versión instalada de Next.
+`server-client.ts` conserva `http://127.0.0.1:8000/api` únicamente como fallback. `next.config.ts` ya contiene `allowedDevOrigins: ["127.0.0.1"]`, conforme a la documentación local de Next.js 16.3.0.
 
 ## 8. Alembic current/head antes
 
 - `current`: `f3a7c9e4b612 (head)`.
 - `heads`: `f3a7c9e4b612 (head)`.
-- `upgrade head` se ejecutó y fue no-op.
-- Se observó un warning no bloqueante del entorno Python sobre `sys.prefix`; Alembic funcionó correctamente.
+- Se revisó el historial completo desde `fa59ceac2a5d` hasta `f3a7c9e4b612`.
+- `alembic upgrade head` se ejecutó directamente y mediante `make run_panel`; ambos fueron no-op.
+- El entorno Python mostró un warning no bloqueante de `sys.prefix`.
 
 ## 9. Estado de SQLite antes
 
 SQLite efectiva: `/home/daniel12/Projects/Arefil_backend/backend/data/arefil.db`.
 
-Antes de seed/E2E:
-
-- 3 reportes; 0 `data_source_id` nulos.
-- 6 fuentes totales: 5 base y `LEGACY_SQL_2`.
-- 5 parámetros.
-- 1 grupo de parámetros, con 3 campos.
-- 10 columnas Builder.
-- 1 configuración Excel.
-
-`report_data_sources` y `report_definitions.data_source_id NOT NULL` ya existían.
+- `report_data_sources`: existente.
+- `report_definitions.data_source_id`: `INTEGER NOT NULL`.
+- 6 fuentes totales: cinco base y `LEGACY_SQL_2` interna.
+- 5 reportes, 5 parámetros, 1 grupo con 3 campos, 14 columnas Builder y 3 layouts Excel.
+- 0 `data_source_id` nulos y `PRAGMA foreign_key_check` sin errores.
+- SHA-256 del estado de tablas de reportes: `ff7588793046569a4d048dab6f0593fe8600bb52641eb0846d19a21ce0c2c49f`.
 
 ## 10. Causas confirmadas
 
-- **C — CONFIRMADA:** el backend no estaba levantado al iniciar el diagnóstico.
-- **K — CONFIRMADA:** fixtures/tests frontend todavía utilizaban `SQL_QUERY`, `data_source_type`, `data_source_key`, `query_text` y `dataSourceKey`. Causaban 20 tests fallidos, typecheck fallido y build fallido.
-- **O — CONFIRMADA PARCIALMENTE:** `LEGACY_SQL_2` estaba correctamente preservada y relacionada, pero el endpoint de catálogo la listaba como seleccionable. Se corrigió el catálogo sin eliminar ni inutilizar la fuente.
-- **Next.js dev origin — CONFIRMADA:** `127.0.0.1:3001` recibía HTML, pero Next 16 bloqueaba chunks/HMR; React no hidrataba y el selector permanecía deshabilitado.
-- **Lint frontend — CONFIRMADA:** `setSourceError(null)` se llamaba sincrónicamente dentro de un effect y existía estado `dirty` sin uso.
+- **B — CONFIRMADA:** Tesis ocupaba los puertos asumidos inicialmente, 3000 y 8001.
+- **C — CONFIRMADA:** no había una instancia de backend Arefil levantada.
+- **G — CONFIRMADA:** `API_INTERNAL_URL` y `BACKEND_PORT` apuntaban a 8001, donde respondía otro proyecto.
+
+La causa raíz runtime fue la combinación de Arefil detenido y el override local dirigido al backend de Tesis. La arquitectura nueva y sus correcciones de código ya estaban presentes en los HEAD actuales.
 
 ## 11. Causas descartadas o no aplicables
 
-- **A — DESCARTADA:** no había frontend viejo ejecutándose.
-- **B — DESCARTADA:** ningún otro proyecto ocupaba 3000/3001/8000/8001.
+- **A — DESCARTADA:** no había frontend viejo de Arefil ejecutándose.
 - **D — DESCARTADA:** Alembic ya estaba en head.
-- **E — DESCARTADA:** `report_data_sources` existía.
-- **F — DESCARTADA:** las fuentes base y metadatos de seed ya existían; el seed fue además idempotente.
-- **G — DESCARTADA:** `API_INTERNAL_URL` apuntaba a 8001 correctamente.
+- **E — DESCARTADA:** `report_data_sources` existía y era íntegra.
+- **F — DESCARTADA:** el seed ya estaba aplicado; dos pasadas fueron idempotentes.
 - **H — DESCARTADA:** `NEXT_PUBLIC_API_URL=/backend-api` era correcto.
-- **I — DESCARTADA:** backend y proxy devolvieron el mismo JSON.
-- **J — DESCARTADA:** ambos repositorios estaban en la misma branch esperada.
-- **L — DESCARTADA:** no había instancia vieja sirviendo `.next`; después se hizo build y arranque limpios.
-- **M — DESCARTADA:** Builder usa `report.data_source`; PRODUCT_CATALOG devolvió 8 campos y COTIZACION 16, sin campos globales ajenos.
-- **N — DESCARTADA:** todos los reportes tenían una relación válida y no nula.
-- Las apariciones backend de `query_text`, `data_source_type` y `data_source_key` se clasificaron como compatibilidad DB/migraciones, ejecución interna o tests de seguridad. No forman parte del esquema público.
-- Las apariciones frontend restantes de términos antiguos son aserciones negativas de tests. La frase natural “Consulta los reportes habilitados” no es un control de consulta SQL y no afecta el flujo administrativo.
+- **I — DESCARTADA:** backend y proxy devolvieron JSON idéntico.
+- **J — DESCARTADA:** ambos repos estaban en la misma branch esperada.
+- **K — DESCARTADA:** tipos/tests frontend usan `data_source_id`/`data_source`; las apariciones legacy son aserciones negativas. Backend conserva referencias internas/de compatibilidad y tests de seguridad.
+- **L — DESCARTADA:** no había `.next` viejo en ejecución; build y arranque limpio sirvieron la UI nueva.
+- **M — DESCARTADA:** Builder consulta campos mediante `report.data_source`, no un catálogo global.
+- **N — DESCARTADA:** todas las definiciones tienen fuente válida y no nula.
+- **O — DESCARTADA:** `LEGACY_SQL_2` está correctamente relacionada, excluida del selector y ejecutable internamente.
+
+Clasificación de referencias antiguas:
+
+- Frontend: `report-definition-form.test.tsx` contiene pruebas negativas; “Consulta los reportes habilitados” es texto natural, no UI SQL.
+- Backend activo: modelos/enum/seed/definitions mantienen columnas de compatibilidad; `registry.py` y `sql_query_executor.py` ejecutan fuentes internas preservadas sin exponerlas.
+- Migraciones: referencias necesarias para upgrade/downgrade y preservación legacy.
+- Tests backend: fixtures de migración, ejecución interna y aserciones de no exposición.
+- No se encontró una referencia legacy que contradiga el contrato público actual.
 
 ## 12. Archivos modificados
 
-Backend:
+Trackeado:
 
-- `backend/app/services/reports/data_sources.py`
-- `backend/tests/test_report_data_sources.py`
+- `codex/output/REPORT_DATA_SOURCES_RUNTIME_FIX.md`.
 
-Frontend:
+Local e ignorado:
 
-- `next.config.ts`
-- `src/components/reports/report-definition-form.tsx`
-- `src/components/reports/report-definition-form.test.tsx`
-- `src/components/reports/report-builder-workspace.test.tsx`
-- `src/components/reports/generic-report-runtime.test.tsx`
-- `src/components/reports/report-catalog-cards.test.tsx`
-- `src/lib/api/reports.test.ts`
-- `src/lib/reports/report-builder.test.ts`
-- `codex/output/REPORT_DATA_SOURCES_RUNTIME_FIX.md`
+- `.env.local`: backend 8001 → 8000 y ajuste correspondiente de `API_INTERNAL_URL`.
+
+Persistencia ignorada:
+
+- Backup SQLite nuevo.
+- Reporte E2E y configuración Builder asociados.
+
+No se modificó código fuente frontend o backend.
 
 ## 13. Razón de cada modificación
 
-- `data_sources.py`: limita el catálogo público/selector a fuentes `HANDLER` habilitadas; conserva `INTERNAL_SQL` para compatibilidad y runtime de reportes migrados.
-- Test backend: cubre que una fuente interna no aparezca en el catálogo, pero que su reporte existente pueda editarse y ejecutarse.
-- `next.config.ts`: permite el origen dev local `127.0.0.1` requerido por las URLs reales de Arefil.
-- Formulario: elimina el effect inválido/estado muerto y diferencia fuentes deshabilitadas de fuentes migradas no catalogables, sin mostrar detalles técnicos.
-- Tests frontend: actualizan fixtures al contrato `data_source_id` + `data_source`, capacidades y endpoint Builder por reporte.
+- `.env.local`: evitar la colisión con Tesis y dirigir proxy/server components al backend real de Arefil.
+- Reporte Markdown: actualizar la evidencia solicitada con el estado de esta ejecución.
+- SQLite: creación E2E autorizada para probar POST, runtime y Builder. No se borró ni alteró manualmente ningún registro.
 
 ## 14. Migración ejecutada
 
-Se ejecutó `alembic upgrade head` tanto directamente como mediante `make run_panel`. En ambos casos fue no-op porque la DB ya estaba en `f3a7c9e4b612`.
+Se ejecutó `alembic upgrade head`; fue no-op porque la DB ya estaba en `f3a7c9e4b612`.
 
 ## 15. Backup creado
 
-`/home/daniel12/Projects/Arefil_backend/backend/data/backups/arefil-before-report-data-sources-20260828-152904.db`
+`/home/daniel12/Projects/Arefil_backend/backend/data/backups/arefil-before-report-data-sources-20260828-165434.db`
 
 - Tamaño: 2,027,520 bytes.
-- Creado con el comando de backup nativo de SQLite.
+- Creado con `sqlite3.Connection.backup` desde una conexión source read-only.
 - `PRAGMA integrity_check`: `ok`.
-- La ruta está cubierta por `.gitignore` y no aparece en Git.
+- No sobrescribió backups previos y está ignorado por Git.
 
 ## 16. Fuentes encontradas
-
-Fuentes base:
 
 | ID | Código | Parámetros | Campos | Capacidades |
 |---:|---|---:|---:|---|
 | 1 | PRODUCT_CATALOG | 0 | 8 | — |
-| 2 | PRICE_LIST | 1 | 19 | — |
-| 3 | PRICE_HISTORY | 1 | 21 | — |
+| 2 | PRICE_LIST | 1 (`price_list_id`) | 19 | — |
+| 3 | PRICE_HISTORY | 1 (`product_id`) | 21 | — |
 | 4 | PRICE_LIST_COMPARISON | 2 | 10 | — |
 | 5 | QUOTATION_ROWS | 1 | 16 | REPEATABLE_ROWS |
 
-También existe `LEGACY_SQL_2`, preservada internamente y excluida de `GET /api/report-data-sources`.
+`LEGACY_SQL_2` permanece como sexta fuente `INTERNAL_SQL`, exclusivamente interna.
 
 ## 17. Reportes migrados
 
-Relaciones iniciales preservadas:
+Relaciones preservadas:
 
 - `PRICE_LIST_COMPARISON` → `PRICE_LIST_COMPARISON`.
 - `RODUCT_QUOTATION` → `LEGACY_SQL_2`.
 - `COTIZACION` → `QUOTATION_ROWS`.
+- Dos reportes E2E preexistentes → `PRODUCT_CATALOG`.
 
-El código existente `RODUCT_QUOTATION` ya estaba almacenado así antes del trabajo; no se renombró ni se alteró fuera del alcance solicitado.
+Creado en esta ejecución:
 
-Después del E2E se añadió:
+- `CODEX_E2E_PRODUCT_CATALOG_20260828_165802` → `PRODUCT_CATALOG`.
 
-- `CODEX_E2E_PRODUCT_CATALOG` → `PRODUCT_CATALOG`.
+El seed se ejecutó dos veces: ambas conservaron el SHA-256 inicial, conteos e IDs, sin duplicados y sin cambios a Builder o Excel.
 
 ## 18. Prueba GET `/report-data-sources`
 
-`GET http://127.0.0.1:8001/api/report-data-sources` devolvió 200 y exactamente las cinco fuentes base. No contiene `query_text`, `handler_key` ni `executor_type`.
+`GET http://127.0.0.1:8000/api/report-data-sources` devolvió 200 y exactamente las cinco fuentes base. Claves públicas:
 
-Los detalles PRODUCT_CATALOG, PRICE_LIST y PRICE_HISTORY devolvieron parámetros y campos esperados. PRICE_HISTORY declara `product_id` con selector de productos; PRICE_LIST declara `price_list_id` con selector de listas.
+```text
+capabilities, code, description, enabled, fields, id, name, parameters
+```
+
+No expuso `query_text`, `handler_key`, `executor_type`, `data_source_type` ni `data_source_key`.
+
+- PRODUCT_CATALOG: 8 campos de producto/proveedor, sin parámetros.
+- PRICE_LIST: `price_list_id`, selector `price_lists`, 19 campos.
+- PRICE_HISTORY: `product_id`, selector `products`, 21 campos incluyendo historial.
 
 ## 19. Prueba del proxy `/backend-api`
 
-`GET http://127.0.0.1:3001/backend-api/report-data-sources` devolvió 200 y contenido idéntico al backend directo. La prueba final comparó ambos cuerpos y obtuvo `backend_proxy_match=yes`.
+`GET http://127.0.0.1:3001/backend-api/report-data-sources` devolvió 200. El payload fue idéntico al backend (`backend_proxy_match=true`) y no expuso campos internos.
+
+Chromium confirmó una respuesta 200 real para ese endpoint durante la hidratación de `/administracion/reportes/nuevo`.
 
 ## 20. Prueba de creación de reporte
 
-Se creó vía API `CODEX_E2E_PRODUCT_CATALOG` con:
+POST 201 para `CODEX_E2E_PRODUCT_CATALOG_20260828_165802`:
 
 ```json
 {
-  "code": "CODEX_E2E_PRODUCT_CATALOG",
-  "name": "Codex E2E Product Catalog",
+  "code": "CODEX_E2E_PRODUCT_CATALOG_20260828_165802",
+  "name": "Codex E2E Product Catalog 20260828 165802",
+  "description": "Validación E2E de ReportDataSource",
+  "category": "Pruebas",
   "data_source_id": 1,
   "enabled": true,
   "parameters": []
 }
 ```
 
-Ni request ni response contienen `query_text`, `data_source_type` o `data_source_key`.
-
-No existe endpoint DELETE; por instrucción expresa no se manipuló SQLite para borrarlo. El reporte E2E permanece registrado.
+Request/response no contienen propiedades legacy. No existe endpoint DELETE; por instrucción no se manipuló SQLite y el reporte permanece registrado.
 
 ## 21. Prueba de ejecución `/data`
 
-`POST /api/reports/CODEX_E2E_PRODUCT_CATALOG/data` con `{}` devolvió:
+`POST /api/reports/CODEX_E2E_PRODUCT_CATALOG_20260828_165802/data` con `{}` devolvió:
 
 - 200 OK.
 - 6,207 filas reales.
-- Campos de producto y proveedor.
-- Primera muestra validada desde el catálogo persistente.
+- Campos válidos de producto/proveedor.
+- Primera muestra: `BIG-00000`, proveedor `DONALDSON`.
 
-El reporte legado `RODUCT_QUOTATION` también se ejecutó correctamente, demostrando que ocultar su fuente del selector no rompe su runtime.
+El reporte legacy `RODUCT_QUOTATION` también devolvió 200 y una fila real, demostrando que su fuente interna sigue funcionando sin aparecer en el catálogo.
 
 ## 22. Validación del Report Builder
 
-PRODUCT_CATALOG:
+E2E PRODUCT_CATALOG:
 
-- `builder/fields`: exactamente 8 campos de producto/proveedor; ningún campo de listas o historial.
-- `builder`: inicialmente vacío.
-- `PUT builder`: guardó columnas `part_number` y `description` con layout Excel.
-- `builder/preview`: 100 filas, `truncated=true`, datos reales.
+- `GET builder/fields`: 200, exactamente 8 campos de producto/proveedor.
+- `GET builder`: 200, definición inicialmente vacía.
+- `PUT builder`: 200; guardó `product.part_number`, `product.description` y layout `Catálogo`.
+- `POST builder/preview`: 200; 100 filas reales, `truncated=true`.
 
 COTIZACION:
 
-- Fuente: `QUOTATION_ROWS`.
-- 16 campos disponibles.
-- 10 columnas guardadas, 1 grupo repetible y layout `Cotización` preservados.
-- Se reenvió el mismo contrato mediante PUT y permaneció intacto.
-- Preview real con lista/producto devolvió una fila, ocho columnas visibles y totales correctos.
+- Conservó 10 columnas, 1 grupo con 3 campos, layout `Cotización`, header row 4 y cuatro totales.
+- `builder/fields` devolvió 16 campos de QUOTATION_ROWS.
+- Preview real con lista 4/producto 9 devolvió una fila y cálculos correctos de subtotal, descuento, IVA y total.
 
-Los metadatos directos de PRICE_LIST y PRICE_HISTORY confirmaron catálogos de 19 y 21 campos respectivamente. Los tests backend cubren su ejecución y aislamiento por fuente.
+PRICE_LIST y PRICE_HISTORY se validaron mediante sus catálogos aislados de 19 y 21 campos. Los tests backend cubren aislamiento y ejecución por fuente.
 
 ## 23. Resultado pytest
 
 ```text
-198 passed, 1 warning in 5.24s
+198 passed, 1 warning in 6.95s
 ```
 
-El warning es una deprecación de Starlette TestClient/httpx2 y no afecta el resultado.
+Warning no bloqueante: deprecación Starlette TestClient/httpx2.
 
 ## 24. Resultado frontend test
 
@@ -256,7 +258,7 @@ El warning es una deprecación de Starlette TestClient/httpx2 y no afecta el res
 
 ## 25. Resultado lint
 
-`npm run lint`: exitoso, sin errores ni warnings.
+`npm run lint`: exitoso, sin errores.
 
 ## 26. Resultado typecheck
 
@@ -264,52 +266,48 @@ El warning es una deprecación de Starlette TestClient/httpx2 y no afecta el res
 
 ## 27. Resultado build
 
-`npm run build`: exitoso con Next.js 16.3.0; compilación, TypeScript y generación de rutas completadas.
+`npm run build`: exitoso con Next.js 16.3.0; compilación, TypeScript y generación de 13 páginas/rutas completadas.
 
 ## 28. URLs finales
 
+Configuración efectiva para `make run_panel`:
+
 - Frontend: `http://127.0.0.1:3001`.
 - Nuevo reporte: `http://127.0.0.1:3001/administracion/reportes/nuevo`.
-- Backend: `http://127.0.0.1:8001/api`.
-- Catálogo backend: `http://127.0.0.1:8001/api/report-data-sources`.
+- Backend: `http://127.0.0.1:8000/api`.
+- Catálogo backend: `http://127.0.0.1:8000/api/report-data-sources`.
 - Catálogo proxy: `http://127.0.0.1:3001/backend-api/report-data-sources`.
 
-Las instancias de prueba se detuvieron al terminar; ejecutar `make run_panel` vuelve a levantar estas URLs.
+Las instancias de validación fueron detenidas para no dejar procesos temporales.
 
 ## 29. Estado Git final
 
-No se hizo commit, push, force push ni reset. El backend contiene únicamente el filtro de catálogo y su test. El frontend contiene la corrección de origen dev, formulario, tests actualizados y este reporte. El backup y `.env.local` permanecen ignorados.
+No se hizo commit, push, force push, reset ni cambio de branch.
 
-Frontend `git status --short`:
-
-```text
- M next.config.ts
- M src/components/reports/generic-report-runtime.test.tsx
- M src/components/reports/report-builder-workspace.test.tsx
- M src/components/reports/report-catalog-cards.test.tsx
- M src/components/reports/report-definition-form.test.tsx
- M src/components/reports/report-definition-form.tsx
- M src/lib/api/reports.test.ts
- M src/lib/reports/report-builder.test.ts
-?? codex/output/REPORT_DATA_SOURCES_RUNTIME_FIX.md
-```
-
-Backend `git status --short`:
+Frontend:
 
 ```text
- M backend/app/services/reports/data_sources.py
- M backend/tests/test_report_data_sources.py
+ M codex/output/REPORT_DATA_SOURCES_RUNTIME_FIX.md
 ```
+
+Backend:
+
+```text
+(limpio)
+```
+
+`.env.local`, SQLite y backup permanecen ignorados por Git.
 
 ## 30. Deuda técnica restante
 
-- `RODUCT_QUOTATION` conserva un código aparentemente truncado que preexistía. No se corrigió porque cambiar códigos/URLs de reportes existentes estaba fuera del alcance y podía romper consumidores.
-- El entorno Python emite warnings de `sys.prefix` y Starlette recomienda migrar de `httpx` a `httpx2`; no bloquean runtime ni tests.
-- `CODEX_E2E_PRODUCT_CATALOG` queda como dato de prueba porque no existe una operación DELETE segura en la API.
+- `RODUCT_QUOTATION` conserva un código aparentemente truncado preexistente; no se renombró para evitar romper URLs/consumidores.
+- El entorno Python emite warnings de `sys.prefix`; Starlette recomienda migrar de `httpx` a `httpx2`. No bloquean runtime ni tests.
+- El reporte E2E queda persistido porque no existe DELETE seguro.
+- El cambio de puerto vive solo en `.env.local`; si 8000 vuelve a ocuparse habrá que elegir otro puerto libre y sincronizar `BACKEND_PORT`/`API_INTERNAL_URL`.
 
 ## Resultado resumido
 
-- Backend, proxy, UI, creación, ejecución y Builder: validados en ejecución real.
-- La UI carga fuentes reales desde backend y no muestra SQL_QUERY/HANDLER/Consulta.
+- Backend, proxy, UI hidratada, creación, ejecución, legacy runtime y Builder: validados en ejecución real.
+- La UI carga las cinco fuentes reales desde backend y no muestra SQL_QUERY/HANDLER/Consulta.
 - Backend y frontend completos: verdes.
 - Sin commit ni push.
