@@ -12,9 +12,7 @@ import type {
   ReportOption,
   ReportPreviewResponse,
   ReportProductOption,
-  ReportDocumentFormat,
-  ReportTemplate,
-  ReportTemplateWriteRequest,
+  ReportExcelTemplate,
   ReportUpdateRequest,
   Page,
 } from "@/types/api";
@@ -224,44 +222,53 @@ export function previewReportBuilder(
 /**
  * Document layer — Backend #22.
  *
- * The template is administrative (one active template per report); the render
- * endpoints are runtime and take the exact parameter map of an execution the
- * user already validated on screen.
+ * The template is an `.xlsx` workbook the administrator uploads (one active
+ * template per report); the render endpoint is runtime and takes the exact
+ * parameter map of an execution the user already validated on screen.
  */
 
-function templatePath(code: string): string {
-  return `/admin${reportPath(code, "/template")}`;
+function excelTemplatePath(code: string, suffix = ""): string {
+  return `/admin${reportPath(code, `/excel-template${suffix}`)}`;
 }
 
-/** Rejects with a 404 `ApiError` when the report has no active template. */
-export function getReportTemplate(code: string, options?: RequestOptions): Promise<ReportTemplate> {
-  return browserApiClient.apiGet<ReportTemplate>(templatePath(code), options);
-}
-
-/** Creates or replaces the active template in one write, like the builder. */
-export function saveReportTemplate(
-  code: string,
-  request: ReportTemplateWriteRequest,
-  options?: RequestOptions,
-): Promise<ReportTemplate> {
-  return browserApiClient.apiPutJson<ReportTemplate>(templatePath(code), request, options);
-}
-
-/** Deactivates/removes the active template; the report keeps running without it. */
-export function deleteReportTemplate(code: string, options?: RequestOptions): Promise<void> {
-  return browserApiClient.apiDelete<void>(templatePath(code), options);
+/** Rejects with a 404 `ApiError` when the report has no active Excel template. */
+export function getReportExcelTemplate(code: string, options?: RequestOptions): Promise<ReportExcelTemplate> {
+  return browserApiClient.apiGet<ReportExcelTemplate>(excelTemplatePath(code), options);
 }
 
 /**
- * Renders the document for one execution. The body is the same parameter map
- * `executeReport` ran with, so the file can never disagree with the preview the
- * user approved.
+ * Uploads or replaces the active template. The backend versions it, so a
+ * replace is the same call as a first upload.
  */
-export function downloadReportDocument(
+export function uploadReportExcelTemplate(
   code: string,
-  format: ReportDocumentFormat,
+  file: File,
+  options?: RequestOptions,
+): Promise<ReportExcelTemplate> {
+  const body = new FormData();
+  body.append("file", file, file.name);
+  return browserApiClient.apiPutForm<ReportExcelTemplate>(excelTemplatePath(code), body, options);
+}
+
+/** Downloads the master template exactly as it was uploaded. */
+export function downloadReportExcelTemplate(code: string, options?: RequestOptions): Promise<BlobDownload> {
+  return browserApiClient.apiDownloadBlob(excelTemplatePath(code, "/download"), options);
+}
+
+/** Deactivates the active template; the report keeps running and exporting data without it. */
+export function deleteReportExcelTemplate(code: string, options?: RequestOptions): Promise<void> {
+  return browserApiClient.apiDelete<void>(excelTemplatePath(code), options);
+}
+
+/**
+ * Renders the final quotation from the active template. The body is the same
+ * parameter map `executeReport` ran with, so the file can never disagree with
+ * the preview the user approved.
+ */
+export function downloadReportDocumentXlsx(
+  code: string,
   parameters: Record<string, unknown>,
   options?: RequestOptions,
 ): Promise<BlobDownload> {
-  return browserApiClient.apiPostBlob(reportPath(code, `/document/${format}`), parameters, options);
+  return browserApiClient.apiPostBlob(reportPath(code, "/document/xlsx"), parameters, options);
 }

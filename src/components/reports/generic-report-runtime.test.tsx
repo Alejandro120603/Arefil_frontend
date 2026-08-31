@@ -8,10 +8,10 @@ import { ApiError } from "@/lib/api/errors";
 import type { ReportDefinition } from "@/types/api";
 const {
   executeReport, listAllReportParameterOptions, searchReportProductOptions, resolveReportProductOption,
-  downloadReportData, downloadReportDocument, triggerBrowserDownload,
+  downloadReportData, downloadReportDocumentXlsx, triggerBrowserDownload,
 } = vi.hoisted(() => ({
   executeReport: vi.fn(), listAllReportParameterOptions: vi.fn(), searchReportProductOptions: vi.fn(),
-  resolveReportProductOption: vi.fn(), downloadReportData: vi.fn(), downloadReportDocument: vi.fn(),
+  resolveReportProductOption: vi.fn(), downloadReportData: vi.fn(), downloadReportDocumentXlsx: vi.fn(),
   triggerBrowserDownload: vi.fn(),
 }));
 vi.mock("@/lib/api/reports", () => ({
@@ -19,7 +19,7 @@ vi.mock("@/lib/api/reports", () => ({
   searchReportProductOptions,
   resolveReportProductOption,
   downloadReportData,
-  downloadReportDocument,
+  downloadReportDocumentXlsx,
   executeReport,
 }));
 vi.mock("@/lib/download", () => ({ triggerBrowserDownload }));
@@ -151,9 +151,9 @@ describe("GenericReportRuntime", () => {
     expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "cotizacion.xlsx");
 
     // The document layer renders from the very same validated snapshot.
-    downloadReportDocument.mockResolvedValue({ blob: new Blob(["%PDF"]), filename: "cotizacion.pdf" });
-    await user.click(screen.getByRole("button", { name: "Descargar PDF" }));
-    await waitFor(() => expect(downloadReportDocument).toHaveBeenCalledWith("COTIZACION", "pdf", {
+    downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "cotizacion-bonatti.xlsx" });
+    await user.click(screen.getByRole("button", { name: "Descargar cotización Excel" }));
+    await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledWith("COTIZACION", {
       price_list_id: 7,
       items: [
         { product_id: 101, quantity: 2, discount: "10" },
@@ -165,7 +165,7 @@ describe("GenericReportRuntime", () => {
     await user.type(screen.getByLabelText("Cantidad * 1"), "3");
     expect(screen.queryByRole("columnheader", { name: "SKU" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Descargar Excel de datos" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Descargar PDF" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar cotización Excel" })).toBeNull();
     expect(screen.getByRole("button", { name: "Regenerar reporte" })).toBeTruthy();
   });
 

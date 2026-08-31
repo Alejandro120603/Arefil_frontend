@@ -480,41 +480,20 @@ export interface ReportBuilderWriteRequest {
  * Document layer — mirrored from Backend #22
  * (`Arefil_backend/backend/app/schemas/reports.py`).
  *
- * A report has at most one *active* template. It is the visual document
- * (Stimulsoft `.mrt`), kept strictly apart from the builder's logical shell:
- * the template decides how the quotation looks, never what it computes.
+ * A report has at most one *active* Excel template: an `.xlsx` workbook the
+ * administrator uploads and the backend fills in. The file itself never travels
+ * as JSON — only this metadata does, so the panel can describe the template
+ * without ever holding its bytes.
  */
-export type ReportTemplateFormat = "mrt" | "json";
-
-export interface ReportTemplate {
-  format: ReportTemplateFormat;
-  /** The template body itself (MRT/JSON), as stored by the backend. */
-  content: string;
+export interface ReportExcelTemplate {
+  report_code: string;
+  original_filename: string;
+  size_bytes: number;
   version: number;
-  active: boolean;
+  checksum: string;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
-}
-
-/** Body of `PUT /admin/reports/{code}/template` — replaces the active template. */
-export interface ReportTemplateWriteRequest {
-  format: ReportTemplateFormat;
-  content: string;
-}
-
-/** Formats the documental renderer can answer with. */
-export type ReportDocumentFormat = "pdf" | "xlsx";
-
-/**
- * The documental dataset contract: what the renderer feeds a template, and
- * therefore what the designer must know about. Amounts are the backend's own
- * Decimal strings — a template formats them, it never recomputes them.
- */
-export interface ReportDocumentDataset {
-  report: { code: string; name: string; generated_at: string };
-  parameters: Record<string, unknown>;
-  rows: Record<string, unknown>[];
-  summary: Record<string, DecimalString | null>;
 }
 
 export interface ReportBuilderPreviewColumn {

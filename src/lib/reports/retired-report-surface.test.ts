@@ -9,16 +9,18 @@ const ROOT = resolve(dirname(SELF), "../../..");
 /**
  * Backend #14 retired the *old* reporting-template stack, and Frontend #15
  * guarded the frontend against its return. Backend #22 / Frontend #23 bring a
- * document layer back, but deliberately a different one: templates live in the
- * backend behind `/admin/reports/{code}/template`, the licensed designer is a
- * page the deployment hosts, and this repo vendors none of it.
- *
- * What these guards still hold to is exactly what the retired stack got wrong:
- * bundled vendor code, `.mrt` files shipped as frontend assets, standalone
- * designer/viewer routes, the legacy `active_template_version` contract field,
- * and secrets written into source.
+ * document layer back, but deliberately a different one: an `.xlsx` workbook
+ * the administrator uploads to `/admin/reports/{code}/excel-template`. There is
+ * no designer, no renderer service, no `.mrt` and no commercial licence — and
+ * these guards are what keeps it that way.
  */
-const RETIRED_NEEDLES = [/active_template_version/];
+const RETIRED_NEEDLES = [
+  /active_template_version/,
+  /stimul/i,
+  /NEXT_PUBLIC_STIMULSOFT_DESIGNER_URL/,
+  /arefil-designer/,
+  /\.mrt\b/,
+];
 
 /** Anything that reads like a credential pasted into the code. */
 const HARDCODED_SECRET = /(licen[sc]e|activation|secret)[_a-z]*\s*[:=]\s*["'][^"']{16,}["']/i;
@@ -79,8 +81,8 @@ describe("retired report surface", () => {
   });
 
   it("exposes no designer or standalone viewer route", () => {
-    // The document designer is a section of the report configuration page, not
-    // a route of its own, and the panel never hosts the viewer.
+    // The Excel template is administered from a section of the report
+    // configuration page, not a route of its own, and the panel hosts no viewer.
     const segments = walk(join(ROOT, "src/app"))
       .map((path) => relative(ROOT, path).split(sep));
     expect(segments.filter((parts) => parts.includes("designer"))).toEqual([]);
@@ -94,13 +96,10 @@ describe("retired report surface", () => {
     expect(scan(CONFIG_FILES.map((file) => join(ROOT, file)), [HARDCODED_SECRET])).toEqual([]);
   });
 
-  it("reads the designer location from the environment only", () => {
-    const designer = readFileSync(
-      join(ROOT, "src/components/reports/report-document-designer.tsx"),
-      "utf8",
-    );
-    expect(designer).toMatch(/process\.env\.NEXT_PUBLIC_STIMULSOFT_DESIGNER_URL/);
-    // No absolute vendor URL may be compiled into the bundle.
-    expect(designer).not.toMatch(/https?:\/\/[^\s"']*stimul/i);
+  it("embeds no designer iframe or postMessage protocol", () => {
+    const sources = walk(join(ROOT, "src")).filter((path) => path !== SELF);
+    const contents = sources.map((path) => readFileSync(path, "utf8"));
+    expect(contents.filter((content) => /<iframe/i.test(content))).toEqual([]);
+    expect(contents.filter((content) => /postMessage/.test(content))).toEqual([]);
   });
 });

@@ -55,6 +55,7 @@ export interface ApiClient {
   apiDelete<T>(path: string, options?: RequestOptions): Promise<T>;
   apiPostBlob(path: string, body: unknown, options?: RequestOptions): Promise<BlobDownload>;
   apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T>;
+  apiPutForm<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T>;
   apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload>;
 }
 
@@ -131,6 +132,17 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return parseJson<T>(response);
   }
 
+  /** Multipart replace (`PUT`); the browser writes the multipart Content-Type itself. */
+  async function apiPutForm<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "PUT",
+      headers: { Accept: "application/json" },
+      body: formData,
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
   async function apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload> {
     const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
       method: "GET",
@@ -142,7 +154,17 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return { blob, filename: disposition ? extractFilename(disposition) : null };
   }
 
-  return { apiGet, apiPostJson, apiPatchJson, apiPutJson, apiDelete, apiPostBlob, apiUpload, apiDownloadBlob };
+  return {
+    apiGet,
+    apiPostJson,
+    apiPatchJson,
+    apiPutJson,
+    apiDelete,
+    apiPostBlob,
+    apiUpload,
+    apiPutForm,
+    apiDownloadBlob,
+  };
 }
 
 export interface BlobDownload {

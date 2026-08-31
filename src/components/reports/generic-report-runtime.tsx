@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Loader2 } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportDataDownloadButtons } from "@/components/reports/report-data-download-buttons";
-import { ReportDocumentDownloadButtons } from "@/components/reports/report-document-download-buttons";
+import { ReportDocumentDownloadButton } from "@/components/reports/report-document-download-button";
 import { ReportRepeatableParameters } from "@/components/reports/report-repeatable-parameters";
 import { ReportRuntimePreview } from "@/components/reports/report-runtime-preview";
 import { ReportRuntimeParameters } from "@/components/reports/report-runtime-parameters";
@@ -170,10 +170,12 @@ export function GenericReportRuntime({
                   backend just ran. Any edit clears the execution, so a stale
                   document can never be downloaded. */}
               <div className="flex flex-col gap-2">
-                <p className="text-sm text-muted-foreground">El documento final se arma con el template del reporte y exactamente los parámetros de esta vista previa.</p>
-                <ReportDocumentDownloadButtons code={report.code} parameters={execution.parameters} />
+                <h3 className="text-sm font-medium">Documento</h3>
+                <p className="text-sm text-muted-foreground">La cotización final se arma con la plantilla Excel del reporte y exactamente los parámetros de esta vista previa.</p>
+                <ReportDocumentDownloadButton code={report.code} parameters={execution.parameters} />
               </div>
               <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-medium">Exportar datos</h3>
                 <p className="text-sm text-muted-foreground">También puedes descargar los datos tabulares que generó el backend.</p>
                 <ReportDataDownloadButtons code={report.code} parameters={execution.parameters} />
               </div>

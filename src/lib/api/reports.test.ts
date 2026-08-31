@@ -13,6 +13,11 @@ import {
   getReportFieldCatalog,
   previewReportBuilder,
   saveReportBuilder,
+  deleteReportExcelTemplate,
+  downloadReportDocumentXlsx,
+  downloadReportExcelTemplate,
+  getReportExcelTemplate,
+  uploadReportExcelTemplate,
 } from "./reports";
 import { ApiError, getUserErrorMessage } from "./errors";
 
@@ -259,5 +264,79 @@ describe("report builder API", () => {
 
     expect(error).toBeInstanceOf(ApiError);
     expect(getUserErrorMessage(error, "fallback")).toBe("Las fórmulas contienen una dependencia cíclica.");
+  });
+
+  it("reads the Excel template metadata from the administrative contract", async () => {
+    const metadata = {
+      report_code: "COTIZACION", original_filename: "BONATTI.xlsx", size_bytes: 2048, version: 1,
+      checksum: "abc", is_active: true, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(metadata));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getReportExcelTemplate("COTIZACION")).resolves.toEqual(metadata);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/admin/reports/COTIZACION/excel-template",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("uploads the workbook as multipart, letting the browser write the boundary", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ version: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["PK"], "BONATTI.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    await uploadReportExcelTemplate("COTIZACION", file);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/backend-api/admin/reports/COTIZACION/excel-template");
+    expect(init.method).toBe("PUT");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("file")).toMatchObject({ name: "BONATTI.xlsx" });
+    expect(new Headers(init.headers).get("content-type")).toBeNull();
+  });
+
+  it("downloads the master template and honours its Content-Disposition name", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("PK", {
+      headers: { "Content-Disposition": 'attachment; filename="BONATTI FILTROS.xlsx"' },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(downloadReportExcelTemplate("COTIZACION")).resolves.toMatchObject({
+      filename: "BONATTI FILTROS.xlsx",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/admin/reports/COTIZACION/excel-template/download",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("deletes the active template", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteReportExcelTemplate("COTIZACION")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/admin/reports/COTIZACION/excel-template",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("renders the final quotation from the executed parameter snapshot", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("PK", {
+      headers: { "Content-Disposition": "attachment; filename=cotizacion-document.xlsx" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const parameters = { price_list_id: 7, items: [{ product_id: 101, quantity: 2 }] };
+
+    await expect(downloadReportDocumentXlsx("COTIZACION", parameters)).resolves.toMatchObject({
+      filename: "cotizacion-document.xlsx",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/document/xlsx",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(parameters) }),
+    );
   });
 });
