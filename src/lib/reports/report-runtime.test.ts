@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   backendRowErrors,
+  estimateLineTotal,
+  productSearchField,
   initialRuntimeGroupValues,
   initialRuntimeValues,
   orderedReportParameters,
@@ -121,6 +123,16 @@ describe("repeatable report runtime parameters", () => {
       quantity: "Debe ser mayor que 0.",
       discount: "Debe ser menor o igual que 100.",
     });
+  });
+
+  it("finds the field the product search resolves and prices a line locally", () => {
+    expect(productSearchField(group)?.name).toBe("product_id");
+    expect(productSearchField({ ...group, fields: group.fields.slice(1) })).toBeNull();
+    expect(estimateLineTotal("574.13", "4", "5")).toBe("2181.69");
+    expect(estimateLineTotal("574.13", "1", "")).toBe("574.13");
+    expect(estimateLineTotal("574.13", "", "5")).toBeNull();
+    expect(estimateLineTotal(null, "4", "0")).toBeNull();
+    expect(estimateLineTotal("574.13", "4", "150")).toBeNull();
   });
 
   it("maps structured backend validation errors to their row and field", () => {

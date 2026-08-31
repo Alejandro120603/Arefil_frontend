@@ -22,7 +22,7 @@ describe("ReportDataDownloadButtons", () => {
     const user = userEvent.setup();
     downloadReportData.mockResolvedValue({ blob: new Blob([]), filename: "empty.csv" });
     render(<ReportDataDownloadButtons code="REPORT" parameters={{ id: 1 }} />);
-    await user.click(screen.getByRole("button", { name: "Descargar CSV" }));
+    await user.click(screen.getByRole("button", { name: "Descargar CSV de datos" }));
     expect(await screen.findByText(/archivo vacío/)).toBeTruthy();
     expect(triggerBrowserDownload).not.toHaveBeenCalled();
   });
@@ -37,7 +37,7 @@ describe("ReportDataDownloadButtons", () => {
       });
     });
     render(<ReportDataDownloadButtons code="REPORT" parameters={{}} />);
-    await user.click(screen.getByRole("button", { name: "Descargar Excel" }));
+    await user.click(screen.getByRole("button", { name: "Descargar Excel de datos" }));
     await user.click(await screen.findByRole("button", { name: "Cancelar" }));
     expect(requestSignal?.aborted).toBe(true);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Cancelar" })).toBeNull());

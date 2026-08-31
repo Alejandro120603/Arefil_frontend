@@ -7,8 +7,11 @@ import { getUserErrorMessage } from "@/lib/api/errors";
 import { downloadReportData } from "@/lib/api/reports";
 import { triggerBrowserDownload } from "@/lib/download";
 
-/** The backend format keys stay technical; the user only ever reads "Excel". */
-const DOWNLOAD_LABELS = { xlsx: "Excel", csv: "CSV" } as const;
+/**
+ * These are the *data* exports, which sit beside the final document downloads:
+ * the labels say so, so the two pairs of buttons can never be confused.
+ */
+const DOWNLOAD_LABELS = { xlsx: "Excel de datos", csv: "CSV de datos" } as const;
 
 export function ReportDataDownloadButtons({
   code,

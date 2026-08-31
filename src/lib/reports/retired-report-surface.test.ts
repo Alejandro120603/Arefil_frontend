@@ -7,22 +7,21 @@ const SELF = fileURLToPath(import.meta.url);
 const ROOT = resolve(dirname(SELF), "../../..");
 
 /**
- * Backend #14 retired the reporting-template stack: there is no `GET/PUT
- * /api/reports/{code}/template`, no `.mrt` asset, and no `active_template_version`
- * on the public contract. The official experience is Report Builder -> preview web
- * -> XLSX, so the frontend must not reference any of it. These guards fail loudly
- * if the retired surface is reintroduced.
+ * Backend #14 retired the *old* reporting-template stack, and Frontend #15
+ * guarded the frontend against its return. Backend #22 / Frontend #23 bring a
+ * document layer back, but deliberately a different one: templates live in the
+ * backend behind `/admin/reports/{code}/template`, the licensed designer is a
+ * page the deployment hosts, and this repo vendors none of it.
  *
- * The vendor needle is matched on the `stimul` prefix on purpose: the full product
- * name must not appear anywhere in active code, this guard included.
+ * What these guards still hold to is exactly what the retired stack got wrong:
+ * bundled vendor code, `.mrt` files shipped as frontend assets, standalone
+ * designer/viewer routes, the legacy `active_template_version` contract field,
+ * and secrets written into source.
  */
-const RETIRED_NEEDLES = [/stimul/i, /\.mrt\b/, /active_template_version/];
+const RETIRED_NEEDLES = [/active_template_version/];
 
-/**
- * The retired vocabulary the user must never read again (Frontend #15 §22). The
- * shipped copy says Generar, Configurar, Vista previa and Descargar Excel instead.
- */
-const RETIRED_COPY = [/template/i, /plantilla/i, /\bMRT\b/, /Diseñador?\b/, /\bVisor\b/];
+/** Anything that reads like a credential pasted into the code. */
+const HARDCODED_SECRET = /(licen[sc]e|activation|secret)[_a-z]*\s*[:=]\s*["'][^"']{16,}["']/i;
 
 const CONFIG_FILES = [
   "package.json",
@@ -42,27 +41,27 @@ function walk(dir: string): string[] {
   });
 }
 
-function scan(paths: string[]) {
+function scan(paths: string[], needles: RegExp[]) {
   return paths
     .filter((path) => path !== SELF)
     .flatMap((path) => {
       const content = readFileSync(path, "utf8");
-      return RETIRED_NEEDLES.filter((needle) => needle.test(content)).map(
+      return needles.filter((needle) => needle.test(content)).map(
         (needle) => `${relative(ROOT, path)} matches ${needle}`,
       );
     });
 }
 
 describe("retired report surface", () => {
-  it("keeps the retired template stack out of the application source", () => {
-    expect(scan(walk(join(ROOT, "src")))).toEqual([]);
+  it("keeps the retired template contract out of the application source", () => {
+    expect(scan(walk(join(ROOT, "src")), RETIRED_NEEDLES)).toEqual([]);
   });
 
-  it("keeps the retired template stack out of configuration and documentation", () => {
-    expect(scan(CONFIG_FILES.map((file) => join(ROOT, file)))).toEqual([]);
+  it("keeps the retired template contract out of configuration and documentation", () => {
+    expect(scan(CONFIG_FILES.map((file) => join(ROOT, file)), RETIRED_NEEDLES)).toEqual([]);
   });
 
-  it("declares no dependency on the retired report vendor", () => {
+  it("declares no dependency on the report vendor", () => {
     const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
@@ -80,6 +79,8 @@ describe("retired report surface", () => {
   });
 
   it("exposes no designer or standalone viewer route", () => {
+    // The document designer is a section of the report configuration page, not
+    // a route of its own, and the panel never hosts the viewer.
     const segments = walk(join(ROOT, "src/app"))
       .map((path) => relative(ROOT, path).split(sep));
     expect(segments.filter((parts) => parts.includes("designer"))).toEqual([]);
@@ -88,21 +89,18 @@ describe("retired report surface", () => {
     ).toEqual([]);
   });
 
-  it("keeps the retired vocabulary out of the shipped user interface", () => {
-    const shipped = [...walk(join(ROOT, "src/app")), ...walk(join(ROOT, "src/components"))]
-      .filter((path) => !/\.test\.[jt]sx?$/.test(path));
-    const found = shipped.flatMap((path) => {
-      const content = readFileSync(path, "utf8");
-      return RETIRED_COPY.filter((needle) => needle.test(content)).map(
-        (needle) => `${relative(ROOT, path)} matches ${needle}`,
-      );
-    });
-    expect(found).toEqual([]);
+  it("hardcodes no licence or activation secret", () => {
+    expect(scan(walk(join(ROOT, "src")), [HARDCODED_SECRET])).toEqual([]);
+    expect(scan(CONFIG_FILES.map((file) => join(ROOT, file)), [HARDCODED_SECRET])).toEqual([]);
   });
 
-  it("exposes no template accessor on the reports API client", () => {
-    const client = readFileSync(join(ROOT, "src/lib/api/reports.ts"), "utf8");
-    expect(client).not.toMatch(/template/i);
-    expect(client).not.toMatch(/ReportTemplate/);
+  it("reads the designer location from the environment only", () => {
+    const designer = readFileSync(
+      join(ROOT, "src/components/reports/report-document-designer.tsx"),
+      "utf8",
+    );
+    expect(designer).toMatch(/process\.env\.NEXT_PUBLIC_STIMULSOFT_DESIGNER_URL/);
+    // No absolute vendor URL may be compiled into the bundle.
+    expect(designer).not.toMatch(/https?:\/\/[^\s"']*stimul/i);
   });
 });

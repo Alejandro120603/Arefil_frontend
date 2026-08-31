@@ -2,6 +2,7 @@ import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportBuilderWorkspace } from "@/components/reports/report-builder-workspace";
 import { ReportDefinitionForm } from "@/components/reports/report-definition-form";
+import { ReportDocumentDesigner } from "@/components/reports/report-document-designer";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { getAdminReportDefinition } from "@/lib/api/report-catalog";
 import type { ReportAdminDefinition } from "@/types/api";
@@ -25,7 +26,7 @@ export default async function ConfigureReportPage({ params }: ConfigureReportPag
       <Breadcrumbs items={[{ label: "Dashboard", href: "/" }, { label: "Administración" }, { label: "Reportes", href: "/administracion/reportes" }, { label: report?.name ?? code }, { label: "Configurar" }]} />
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{report ? `Configurar ${report.name}` : "Configurar reporte"}</h1>
-        <p className="text-sm text-muted-foreground">Edita metadata, parámetros, columnas, fórmulas y formato Excel usando el contrato administrativo.</p>
+        <p className="text-sm text-muted-foreground">Edita metadata, parámetros, columnas, fórmulas, formato Excel y el diseño del documento usando el contrato administrativo.</p>
       </div>
       {errorMessage && <ErrorAlert title="No se pudo abrir la configuración" message={errorMessage} />}
       {report && (
@@ -39,6 +40,14 @@ export default async function ConfigureReportPage({ params }: ConfigureReportPag
             code={report.code}
             parameters={report.parameters}
             dataSourceCapabilities={report.data_source.capabilities}
+          />
+          {/* The document layer is independent of the builder: the template can
+              be edited, saved or removed without touching columns or formulas,
+              and a report with no template still runs and exports data. */}
+          <ReportDocumentDesigner
+            code={report.code}
+            name={report.name}
+            parameters={report.parameters}
           />
         </>
       )}

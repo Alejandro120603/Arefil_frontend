@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getReportParameterOptions } from "@/lib/api/reports";
+import { listAllReportParameterOptions } from "@/lib/api/reports";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import {
   orderedReportParameters,
@@ -50,7 +50,7 @@ export function ReportRuntimeParameters({
     void Promise.all(
       selects.map(async (parameter) => [
         parameter.name,
-        await getReportParameterOptions(code, parameter.name, undefined, { signal: controller.signal }),
+        await listAllReportParameterOptions(code, parameter.name, undefined, { signal: controller.signal }),
       ] as const),
     ).then((entries) => {
       if (!controller.signal.aborted) setOptions(Object.fromEntries(entries));

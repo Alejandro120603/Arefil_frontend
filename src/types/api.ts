@@ -352,6 +352,21 @@ export interface ReportOption {
 }
 
 /**
+ * One product of the selected price list (Backend #21). The search endpoint
+ * answers with these so a quotation line can show part number, description and
+ * unit price without a second round trip after picking a product.
+ */
+export interface ReportProductOption extends ReportOption {
+  product_id: number;
+  part_number: string;
+  item_number: string | null;
+  description: string | null;
+  unit_price: DecimalString;
+  currency: string;
+  classification: string | null;
+}
+
+/**
  * Report Builder — mirrored from Backend #12/#13
  * (`Arefil_backend/backend/app/schemas/reports.py`, `app/db/enums.py`).
  *
@@ -459,6 +474,47 @@ export interface ReportBuilderWriteRequest {
   columns: ReportColumn[];
   parameter_groups: ReportParameterGroup[];
   excel_layout: ReportExcelLayout;
+}
+
+/**
+ * Document layer — mirrored from Backend #22
+ * (`Arefil_backend/backend/app/schemas/reports.py`).
+ *
+ * A report has at most one *active* template. It is the visual document
+ * (Stimulsoft `.mrt`), kept strictly apart from the builder's logical shell:
+ * the template decides how the quotation looks, never what it computes.
+ */
+export type ReportTemplateFormat = "mrt" | "json";
+
+export interface ReportTemplate {
+  format: ReportTemplateFormat;
+  /** The template body itself (MRT/JSON), as stored by the backend. */
+  content: string;
+  version: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Body of `PUT /admin/reports/{code}/template` — replaces the active template. */
+export interface ReportTemplateWriteRequest {
+  format: ReportTemplateFormat;
+  content: string;
+}
+
+/** Formats the documental renderer can answer with. */
+export type ReportDocumentFormat = "pdf" | "xlsx";
+
+/**
+ * The documental dataset contract: what the renderer feeds a template, and
+ * therefore what the designer must know about. Amounts are the backend's own
+ * Decimal strings — a template formats them, it never recomputes them.
+ */
+export interface ReportDocumentDataset {
+  report: { code: string; name: string; generated_at: string };
+  parameters: Record<string, unknown>;
+  rows: Record<string, unknown>[];
+  summary: Record<string, DecimalString | null>;
 }
 
 export interface ReportBuilderPreviewColumn {

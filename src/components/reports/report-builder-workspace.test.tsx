@@ -17,13 +17,17 @@ const {
   getReportFieldCatalogMock,
   saveReportBuilderMock,
   previewReportBuilderMock,
-  getReportParameterOptionsMock,
+  listAllReportParameterOptionsMock,
+  resolveReportProductOptionMock,
+  searchReportProductOptionsMock,
 } = vi.hoisted(() => ({
   getReportBuilderMock: vi.fn(),
   getReportFieldCatalogMock: vi.fn(),
   saveReportBuilderMock: vi.fn(),
   previewReportBuilderMock: vi.fn(),
-  getReportParameterOptionsMock: vi.fn(),
+  listAllReportParameterOptionsMock: vi.fn(),
+  resolveReportProductOptionMock: vi.fn(),
+  searchReportProductOptionsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api/reports", () => ({
@@ -31,7 +35,9 @@ vi.mock("@/lib/api/reports", () => ({
   getReportFieldCatalog: getReportFieldCatalogMock,
   saveReportBuilder: saveReportBuilderMock,
   previewReportBuilder: previewReportBuilderMock,
-  getReportParameterOptions: getReportParameterOptionsMock,
+  listAllReportParameterOptions: listAllReportParameterOptionsMock,
+  resolveReportProductOption: resolveReportProductOptionMock,
+  searchReportProductOptions: searchReportProductOptionsMock,
 }));
 
 const FIELDS: ReportFieldDescriptor[] = [
@@ -79,7 +85,9 @@ beforeEach(() => {
   getReportFieldCatalogMock.mockResolvedValue(FIELDS);
   getReportBuilderMock.mockResolvedValue(EMPTY_BUILDER);
   saveReportBuilderMock.mockResolvedValue(SAVED_BUILDER);
-  getReportParameterOptionsMock.mockResolvedValue([]);
+  listAllReportParameterOptionsMock.mockResolvedValue([]);
+  searchReportProductOptionsMock.mockResolvedValue([]);
+  resolveReportProductOptionMock.mockResolvedValue(null);
 });
 
 afterEach(cleanup);

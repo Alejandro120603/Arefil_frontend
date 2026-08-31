@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReportRuntimeParameters } from "./report-runtime-parameters";
 import type { ReportParameter } from "@/types/api";
 
-const { getReportParameterOptions } = vi.hoisted(() => ({ getReportParameterOptions: vi.fn() }));
-vi.mock("@/lib/api/reports", () => ({ getReportParameterOptions }));
+const { listAllReportParameterOptions } = vi.hoisted(() => ({ listAllReportParameterOptions: vi.fn() }));
+vi.mock("@/lib/api/reports", () => ({ listAllReportParameterOptions }));
 
 function parameter(name: string, input_type: ReportParameter["input_type"], data_type: ReportParameter["data_type"], display_order: number): ReportParameter {
   return { name, label: name, input_type, data_type, display_order, required: true, default_value: null, configuration_json: input_type === "select" ? { options_source: "suppliers" } : null };
@@ -22,7 +22,7 @@ describe("ReportRuntimeParameters", () => {
   it("renders every metadata control in display order and reports changes", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    getReportParameterOptions.mockResolvedValue([{ value: 8, label: "DONALDSON · Donaldson" }]);
+    listAllReportParameterOptions.mockResolvedValue([{ value: 8, label: "DONALDSON · Donaldson" }]);
     const parameters = [
       parameter("choice", "select", "integer", 5),
       parameter("active", "checkbox", "boolean", 4),
@@ -42,7 +42,7 @@ describe("ReportRuntimeParameters", () => {
   });
 
   it("shows option-source failures and field validation messages", async () => {
-    getReportParameterOptions.mockRejectedValue(new Error("network"));
+    listAllReportParameterOptions.mockRejectedValue(new Error("network"));
     render(
       <ReportRuntimeParameters
         code="GENERIC"
