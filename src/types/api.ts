@@ -496,6 +496,36 @@ export interface ReportExcelTemplate {
   updated_at: string;
 }
 
+/**
+ * Preflight result of `PUT /reports/{code}/excel-template` (Backend #24).
+ *
+ * The backend parses every sheet against the saved builder before activating a
+ * template. On success the metadata carries this result; on rejection it comes
+ * back as the `detail` of a `422`, with `valid: false` — and no version is
+ * created.
+ */
+export interface ReportExcelTemplateValidationIssue {
+  code: string;
+  message: string;
+  sheet: string;
+  cell: string | null;
+  placeholder: string | null;
+  range: string | null;
+}
+
+export interface ReportExcelTemplateValidationResult {
+  valid: boolean;
+  placeholder_count: number;
+  repeatable_rows: number;
+  warnings: ReportExcelTemplateValidationIssue[];
+  errors: ReportExcelTemplateValidationIssue[];
+}
+
+/** The upload response: the same metadata plus the preflight that admitted it. */
+export interface ReportExcelTemplateUpload extends ReportExcelTemplate {
+  validation: ReportExcelTemplateValidationResult;
+}
+
 export interface ReportBuilderPreviewColumn {
   key: string;
   label: string;

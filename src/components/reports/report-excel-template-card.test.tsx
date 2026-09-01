@@ -5,7 +5,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportExcelTemplateCard } from "./report-excel-template-card";
 import { ApiError } from "@/lib/api/errors";
-import type { ReportBuilderDefinition, ReportExcelTemplate, ReportParameter } from "@/types/api";
+import type {
+  ReportBuilderDefinition,
+  ReportExcelTemplate,
+  ReportExcelTemplateUpload,
+  ReportExcelTemplateValidationResult,
+  ReportParameter,
+} from "@/types/api";
 
 const {
   getReportExcelTemplate, uploadReportExcelTemplate, downloadReportExcelTemplate,
@@ -44,6 +50,38 @@ const TEMPLATE: ReportExcelTemplate = {
   version: 2, checksum: "abc123", is_active: true,
   created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-02T00:00:00Z",
 };
+
+const CLEAN_VALIDATION: ReportExcelTemplateValidationResult = {
+  valid: true, placeholder_count: 14, repeatable_rows: 1, warnings: [], errors: [],
+};
+
+const UPLOAD: ReportExcelTemplateUpload = { ...TEMPLATE, validation: CLEAN_VALIDATION };
+
+/** The `422` body of a template the preflight refuses to activate. */
+const REJECTION = new ApiError(422, {
+  valid: false,
+  placeholder_count: 5,
+  repeatable_rows: 1,
+  warnings: [],
+  errors: [
+    {
+      code: "unknown_placeholder",
+      message: "Placeholder desconocido en Cotización!B4: {{rows.descuento}}.",
+      sheet: "Cotización",
+      cell: "B4",
+      placeholder: "{{rows.descuento}}",
+      range: null,
+    },
+    {
+      code: "merge_crosses_repeatable_row",
+      message: "La combinación A8:C9 en la hoja Cotización atraviesa una fila repetible.",
+      sheet: "Cotización",
+      cell: null,
+      placeholder: null,
+      range: "A8:C9",
+    },
+  ],
+});
 
 const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -84,7 +122,7 @@ describe("ReportExcelTemplateCard", () => {
   });
 
   it("uploads an .xlsx file and shows the metadata the backend answered with", async () => {
-    uploadReportExcelTemplate.mockResolvedValue(TEMPLATE);
+    uploadReportExcelTemplate.mockResolvedValue(UPLOAD);
     const user = userEvent.setup();
     renderCard();
 
@@ -97,6 +135,9 @@ describe("ReportExcelTemplateCard", () => {
     expect(screen.getByText("Versión: 2")).toBeTruthy();
     expect(screen.getByText("Tamaño: 24.0 KB")).toBeTruthy();
     expect(screen.getByLabelText("Reemplazar plantilla")).toBeTruthy();
+    expect(screen.getByText("Compatibilidad: Válida")).toBeTruthy();
+    expect(screen.getByText("Placeholders reconocidos: 14")).toBeTruthy();
+    expect(screen.getByText("Filas repetibles detectadas: 1")).toBeTruthy();
   });
 
   it("rejects a file with the wrong extension in the client, without calling the backend", async () => {
@@ -116,7 +157,7 @@ describe("ReportExcelTemplateCard", () => {
   it("keeps the chosen file for a retry when the upload fails", async () => {
     uploadReportExcelTemplate
       .mockRejectedValueOnce(new ApiError(422, "El archivo no es un XLSX válido."))
-      .mockResolvedValueOnce(TEMPLATE);
+      .mockResolvedValueOnce(UPLOAD);
     const user = userEvent.setup();
     renderCard();
 
@@ -132,7 +173,7 @@ describe("ReportExcelTemplateCard", () => {
 
   it("replaces, downloads and deletes the active template", async () => {
     getReportExcelTemplate.mockResolvedValue(TEMPLATE);
-    uploadReportExcelTemplate.mockResolvedValue({ ...TEMPLATE, version: 3, original_filename: "NUEVA.xlsx" });
+    uploadReportExcelTemplate.mockResolvedValue({ ...UPLOAD, version: 3, original_filename: "NUEVA.xlsx" });
     downloadReportExcelTemplate.mockResolvedValue({ blob: new Blob(["PK"]), filename: "BONATTI-COTIZACION.xlsx" });
     deleteReportExcelTemplate.mockResolvedValue(undefined);
     const user = userEvent.setup();
@@ -167,5 +208,108 @@ describe("ReportExcelTemplateCard", () => {
     expect(await screen.findByText("No se pudo eliminar.")).toBeTruthy();
     expect(screen.getByText("BONATTI-COTIZACION.xlsx")).toBeTruthy();
     expect(screen.getByText("Configurada · v2")).toBeTruthy();
+  });
+  it("shows the compatibility diagnosis of a rejected template without ever calling it Configurada", async () => {
+    uploadReportExcelTemplate.mockRejectedValue(REJECTION);
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.upload(await screen.findByLabelText("Subir plantilla Excel"), xlsxFile("ROTA.xlsx"));
+
+    expect(await screen.findByText("Compatibilidad: No compatible")).toBeTruthy();
+    expect(screen.getByText("Placeholders reconocidos: 5")).toBeTruthy();
+    expect(screen.getByText("Filas repetibles detectadas: 1")).toBeTruthy();
+    expect(screen.getByText("Errores (2)")).toBeTruthy();
+    // Every issue names the sheet and the cell or merged range it came from.
+    expect(screen.getByText("Cotización!B4")).toBeTruthy();
+    expect(screen.getByText(/Placeholder desconocido en Cotización!B4/)).toBeTruthy();
+    expect(screen.getByText("Cotización!A8:C9")).toBeTruthy();
+    expect(screen.getByText(/atraviesa una fila repetible/)).toBeTruthy();
+    expect(screen.queryByText("Advertencias (0)")).toBeNull();
+
+    // The report is still without a template, and the file survives for a retry.
+    expect(screen.getByText("Sin plantilla")).toBeTruthy();
+    expect(screen.queryByText(/^Configurada/)).toBeNull();
+    expect(screen.getByRole("button", { name: /Reintentar ROTA\.xlsx/ })).toBeTruthy();
+  });
+
+  it("keeps the active template on screen when a replacement is rejected", async () => {
+    getReportExcelTemplate.mockResolvedValue(TEMPLATE);
+    uploadReportExcelTemplate.mockRejectedValueOnce(REJECTION).mockResolvedValueOnce({
+      ...UPLOAD, version: 3, original_filename: "CORREGIDA.xlsx",
+    });
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.upload(await screen.findByLabelText("Reemplazar plantilla"), xlsxFile("CORREGIDA.xlsx"));
+
+    expect(await screen.findByText("Compatibilidad: No compatible")).toBeTruthy();
+    // The rejected file never became a version: v2 is still the active one.
+    expect(screen.getByText("Configurada · v2")).toBeTruthy();
+    expect(screen.getByText("BONATTI-COTIZACION.xlsx")).toBeTruthy();
+    expect(screen.getByText(/la plantilla vigente no fue modificada/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /Reintentar CORREGIDA\.xlsx/ }));
+    expect(await screen.findByText("Configurada · v3")).toBeTruthy();
+    expect(screen.getByText("Compatibilidad: Válida")).toBeTruthy();
+    expect(screen.queryByText("Errores (2)")).toBeNull();
+  });
+
+  it("reports a template the backend accepted with warnings as installed but flagged", async () => {
+    uploadReportExcelTemplate.mockResolvedValue({
+      ...UPLOAD,
+      validation: {
+        valid: true,
+        placeholder_count: 9,
+        repeatable_rows: 0,
+        warnings: [{
+          code: "no_repeatable_row",
+          message: "Ninguna fila contiene campos de partidas.",
+          sheet: "Cotización",
+          cell: null,
+          placeholder: null,
+          range: null,
+        }],
+        errors: [],
+      },
+    });
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.upload(await screen.findByLabelText("Subir plantilla Excel"), xlsxFile());
+
+    expect(await screen.findByText("Compatibilidad: Con advertencias")).toBeTruthy();
+    expect(screen.getByText("Advertencias (1)")).toBeTruthy();
+    expect(screen.getByText("Cotización")).toBeTruthy();
+    expect(screen.getByText("Configurada · v2")).toBeTruthy();
+  });
+
+  it("falls back to the plain message when the failure carries no validation result", async () => {
+    uploadReportExcelTemplate.mockRejectedValue(new ApiError(413, "La plantilla excede el tamaño máximo."));
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.upload(await screen.findByLabelText("Subir plantilla Excel"), xlsxFile());
+
+    expect(await screen.findByText("La plantilla excede el tamaño máximo.")).toBeTruthy();
+    expect(screen.queryByText(/^Compatibilidad:/)).toBeNull();
+  });
+
+  it("drops the diagnosis with the template it described when the template is deleted", async () => {
+    getReportExcelTemplate.mockResolvedValue(TEMPLATE);
+    uploadReportExcelTemplate.mockResolvedValue(UPLOAD);
+    deleteReportExcelTemplate.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.upload(await screen.findByLabelText("Reemplazar plantilla"), xlsxFile());
+    expect(await screen.findByText("Compatibilidad: Válida")).toBeTruthy();
+
+    getReportExcelTemplate.mockRejectedValue(new ApiError(404, "El reporte no tiene plantilla Excel activa."));
+    await user.click(screen.getByRole("button", { name: "Eliminar plantilla" }));
+    await user.click(screen.getByRole("button", { name: "Confirmar" }));
+
+    expect(await screen.findByText("Sin plantilla")).toBeTruthy();
+    expect(screen.queryByText(/^Compatibilidad:/)).toBeNull();
   });
 });

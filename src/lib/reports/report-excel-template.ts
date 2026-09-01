@@ -3,6 +3,8 @@ import { orderedReportParameters } from "@/lib/reports/report-runtime";
 import type {
   ReportColumn,
   ReportExcelTemplate,
+  ReportExcelTemplateValidationIssue,
+  ReportExcelTemplateValidationResult,
   ReportParameter,
   ReportParameterDataType,
   ReportSummaryConfiguration,
@@ -27,6 +29,75 @@ export const EXCEL_TEMPLATE_STATUS_LABELS: Record<ReportExcelTemplateStatus, str
   missing: "Sin plantilla",
   configured: "Configurada",
 };
+
+/**
+ * The compatibility preflight (Backend #24), read as three states.
+ *
+ * `invalid` is the only one the backend refuses to activate; `warning` exists
+ * because the contract carries a `warnings` list the renderer tolerates.
+ */
+export type ReportExcelTemplateValidationStatus = "valid" | "warning" | "invalid";
+
+export function excelTemplateValidationStatus(
+  validation: ReportExcelTemplateValidationResult,
+): ReportExcelTemplateValidationStatus {
+  if (!validation.valid || validation.errors.length > 0) return "invalid";
+  return validation.warnings.length > 0 ? "warning" : "valid";
+}
+
+export const EXCEL_TEMPLATE_VALIDATION_LABELS: Record<ReportExcelTemplateValidationStatus, string> = {
+  valid: "Válida",
+  warning: "Con advertencias",
+  invalid: "No compatible",
+};
+
+export const INCOMPATIBLE_TEMPLATE_MESSAGE =
+  "La plantilla no es compatible con el Report Builder y no fue activada.";
+
+/** Where an issue lives, as the workbook writes it: `Hoja!B4`, or a merged range. */
+export function excelTemplateIssueLocation(issue: ReportExcelTemplateValidationIssue): string {
+  const target = issue.cell ?? issue.range;
+  return target ? `${issue.sheet}!${target}` : issue.sheet;
+}
+
+function issueList(value: unknown): ReportExcelTemplateValidationIssue[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (item == null || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.message !== "string" || typeof record.sheet !== "string") return [];
+    return [{
+      code: typeof record.code === "string" ? record.code : "unknown",
+      message: record.message,
+      sheet: record.sheet,
+      cell: typeof record.cell === "string" ? record.cell : null,
+      placeholder: typeof record.placeholder === "string" ? record.placeholder : null,
+      range: typeof record.range === "string" ? record.range : null,
+    }];
+  });
+}
+
+/**
+ * Reads a validation result out of an arbitrary payload — the `detail` of the
+ * rejection `422`, which reaches us as `unknown`. Anything that is not that
+ * shape returns `null` so the caller falls back to a plain error message
+ * instead of rendering a half-parsed diagnostic.
+ */
+export function parseExcelTemplateValidation(
+  value: unknown,
+): ReportExcelTemplateValidationResult | null {
+  if (value == null || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.valid !== "boolean") return null;
+  if (typeof record.placeholder_count !== "number" || typeof record.repeatable_rows !== "number") return null;
+  return {
+    valid: record.valid,
+    placeholder_count: record.placeholder_count,
+    repeatable_rows: record.repeatable_rows,
+    warnings: issueList(record.warnings),
+    errors: issueList(record.errors),
+  };
+}
 
 export const XLSX_EXTENSION = ".xlsx";
 export const XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

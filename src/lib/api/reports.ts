@@ -13,6 +13,7 @@ import type {
   ReportPreviewResponse,
   ReportProductOption,
   ReportExcelTemplate,
+  ReportExcelTemplateUpload,
   ReportUpdateRequest,
   Page,
 } from "@/types/api";
@@ -239,15 +240,19 @@ export function getReportExcelTemplate(code: string, options?: RequestOptions): 
 /**
  * Uploads or replaces the active template. The backend versions it, so a
  * replace is the same call as a first upload.
+ *
+ * The response carries the compatibility preflight (Backend #24). A template
+ * the preflight rejects never becomes a version: it comes back as a `422`
+ * whose `detail` is that same validation result.
  */
 export function uploadReportExcelTemplate(
   code: string,
   file: File,
   options?: RequestOptions,
-): Promise<ReportExcelTemplate> {
+): Promise<ReportExcelTemplateUpload> {
   const body = new FormData();
   body.append("file", file, file.name);
-  return browserApiClient.apiPutForm<ReportExcelTemplate>(excelTemplatePath(code), body, options);
+  return browserApiClient.apiPutForm<ReportExcelTemplateUpload>(excelTemplatePath(code), body, options);
 }
 
 /** Downloads the master template exactly as it was uploaded. */

@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileSpreadsheet, Loader2, RefreshCw, Trash2, Upload, X } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  FileSpreadsheet,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  Upload,
+  X,
+  XCircle,
+} from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,10 +31,15 @@ import { triggerBrowserDownload } from "@/lib/download";
 import { normalizeSummaries } from "@/lib/reports/report-builder";
 import {
   EXCEL_TEMPLATE_STATUS_LABELS,
+  EXCEL_TEMPLATE_VALIDATION_LABELS,
+  excelTemplateIssueLocation,
   excelTemplatePlaceholders,
   excelTemplateStatus,
+  excelTemplateValidationStatus,
   formatFileSize,
+  INCOMPATIBLE_TEMPLATE_MESSAGE,
   isXlsxFile,
+  parseExcelTemplateValidation,
   XLSX_EXTENSION,
   XLSX_MEDIA_TYPE,
   type ReportPlaceholderDescriptor,
@@ -32,6 +48,8 @@ import { formatDateTime } from "@/lib/format/date";
 import type {
   ReportColumn,
   ReportExcelTemplate,
+  ReportExcelTemplateValidationIssue,
+  ReportExcelTemplateValidationResult,
   ReportParameter,
   ReportSummaryConfiguration,
 } from "@/types/api";
@@ -62,6 +80,12 @@ export function ReportExcelTemplateCard({
   const [uploading, setUploading] = useState(false);
   /** Kept after a failed upload so the user can retry without picking the file again. */
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  /**
+   * The last preflight the backend answered with (Backend #24) — for the
+   * template it just activated, or for the one it just refused. `GET` does not
+   * carry it, so a freshly loaded page has none to show.
+   */
+  const [validation, setValidation] = useState<ReportExcelTemplateValidationResult | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
@@ -131,14 +155,25 @@ export function ReportExcelTemplateCard({
     setUploading(true);
     setPendingFile(file);
     setActionError(null);
+    setValidation(null);
     try {
-      const metadata = await uploadReportExcelTemplate(code, file);
+      const { validation: preflight, ...metadata } = await uploadReportExcelTemplate(code, file);
       setTemplate(metadata);
+      setValidation(preflight ?? null);
       setPendingFile(null);
     } catch (error) {
+      // A rejected template is never activated, so `template` is deliberately
+      // left alone: the report keeps whatever it had, and the badge keeps
+      // describing *that* file rather than the one that just bounced.
+      const rejected = error instanceof ApiError ? parseExcelTemplateValidation(error.detail) : null;
+      setValidation(rejected);
       // The chosen file stays in state: a failed upload must not cost the user
       // another trip through the file picker.
-      setActionError(getUserErrorMessage(error, "No se pudo subir la plantilla Excel."));
+      setActionError(
+        rejected != null
+          ? INCOMPATIBLE_TEMPLATE_MESSAGE
+          : getUserErrorMessage(error, "No se pudo subir la plantilla Excel."),
+      );
     } finally {
       uploadingRef.current = false;
       setUploading(false);
@@ -165,6 +200,7 @@ export function ReportExcelTemplateCard({
       await deleteReportExcelTemplate(code);
       setTemplate(null);
       setPendingFile(null);
+      setValidation(null);
       setConfirmingRemoval(false);
       // The backend owns activation: re-read rather than assume the delete
       // left the report with no template at all.
@@ -223,6 +259,8 @@ export function ReportExcelTemplateCard({
                 Este reporte todavía no tiene una plantilla Excel configurada.
               </p>
             )}
+
+            {validation != null && <ValidationPanel validation={validation} />}
 
             <div className="flex flex-wrap items-center gap-2">
               <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border px-3 text-sm font-medium hover:bg-accent">
@@ -327,5 +365,70 @@ export function ReportExcelTemplateCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+const VALIDATION_ICONS = {
+  valid: CheckCircle2,
+  warning: AlertTriangle,
+  invalid: XCircle,
+} as const;
+
+const VALIDATION_TONES = {
+  valid: "border-emerald-500/40 text-emerald-700 dark:text-emerald-400",
+  warning: "border-amber-500/40 text-amber-700 dark:text-amber-500",
+  invalid: "border-destructive/40 text-destructive",
+} as const;
+
+/**
+ * The compatibility diagnosis of the last upload (Backend #24).
+ *
+ * It describes the *file the backend just read*, not the active template: an
+ * incompatible workbook is reported here while the card above keeps showing
+ * whichever template is really installed.
+ */
+function ValidationPanel({ validation }: { validation: ReportExcelTemplateValidationResult }) {
+  const state = excelTemplateValidationStatus(validation);
+  const Icon = VALIDATION_ICONS[state];
+
+  return (
+    <section className={`flex flex-col gap-2 rounded-lg border p-3 ${VALIDATION_TONES[state]}`}>
+      <p className="flex items-center gap-2 font-medium">
+        <Icon className="h-4 w-4" aria-hidden="true" />
+        Compatibilidad: {EXCEL_TEMPLATE_VALIDATION_LABELS[state]}
+      </p>
+      <p className="text-sm text-muted-foreground">
+        Placeholders reconocidos: {validation.placeholder_count}
+      </p>
+      <p className="text-sm text-muted-foreground">
+        Filas repetibles detectadas: {validation.repeatable_rows}
+      </p>
+      {state === "invalid" && (
+        <p className="text-sm text-muted-foreground">
+          Corrige los errores y vuelve a subir el archivo; la plantilla vigente no fue modificada.
+        </p>
+      )}
+      <IssueList title="Errores" issues={validation.errors} />
+      <IssueList title="Advertencias" issues={validation.warnings} />
+    </section>
+  );
+}
+
+/** Every issue names its sheet, and its cell or merged range when it has one. */
+function IssueList({ title, issues }: { title: string; issues: ReportExcelTemplateValidationIssue[] }) {
+  if (issues.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-sm font-medium">
+        {title} ({issues.length})
+      </p>
+      <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-muted-foreground">
+        {issues.map((issue, index) => (
+          <li key={`${issue.code}-${excelTemplateIssueLocation(issue)}-${index}`}>
+            <span className="font-mono text-xs">{excelTemplateIssueLocation(issue)}</span> — {issue.message}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  excelTemplateIssueLocation,
   excelTemplatePlaceholders,
   excelTemplateStatus,
+  excelTemplateValidationStatus,
   formatFileSize,
   isXlsxFile,
+  parseExcelTemplateValidation,
 } from "./report-excel-template";
 import type {
   ReportColumn,
   ReportExcelTemplate,
+  ReportExcelTemplateValidationResult,
   ReportParameter,
   ReportSummaryConfiguration,
 } from "@/types/api";
@@ -83,5 +87,84 @@ describe("report excel template contract", () => {
     expect(formatFileSize(24_576)).toBe("24.0 KB");
     expect(formatFileSize(5_000_000)).toBe("4.8 MB");
     expect(formatFileSize(-1)).toBe("—");
+  });
+});
+
+const VALID: ReportExcelTemplateValidationResult = {
+  valid: true, placeholder_count: 14, repeatable_rows: 1, warnings: [], errors: [],
+};
+
+describe("excel template compatibility preflight", () => {
+  it("reads the three states the card labels", () => {
+    expect(excelTemplateValidationStatus(VALID)).toBe("valid");
+    expect(excelTemplateValidationStatus({
+      ...VALID,
+      warnings: [{ code: "empty_sheet", message: "Hoja vacía.", sheet: "Hoja2", cell: null, placeholder: null, range: null }],
+    })).toBe("warning");
+    expect(excelTemplateValidationStatus({
+      ...VALID,
+      valid: false,
+      errors: [{ code: "unknown_placeholder", message: "Placeholder desconocido.", sheet: "Cotización", cell: "B4", placeholder: "{{rows.foo}}", range: null }],
+    })).toBe("invalid");
+  });
+
+  it("treats a result that carries errors as incompatible even if the flag disagrees", () => {
+    expect(excelTemplateValidationStatus({
+      ...VALID,
+      errors: [{ code: "invalid_placeholder", message: "Inválido.", sheet: "Cotización", cell: "A1", placeholder: "{{ }}", range: null }],
+    })).toBe("invalid");
+  });
+
+  it("locates an issue by cell, by merged range, or by sheet alone", () => {
+    expect(excelTemplateIssueLocation({ code: "x", message: "m", sheet: "Cotización", cell: "B4", placeholder: null, range: null })).toBe("Cotización!B4");
+    expect(excelTemplateIssueLocation({ code: "x", message: "m", sheet: "Cotización", cell: null, placeholder: null, range: "A8:C9" })).toBe("Cotización!A8:C9");
+    expect(excelTemplateIssueLocation({ code: "x", message: "m", sheet: "Cotización", cell: null, placeholder: null, range: null })).toBe("Cotización");
+  });
+
+  it("parses the 422 detail the backend sends for a rejected template", () => {
+    expect(parseExcelTemplateValidation({
+      valid: false,
+      placeholder_count: 3,
+      repeatable_rows: 1,
+      warnings: [],
+      errors: [{
+        code: "merge_crosses_repeatable_row",
+        message: "La combinación A8:C9 atraviesa una fila repetible.",
+        sheet: "Cotización",
+        cell: null,
+        placeholder: null,
+        range: "A8:C9",
+      }],
+    })).toEqual({
+      valid: false,
+      placeholder_count: 3,
+      repeatable_rows: 1,
+      warnings: [],
+      errors: [{
+        code: "merge_crosses_repeatable_row",
+        message: "La combinación A8:C9 atraviesa una fila repetible.",
+        sheet: "Cotización",
+        cell: null,
+        placeholder: null,
+        range: "A8:C9",
+      }],
+    });
+  });
+
+  it("fills the optional issue fields the backend omits", () => {
+    expect(parseExcelTemplateValidation({
+      valid: false, placeholder_count: 1, repeatable_rows: 0,
+      errors: [{ code: "unknown_namespace", message: "Namespace desconocido.", sheet: "Hoja1" }],
+    })?.errors).toEqual([
+      { code: "unknown_namespace", message: "Namespace desconocido.", sheet: "Hoja1", cell: null, placeholder: null, range: null },
+    ]);
+  });
+
+  it("refuses any payload that is not a validation result, so no half-parsed diagnostic renders", () => {
+    expect(parseExcelTemplateValidation("El archivo no es un XLSX válido.")).toBeNull();
+    expect(parseExcelTemplateValidation(null)).toBeNull();
+    expect(parseExcelTemplateValidation([{ loc: ["body"], msg: "field required" }])).toBeNull();
+    expect(parseExcelTemplateValidation({ valid: false })).toBeNull();
+    expect(parseExcelTemplateValidation({ valid: false, placeholder_count: 1, repeatable_rows: 0, errors: ["boom"] })?.errors).toEqual([]);
   });
 });
