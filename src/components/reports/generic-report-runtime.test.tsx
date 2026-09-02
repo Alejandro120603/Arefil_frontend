@@ -45,6 +45,8 @@ const REPORT: ReportDefinition = {
   updated_at: "2026-08-26T12:00:00Z",
 };
 
+const EXECUTION_ID = "10d693fd-ecc3-4759-aec7-d3d7cb086eb7";
+
 const PRODUCTS = [
   { value: 101, label: "P-001 · Filtro", product_id: 101, part_number: "P-001", item_number: null, description: "Filtro", unit_price: "115.99", currency: "MXN", classification: null },
   { value: 202, label: "P-002 · Aceite", product_id: 202, part_number: "P-002", item_number: null, description: "Aceite", unit_price: "116.00", currency: "MXN", classification: null },
@@ -107,6 +109,7 @@ describe("GenericReportRuntime", () => {
     resolveReportProductOption.mockImplementation((_code, _path, _context, productId) =>
       Promise.resolve(PRODUCTS.find((candidate) => candidate.product_id === productId) ?? null));
     executeReport.mockResolvedValue({
+      execution_id: EXECUTION_ID,
       columns: [
         { key: "sku", label: "SKU", data_type: "string", format_type: "text" },
         { key: "total", label: "Total", data_type: "decimal", format_type: "currency" },
@@ -150,16 +153,13 @@ describe("GenericReportRuntime", () => {
     }, expect.anything()));
     expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "cotizacion.xlsx");
 
-    // The document layer renders from the very same validated snapshot.
+    // The document layer renders from the frozen execution snapshot, never
+    // from the parameters the form still holds.
     downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "cotizacion-bonatti.xlsx" });
     await user.click(screen.getByRole("button", { name: "Descargar cotización Excel" }));
-    await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledWith("COTIZACION", {
-      price_list_id: 7,
-      items: [
-        { product_id: 101, quantity: 2, discount: "10" },
-        { product_id: 202, quantity: 5, discount: "0" },
-      ],
-    }, expect.anything()));
+    await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledWith(
+      "COTIZACION", EXECUTION_ID, expect.anything(),
+    ));
 
     await user.clear(screen.getByLabelText("Cantidad * 1"));
     await user.type(screen.getByLabelText("Cantidad * 1"), "3");
@@ -167,6 +167,28 @@ describe("GenericReportRuntime", () => {
     expect(screen.queryByRole("button", { name: "Descargar Excel de datos" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Descargar cotización Excel" })).toBeNull();
     expect(screen.getByRole("button", { name: "Regenerar reporte" })).toBeTruthy();
+
+    // Regenerating replaces the id: the obsolete one is never sent again.
+    executeReport.mockResolvedValue({
+      execution_id: "b9f0a1c2-0000-4000-8000-000000000002",
+      columns: [{ key: "sku", label: "SKU", data_type: "string", format_type: "text" }],
+      rows: [{ sku: "P-001" }], totals: {}, row_count: 1, truncated: false,
+    });
+    await user.click(screen.getByRole("button", { name: "Regenerar reporte" }));
+    await user.click(await screen.findByRole("button", { name: "Descargar cotización Excel" }));
+    await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenLastCalledWith(
+      "COTIZACION", "b9f0a1c2-0000-4000-8000-000000000002", expect.anything(),
+    ));
+  });
+
+  it("offers no document download for a report the backend did not snapshot", async () => {
+    const user = userEvent.setup();
+    executeReport.mockResolvedValue({ columns: [], rows: [], row_count: 0 });
+    render(<GenericReportRuntime report={REPORT} />);
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    expect(await screen.findByText("Vista previa del reporte")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Descargar Excel de datos" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Descargar cotización Excel" })).toBeNull();
   });
 
   it("places structured backend errors on the affected repeatable field", async () => {

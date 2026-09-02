@@ -14,6 +14,8 @@ import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { executeReport } from "@/lib/api/reports";
 import {
   backendRowErrors,
+  isReportBuilderPreviewResponse,
+  reportExecutionId,
   initialRuntimeGroupValues,
   initialRuntimeValues,
   validateRuntimeForm,
@@ -26,6 +28,12 @@ interface SuccessfulExecution {
   id: number;
   parameters: Record<string, unknown>;
   payload: unknown;
+  /**
+   * Snapshot the backend froze for this run (Backend #25). The final document
+   * renders from it alone, so it lives and dies with this execution: any edit
+   * clears the execution and with it the id.
+   */
+  executionId: string | null;
 }
 
 export function GenericReportRuntime({
@@ -101,7 +109,12 @@ export function GenericReportRuntime({
       const payload = await executeReport(report.code, parameters, { signal: controller.signal });
       if (controller.signal.aborted) return;
       executionIdRef.current += 1;
-      setExecution({ id: executionIdRef.current, parameters, payload });
+      setExecution({
+        id: executionIdRef.current,
+        parameters,
+        payload,
+        executionId: reportExecutionId(payload),
+      });
       setGeneratedOnce(true);
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -166,14 +179,17 @@ export function GenericReportRuntime({
           <Card id="descargas" className="scroll-mt-6">
             <CardHeader><CardTitle>Descargar reporte</CardTitle></CardHeader>
             <CardContent className="flex flex-col gap-4">
-              {/* Both layers render from `execution.parameters`: the snapshot the
-                  backend just ran. Any edit clears the execution, so a stale
-                  document can never be downloaded. */}
-              <div className="flex flex-col gap-2">
-                <h3 className="text-sm font-medium">Documento</h3>
-                <p className="text-sm text-muted-foreground">La cotización final se arma con la plantilla Excel del reporte y exactamente los parámetros de esta vista previa.</p>
-                <ReportDocumentDownloadButton code={report.code} parameters={execution.parameters} />
-              </div>
+              {/* The document renders from `execution.executionId`, the frozen
+                  snapshot behind this preview; the tabular exports still run on
+                  `execution.parameters`. Any edit clears the execution, so a
+                  stale document can never be downloaded. */}
+              {isReportBuilderPreviewResponse(execution.payload) && (
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-sm font-medium">Documento</h3>
+                  <p className="text-sm text-muted-foreground">La cotización final se arma con la plantilla Excel del reporte y exactamente las filas y totales de esta vista previa.</p>
+                  <ReportDocumentDownloadButton code={report.code} executionId={execution.executionId} />
+                </div>
+              )}
               <div className="flex flex-col gap-2">
                 <h3 className="text-sm font-medium">Exportar datos</h3>
                 <p className="text-sm text-muted-foreground">También puedes descargar los datos tabulares que generó el backend.</p>

@@ -324,19 +324,22 @@ describe("report builder API", () => {
     );
   });
 
-  it("renders the final quotation from the executed parameter snapshot", async () => {
+  it("renders the final quotation from the approved execution snapshot", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("PK", {
       headers: { "Content-Disposition": "attachment; filename=cotizacion-document.xlsx" },
     }));
     vi.stubGlobal("fetch", fetchMock);
-    const parameters = { price_list_id: 7, items: [{ product_id: 101, quantity: 2 }] };
 
-    await expect(downloadReportDocumentXlsx("COTIZACION", parameters)).resolves.toMatchObject({
-      filename: "cotizacion-document.xlsx",
-    });
+    await expect(downloadReportDocumentXlsx("COTIZACION", "10d693fd-ecc3-4759-aec7-d3d7cb086eb7"))
+      .resolves.toMatchObject({ filename: "cotizacion-document.xlsx" });
+    // The backend rejects a body that mixes the id with report parameters, so
+    // `execution_id` has to travel alone.
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend-api/reports/COTIZACION/document/xlsx",
-      expect.objectContaining({ method: "POST", body: JSON.stringify(parameters) }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ execution_id: "10d693fd-ecc3-4759-aec7-d3d7cb086eb7" }),
+      }),
     );
   });
 });

@@ -339,6 +339,18 @@ export function isReportBuilderPreviewResponse(value: unknown): value is ReportB
     && typeof candidate.truncated === "boolean";
 }
 
+/**
+ * Public id of the immutable snapshot the backend persisted for this dataset
+ * (Backend #25). Only builder datasets carry one; every other payload answers
+ * `null`, which is what keeps the document layer from offering a download it
+ * could not honour.
+ */
+export function reportExecutionId(payload: unknown): string | null {
+  if (!isReportBuilderPreviewResponse(payload)) return null;
+  const executionId = payload.execution_id;
+  return typeof executionId === "string" && executionId.trim() !== "" ? executionId : null;
+}
+
 export function isSQLReportExecutionResponse(value: unknown): value is SQLReportExecutionResponse {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<SQLReportExecutionResponse>;

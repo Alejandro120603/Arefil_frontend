@@ -538,6 +538,12 @@ export interface ReportBuilderPreviewColumn {
  * values arrive as strings, like every other backend Decimal.
  */
 export interface ReportBuilderPreviewResponse {
+  /**
+   * Public id of the immutable execution snapshot the backend persisted
+   * (Backend #25). The final document renders from this id, never from the
+   * parameters again; it is absent for datasets the backend cannot persist.
+   */
+  execution_id?: string | null;
   columns: ReportBuilderPreviewColumn[];
   /** Normalized scalar parameters the backend actually ran with (no groups). */
   parameters?: Record<string, unknown>;

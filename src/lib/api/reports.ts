@@ -266,14 +266,22 @@ export function deleteReportExcelTemplate(code: string, options?: RequestOptions
 }
 
 /**
- * Renders the final quotation from the active template. The body is the same
- * parameter map `executeReport` ran with, so the file can never disagree with
- * the preview the user approved.
+ * Renders the final quotation from the immutable execution snapshot the
+ * backend persisted for the preview the user approved (Backend #25).
+ *
+ * The body carries the `execution_id` alone - the backend rejects mixing it
+ * with report parameters, and re-sending parameters would let the document
+ * disagree with the rows on screen. A snapshot that expired (24 h by default)
+ * or that belongs to another report answers `404`/`409`.
  */
 export function downloadReportDocumentXlsx(
   code: string,
-  parameters: Record<string, unknown>,
+  executionId: string,
   options?: RequestOptions,
 ): Promise<BlobDownload> {
-  return browserApiClient.apiPostBlob(reportPath(code, "/document/xlsx"), parameters, options);
+  return browserApiClient.apiPostBlob(
+    reportPath(code, "/document/xlsx"),
+    { execution_id: executionId },
+    options,
+  );
 }
