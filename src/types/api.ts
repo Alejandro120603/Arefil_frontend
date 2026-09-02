@@ -237,6 +237,12 @@ export interface ReportDefinition {
   name: string;
   description: string | null;
   category: string | null;
+  /**
+   * Pattern for the final XLSX document name (Backend #26). `null` keeps the
+   * backend's generic fallback (`<code>-document.xlsx`). Only
+   * `{{parameters.*}}`, `{{report.code}}` and `{{report.name}}` are supported.
+   */
+  filename_template: string | null;
   enabled: boolean;
   data_source_id: number;
   data_source: ReportDataSourceSummary;
@@ -325,6 +331,7 @@ export interface ReportCreateRequest {
   name: string;
   description: string | null;
   category: string | null;
+  filename_template: string | null;
   data_source_id: number;
   enabled: boolean;
   parameters: ReportParameter[];

@@ -117,6 +117,7 @@ describe("report manager API", () => {
       name: "Catálogo",
       description: null,
       category: null,
+      filename_template: null,
       enabled: false,
       data_source_id: dataSource.id,
       data_source: dataSource,
@@ -138,6 +139,7 @@ describe("report manager API", () => {
       name: definition.name,
       description: null,
       category: null,
+      filename_template: null,
       data_source_id: dataSource.id,
       enabled: false,
       parameters: [],
@@ -162,7 +164,7 @@ describe("report manager API", () => {
       .mockResolvedValueOnce(Response.json({ detail: "El reporte DUPLICATE ya existe." }, { status: 409 }))
       .mockResolvedValueOnce(Response.json({ detail: "near FROM: syntax error" }, { status: 422 })));
     const request = {
-      code: "DUPLICATE", name: "Duplicate", description: null, category: null,
+      code: "DUPLICATE", name: "Duplicate", description: null, category: null, filename_template: null,
       data_source_id: 1,
       enabled: false, parameters: [],
     };

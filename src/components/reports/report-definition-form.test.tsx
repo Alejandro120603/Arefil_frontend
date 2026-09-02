@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportDefinitionForm } from "./report-definition-form";
+import { ApiError } from "@/lib/api/errors";
 import type { ReportAdminDefinition, ReportDataSource, ReportDefinition } from "@/types/api";
 
 const { push, refresh, createReport, updateReport, listReportDataSources } = vi.hoisted(() => ({
@@ -85,6 +86,7 @@ const REPORT: ReportAdminDefinition = {
   name: "Catálogo",
   description: "Productos",
   category: "Catálogo",
+  filename_template: null,
   enabled: true,
   data_source_id: PRODUCT_SOURCE.id,
   data_source: PRODUCT_SOURCE,
@@ -232,6 +234,63 @@ describe("ReportDefinitionForm", () => {
     expect(await screen.findByText("No se pudo guardar el reporte. Tus cambios siguen en el formulario.")).toBeTruthy();
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Sin guardar");
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("saves the filename pattern built from the supported placeholders", async () => {
+    const user = userEvent.setup();
+    updateReport.mockResolvedValue({ ...QUOTATION_REPORT, filename_template: "{{parameters.price_list_id}}" });
+    render(<ReportDefinitionForm report={QUOTATION_REPORT} />);
+    await screen.findByRole("option", { name: "Renglones de cotización" });
+
+    await user.click(screen.getByRole("button", { name: "{{parameters.price_list_id}}" }));
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
+    expect(updateReport.mock.calls[0]?.[1].filename_template).toBe("{{parameters.price_list_id}}");
+  });
+
+  it("sends null when the pattern is cleared, keeping the backend fallback", async () => {
+    const user = userEvent.setup();
+    updateReport.mockResolvedValue({ ...QUOTATION_REPORT, filename_template: null });
+    render(<ReportDefinitionForm report={{ ...QUOTATION_REPORT, filename_template: "{{report.code}}" }} />);
+    await screen.findByRole("option", { name: "Renglones de cotización" });
+
+    await user.clear(screen.getByLabelText("Patrón del nombre"));
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
+    expect(updateReport.mock.calls[0]?.[1].filename_template).toBeNull();
+  });
+
+  it("refuses locally a placeholder the backend does not support", async () => {
+    const user = userEvent.setup();
+    render(<ReportDefinitionForm report={{ ...QUOTATION_REPORT, filename_template: "{{execution.id}}" }} />);
+    await screen.findByRole("option", { name: "Renglones de cotización" });
+
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    expect(await screen.findAllByText("Placeholder no permitido en el nombre de archivo: {{execution.id}}."))
+      .toHaveLength(2);
+    expect(updateReport).not.toHaveBeenCalled();
+  });
+
+  it("keeps the edited pattern when the backend rejects it", async () => {
+    const user = userEvent.setup();
+    updateReport.mockRejectedValue(
+      new ApiError(400, "El parámetro 'folio' usado por filename_template no está definido."),
+    );
+    render(<ReportDefinitionForm report={{ ...QUOTATION_REPORT, filename_template: "{{report.code}}" }} />);
+    await screen.findByRole("option", { name: "Renglones de cotización" });
+
+    const field = screen.getByLabelText("Patrón del nombre");
+    await user.clear(field);
+    await user.click(field);
+    await user.paste("{{report.name}} final");
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    expect(await screen.findByText(/no está definido/)).toBeTruthy();
+    expect((screen.getByLabelText("Patrón del nombre") as HTMLInputElement).value)
+      .toBe("{{report.name}} final");
   });
 
   it("shows a migrated report whose source is now disabled", async () => {

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CircleCheck, Database, Loader2, Save } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
+import { ReportFilenameTemplateField } from "@/components/reports/report-filename-template-field";
 import { ReportParameterEditor } from "@/components/reports/report-parameter-editor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -243,6 +244,14 @@ export function ReportDefinitionForm({ report = null }: { report?: ReportAdminDe
           />
         </CardContent>
       </Card>
+
+      <ReportFilenameTemplateField
+        value={value.filename_template}
+        code={value.code}
+        name={value.name}
+        parameters={value.parameters}
+        onChange={(filename_template) => change({ filename_template })}
+      />
 
       <div className="flex justify-end">
         <Button type="submit" disabled={saving || sources == null}>

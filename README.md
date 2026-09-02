@@ -132,6 +132,13 @@ parámetros de la vista previa, recibe el blob y respeta el nombre de
 `Content-Disposition`. CSV se conserva como acción secundaria. No se usa
 ninguna librería de Excel en el navegador.
 
+El nombre del documento XLSX final se configura por reporte en
+`/administracion/reportes/[code]` mediante `filename_template` (Backend #26).
+Solo se ofrecen los placeholders que el backend admite —`{{parameters.*}}`,
+`{{report.code}}` y `{{report.name}}`— y el campo muestra una vista previa del
+nombre resuelto cuando hay valores de ejemplo. Vacío significa conservar el
+nombre genérico `<code>-document.xlsx` que arma el backend.
+
 Los reportes se configuran en la base de datos, no en el código: `SQL_QUERY` y
 `HANDLER` (incluidos `PRICE_LIST_COMPARISON` y los renglones repetibles que dan
 soporte a cotizaciones) se renderizan con el mismo runtime genérico.

@@ -8,6 +8,7 @@ import type { ReportDefinition } from "@/types/api";
 const BASE: Omit<ReportDefinition, "code" | "name"> = {
   description: null,
   category: null,
+  filename_template: null,
   enabled: true,
   data_source_id: 1,
   data_source: {

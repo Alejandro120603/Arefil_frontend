@@ -29,6 +29,7 @@ const REPORT: ReportDefinition = {
   name: "Sin parámetros",
   description: null,
   category: null,
+  filename_template: null,
   enabled: true,
   data_source_id: 1,
   data_source: {

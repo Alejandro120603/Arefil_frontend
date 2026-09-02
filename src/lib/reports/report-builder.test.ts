@@ -433,7 +433,7 @@ describe("serialization", () => {
   it("loads an existing builder in display order", () => {
     const builder: ReportBuilderDefinition = {
       report: {
-        code: "COTIZACION", name: "Cotización", description: null, category: null, enabled: true,
+        code: "COTIZACION", name: "Cotización", description: null, category: null, filename_template: null, enabled: true,
         data_source_id: 5,
         data_source: { id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización", description: null, enabled: true, capabilities: ["REPEATABLE_ROWS"] },
         parameters: [QUANTITY],
@@ -452,7 +452,7 @@ describe("serialization", () => {
   it("falls back to a default layout when the report has no builder yet", () => {
     const value = builderFormFromDefinition({
       report: {
-        code: "NEW", name: "Nuevo", description: null, category: null, enabled: false,
+        code: "NEW", name: "Nuevo", description: null, category: null, filename_template: null, enabled: false,
         data_source_id: 1,
         data_source: { id: 1, code: "PRODUCT_CATALOG", name: "Catálogo de productos", description: null, enabled: true, capabilities: [] },
         parameters: [],
@@ -507,7 +507,7 @@ describe("serialization", () => {
   it("upgrades a saved legacy layout when the builder loads", () => {
     const value = builderFormFromDefinition({
       report: {
-        code: "LEGACY", name: "Legacy", description: null, category: null, enabled: true,
+        code: "LEGACY", name: "Legacy", description: null, category: null, filename_template: null, enabled: true,
         data_source_id: 1,
         data_source: { id: 1, code: "PRODUCT_CATALOG", name: "Catálogo", description: null, enabled: true, capabilities: [] },
         parameters: [], parameter_groups: [],

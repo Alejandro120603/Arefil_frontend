@@ -51,7 +51,7 @@ const QUANTITY: ReportParameter = {
 };
 
 const REPORT = {
-  code: "COTIZACION", name: "Cotización", description: null, category: null, enabled: true,
+  code: "COTIZACION", name: "Cotización", description: null, category: null, filename_template: null, enabled: true,
   data_source_id: 5,
   data_source: {
     id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización",
