@@ -46,27 +46,6 @@ describe("createApiClient", () => {
     });
   });
 
-  it("loads raw templates and saves their exact JSON text with PUT", async () => {
-    const template = '{"ReportVersion":"2026.3.2","Pages":{"0":{}}}';
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(template, { headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(Response.json({ report_code: "PRICE_LIST_COMPARISON", version: 2 }));
-    vi.stubGlobal("fetch", fetchMock);
-    const api = createApiClient(() => "/backend-api");
-
-    await expect(api.apiGetText("/reports/PRICE_LIST_COMPARISON/template")).resolves.toBe(template);
-    await expect(
-      api.apiPutText<{ version: number }>("/reports/PRICE_LIST_COMPARISON/template", template),
-    ).resolves.toMatchObject({ version: 2 });
-
-    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: template,
-    });
-  });
-
   it("preserves FormData uploads without overriding the multipart boundary", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ import_id: 1 }));
     vi.stubGlobal("fetch", fetchMock);

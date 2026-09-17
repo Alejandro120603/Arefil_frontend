@@ -2,8 +2,7 @@
  * Pure presentation logic for the A-vs-B price list comparison report.
  *
  * Nothing here touches React or the network: filtering, paging and label
- * mapping live in one testable place, and the same helpers can back the
- * Stimulsoft viewer in Frontend #9 without being rewritten.
+ * mapping live in one testable place shared by the native comparison preview.
  */
 import type {
   ComparisonPriceList,
@@ -128,7 +127,7 @@ export const DISTINCT_LISTS_MESSAGE = "Selecciona dos listas distintas.";
 /**
  * Returns the reason the comparison cannot run, or `null` when the selection
  * is valid. Drives both the disabled `Comparar` button and the inline hint, so
- * an invalid pair can never reach `getPriceListComparison`.
+ * an invalid pair can never reach the generic report endpoint.
  */
 export function validateComparisonSelection(
   priceListAId: number | null,

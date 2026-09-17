@@ -10,10 +10,8 @@ export function parseDecimal(value: string | null | undefined): number | null {
 
 /**
  * Constructing an `Intl.NumberFormat` costs ~20 µs, which rounds to nothing for
- * the 50 rows the HTML table paints and adds up over the 6,200 rows the
- * Stimulsoft report formats in one pass (four formatted fields per row, so
- * ~25,000 constructions, measured at ~0.55 s). Formatters are immutable and
- * keyed here by their full option set, so sharing them changes no output.
+ * a paginated HTML table. Formatters are immutable and keyed here by their
+ * full option set, so sharing them changes no output.
  */
 const FORMATTER_CACHE = new Map<string, Intl.NumberFormat>();
 

@@ -1,41 +1,39 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  PRICE_LIST_COMPARISON_PATH,
-  SAME_PRICE_LIST_MESSAGE,
-  getPriceListComparison,
   createReport,
   downloadReportData,
   executeReport,
   getReportParameterOptions,
+  listAllReportParameterOptions,
   previewReport,
-  getReportTemplate,
-  saveReportTemplate,
+  resolveReportProductOption,
+  searchReportProductOptions,
   updateReport,
+  getReportBuilder,
+  getReportFieldCatalog,
+  previewReportBuilder,
+  saveReportBuilder,
+  deleteReportExcelTemplate,
+  downloadReportDocumentXlsx,
+  downloadReportExcelTemplate,
+  getReportExcelTemplate,
+  uploadReportExcelTemplate,
 } from "./reports";
 import { ApiError, getUserErrorMessage } from "./errors";
-import type { PriceListComparisonResponse } from "@/types/api";
-
-const EMPTY_COMPARISON: PriceListComparisonResponse = {
-  report: { code: "PRICE_LIST_COMPARISON", generated_at: "2026-08-24T12:00:00Z" },
-  supplier: { id: 1, code: "DONALDSON", name: "Donaldson" },
-  list_a: { id: 1, effective_date: "2025-10-20", currency: "MXN", source_filename: "a.xlsx" },
-  list_b: { id: 2, effective_date: "2026-01-15", currency: "MXN", source_filename: "b.xlsx" },
-  summary: {
-    total_products: 0,
-    increased: 0,
-    decreased: 0,
-    unchanged: 0,
-    new: 0,
-    removed: 0,
-    average_percentage_change: null,
-  },
-  items: [],
-};
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
+
+const PRODUCT = {
+  value: 120, label: "P550202 · Filtro Donaldson", product_id: 120, part_number: "P550202",
+  item_number: "1000", description: "Filtro Donaldson", unit_price: "574.13", currency: "MXN", classification: "A",
+};
+
+function optionsPage<T>(items: T[], meta: Partial<{ page: number; page_size: number; total_items: number; total_pages: number }> = {}) {
+  return { items, meta: { page: 1, page_size: 20, total_items: items.length, total_pages: items.length > 0 ? 1 : 0, ...meta } };
+}
 
 describe("report manager API", () => {
   it("executes any report through the generic data endpoint", async () => {
@@ -50,6 +48,52 @@ describe("report manager API", () => {
     );
   });
 
+  it("passes scalar context when loading options for a repeatable field", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(optionsPage([{ value: 101, label: "P-001 · Filtro" }])));
+    vi.stubGlobal("fetch", fetchMock);
+    await getReportParameterOptions("COTIZACION", "items.product_id", { price_list_id: 7 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/parameters/items.product_id/options?price_list_id=7",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("walks every page of a bounded option source", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(optionsPage([{ value: 1, label: "A" }], { page: 1, total_items: 2, total_pages: 2 })))
+      .mockResolvedValueOnce(Response.json(optionsPage([{ value: 2, label: "B" }], { page: 2, total_items: 2, total_pages: 2 })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listAllReportParameterOptions("COTIZACION", "price_list_id")).resolves.toEqual([
+      { value: 1, label: "A" }, { value: 2, label: "B" },
+    ]);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/backend-api/reports/COTIZACION/parameters/price_list_id/options?page=1&page_size=100",
+      "/backend-api/reports/COTIZACION/parameters/price_list_id/options?page=2&page_size=100",
+    ]);
+  });
+
+  it("searches products server-side inside one price list and never asks for the whole catalog", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(optionsPage([PRODUCT])));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(searchReportProductOptions("COTIZACION", "items.product_id", { price_list_id: 7 }, " P550202 ")).resolves.toEqual([PRODUCT]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/parameters/items.product_id/options?search=P550202&page=1&page_size=20&price_list_id=7",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("resolves a selected product against a list and answers null when it does not belong to it", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json(optionsPage([PRODUCT]))));
+    await expect(resolveReportProductOption("COTIZACION", "items.product_id", { price_list_id: 7 }, 120))
+      .resolves.toEqual(PRODUCT);
+
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json(optionsPage([]))));
+    await expect(resolveReportProductOption("COTIZACION", "items.product_id", { price_list_id: 9 }, 120))
+      .resolves.toBeNull();
+  });
+
   it("prefers an RFC 5987 backend filename and removes path separators", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response("csv", {
       headers: { "Content-Disposition": "attachment; filename=fallback.csv; filename*=UTF-8''reporte%20agosto%2Ffinal.csv" },
@@ -60,22 +104,32 @@ describe("report manager API", () => {
   });
 
   it("creates, previews, updates, and exports through the browser proxy", async () => {
+    const dataSource = {
+      id: 1,
+      code: "PRODUCT_CATALOG",
+      name: "Catálogo de productos",
+      description: null,
+      enabled: true,
+      capabilities: [],
+    };
     const definition = {
       code: "PRODUCT_CATALOG",
       name: "Catálogo",
       description: null,
       category: null,
+      filename_template: null,
       enabled: false,
-      data_source_type: "SQL_QUERY" as const,
-      active_template_version: null,
+      data_source_id: dataSource.id,
+      data_source: dataSource,
       parameters: [],
+      parameter_groups: [],
       created_at: "2026-08-25T12:00:00Z",
       updated_at: "2026-08-25T12:00:00Z",
     };
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json(definition, { status: 201 }))
       .mockResolvedValueOnce(Response.json({ columns: ["id"], rows: [{ id: 1 }], row_count: 1, truncated: false }))
-      .mockResolvedValueOnce(Response.json([{ value: 1, label: "Donaldson" }]))
+      .mockResolvedValueOnce(Response.json(optionsPage([{ value: 1, label: "Donaldson" }])))
       .mockResolvedValueOnce(Response.json({ ...definition, enabled: true }))
       .mockResolvedValueOnce(new Response("csv", { headers: { "Content-Disposition": 'attachment; filename="product-catalog.csv"' } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -85,15 +139,14 @@ describe("report manager API", () => {
       name: definition.name,
       description: null,
       category: null,
-      data_source_type: "SQL_QUERY" as const,
-      data_source_key: null,
-      query_text: "SELECT id FROM products",
+      filename_template: null,
+      data_source_id: dataSource.id,
       enabled: false,
       parameters: [],
     };
     await expect(createReport(createRequest)).resolves.toEqual(definition);
     await expect(previewReport(definition.code, {})).resolves.toMatchObject({ row_count: 1 });
-    await expect(getReportParameterOptions(definition.code, "supplier_id")).resolves.toEqual([{ value: 1, label: "Donaldson" }]);
+    await expect(getReportParameterOptions(definition.code, "supplier_id")).resolves.toMatchObject({ items: [{ value: 1, label: "Donaldson" }] });
     await expect(updateReport(definition.code, { ...createRequest, enabled: true })).resolves.toMatchObject({ enabled: true });
     await expect(downloadReportData(definition.code, "csv", {})).resolves.toMatchObject({ filename: "product-catalog.csv" });
 
@@ -111,127 +164,12 @@ describe("report manager API", () => {
       .mockResolvedValueOnce(Response.json({ detail: "El reporte DUPLICATE ya existe." }, { status: 409 }))
       .mockResolvedValueOnce(Response.json({ detail: "near FROM: syntax error" }, { status: 422 })));
     const request = {
-      code: "DUPLICATE", name: "Duplicate", description: null, category: null,
-      data_source_type: "SQL_QUERY" as const, data_source_key: null, query_text: "SELECT 1",
+      code: "DUPLICATE", name: "Duplicate", description: null, category: null, filename_template: null,
+      data_source_id: 1,
       enabled: false, parameters: [],
     };
     await expect(createReport(request)).rejects.toMatchObject({ status: 409 });
     await expect(previewReport("DUPLICATE", {})).rejects.toMatchObject({ status: 422 });
-  });
-});
-
-describe("getPriceListComparison", () => {
-  it("posts the A/B ids to the reports endpoint through the browser proxy", async () => {
-    vi.stubEnv("NEXT_PUBLIC_API_URL", "");
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(EMPTY_COMPARISON));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(getPriceListComparison({ price_list_a_id: 1, price_list_b_id: 2 })).resolves.toEqual(
-      EMPTY_COMPARISON,
-    );
-
-    const [url, init] = fetchMock.mock.calls[0] ?? [];
-    expect(url).toBe(`/backend-api${PRICE_LIST_COMPARISON_PATH}`);
-    // The internal Docker hostname must never be reachable from the browser.
-    expect(String(url)).not.toContain("backend:8000");
-    expect(init).toMatchObject({ method: "POST", headers: { "Content-Type": "application/json" } });
-    expect(JSON.parse(String(init?.body))).toEqual({ price_list_a_id: 1, price_list_b_id: 2 });
-  });
-
-  it("refuses to compare a list against itself without touching the network", async () => {
-    const fetchMock = vi.fn<typeof fetch>();
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(getPriceListComparison({ price_list_a_id: 5, price_list_b_id: 5 })).rejects.toThrow(
-      SAME_PRICE_LIST_MESSAGE,
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("returns an empty dataset as a normal response, not an error", async () => {
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json(EMPTY_COMPARISON)));
-
-    const result = await getPriceListComparison({ price_list_a_id: 1, price_list_b_id: 2 });
-
-    expect(result.items).toEqual([]);
-    expect(result.summary.total_products).toBe(0);
-    expect(result.summary.average_percentage_change).toBeNull();
-  });
-
-  it("surfaces the backend's own message when the lists are incompatible", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValue(
-          Response.json({ detail: "Las listas de precios A y B deben usar la misma moneda." }, { status: 422 }),
-        ),
-    );
-
-    await expect(getPriceListComparison({ price_list_a_id: 1, price_list_b_id: 2 })).rejects.toMatchObject({
-      status: 422,
-      message: "Las listas de precios A y B deben usar la misma moneda.",
-    });
-  });
-
-  it("reports a missing price list without leaking a stack trace", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValue(Response.json({ detail: "La lista de precios A #99 no existe." }, { status: 404 })),
-    );
-
-    await expect(getPriceListComparison({ price_list_a_id: 99, price_list_b_id: 2 })).rejects.toMatchObject({
-      status: 404,
-      message: "La lista de precios A #99 no existe.",
-    });
-  });
-
-  it("turns an unreachable backend into a readable message", async () => {
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockRejectedValue(new TypeError("fetch failed")));
-
-    await expect(getPriceListComparison({ price_list_a_id: 1, price_list_b_id: 2 })).rejects.toThrow("fetch failed");
-  });
-});
-
-describe("report templates", () => {
-  it("loads the active template and saves the Designer output through the browser proxy", async () => {
-    vi.stubEnv("NEXT_PUBLIC_API_URL", "");
-    const template = '{"ReportVersion":"2026.3.2","ReportName":"Edited","Pages":{"0":{}}}';
-    const saved = {
-      report_code: "PRICE_LIST_COMPARISON",
-      version: 2,
-      checksum: "abc",
-      created_at: "2026-08-24T12:00:00Z",
-      updated_at: "2026-08-24T12:00:00Z",
-    };
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(template))
-      .mockResolvedValueOnce(Response.json(saved, { status: 201 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(getReportTemplate("PRICE_LIST_COMPARISON")).resolves.toBe(template);
-    await expect(saveReportTemplate("PRICE_LIST_COMPARISON", template)).resolves.toEqual(saved);
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/backend-api/reports/PRICE_LIST_COMPARISON/template");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/backend-api/reports/PRICE_LIST_COMPARISON/template");
-    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "PUT", body: template });
-  });
-
-  it("does not turn backend validation failure into a successful save", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>().mockResolvedValue(
-        Response.json({ detail: "La plantilla excede el tamaño máximo permitido." }, { status: 413 }),
-      ),
-    );
-
-    await expect(saveReportTemplate("PRICE_LIST_COMPARISON", "too-large")).rejects.toMatchObject({
-      status: 413,
-      message: "La plantilla excede el tamaño máximo permitido.",
-    });
   });
 });
 
@@ -244,5 +182,166 @@ describe("getUserErrorMessage", () => {
       "No fue posible generar la comparación.",
     );
     expect(getUserErrorMessage({ stack: "Traceback..." }, "generico")).toBe("generico");
+  });
+});
+
+describe("report builder API", () => {
+  it("reads the field catalog from the backend, never from a local constant", async () => {
+    const catalog = [
+      { key: "product.part_number", label: "Número de parte", data_type: "string", group: "Producto", required_context: "product" },
+    ];
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(catalog));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getReportFieldCatalog("COTIZACION")).resolves.toEqual(catalog);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/builder/fields",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("loads a builder through the same-origin proxy", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ report: {}, columns: [], excel_layout: null }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getReportBuilder("COTIZACION");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/builder",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("saves columns and layout in a single transactional PUT", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ report: {}, columns: [], excel_layout: null }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = {
+      columns: [{
+        key: "sku", label: "SKU", column_type: "FIELD" as const,
+        source_field: "product.part_number", source_parameter: null, formula_definition: null,
+        data_type: "string" as const, format_type: "text" as const, display_order: 0, visible: true, width: 18,
+      }],
+      parameter_groups: [],
+      excel_layout: {
+        sheet_name: "Data", title: null, show_report_name: true, show_generated_at: true,
+        show_parameters: true, freeze_header: true, header_row: 1, totals: [],
+      },
+    };
+    await saveReportBuilder("COTIZACION", request);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/builder",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify(request) }),
+    );
+  });
+
+  it("posts the bare parameter map to the builder preview", async () => {
+    const payload = { columns: [], rows: [], totals: {}, row_count: 0, truncated: false };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(previewReportBuilder("COTIZACION", { quantity: 3 })).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/builder/preview",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ quantity: 3 }) }),
+    );
+  });
+
+  it("surfaces the backend's own formula message instead of a generic one", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ detail: "Las fórmulas contienen una dependencia cíclica." }, { status: 422 }),
+    ));
+
+    const error = await saveReportBuilder("COTIZACION", {
+      columns: [],
+      parameter_groups: [],
+      excel_layout: {
+        sheet_name: "Data", title: null, show_report_name: true, show_generated_at: true,
+        show_parameters: true, freeze_header: true, header_row: 1, totals: [],
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(getUserErrorMessage(error, "fallback")).toBe("Las fórmulas contienen una dependencia cíclica.");
+  });
+
+  it("reads the Excel template metadata from the administrative contract", async () => {
+    const metadata = {
+      report_code: "COTIZACION", original_filename: "BONATTI.xlsx", size_bytes: 2048, version: 1,
+      checksum: "abc", is_active: true, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(metadata));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getReportExcelTemplate("COTIZACION")).resolves.toEqual(metadata);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/admin/reports/COTIZACION/excel-template",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("uploads the workbook as multipart, letting the browser write the boundary", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ version: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["PK"], "BONATTI.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    await uploadReportExcelTemplate("COTIZACION", file);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/backend-api/admin/reports/COTIZACION/excel-template");
+    expect(init.method).toBe("PUT");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("file")).toMatchObject({ name: "BONATTI.xlsx" });
+    expect(new Headers(init.headers).get("content-type")).toBeNull();
+  });
+
+  it("downloads the master template and honours its Content-Disposition name", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("PK", {
+      headers: { "Content-Disposition": 'attachment; filename="BONATTI FILTROS.xlsx"' },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(downloadReportExcelTemplate("COTIZACION")).resolves.toMatchObject({
+      filename: "BONATTI FILTROS.xlsx",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/admin/reports/COTIZACION/excel-template/download",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("deletes the active template", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteReportExcelTemplate("COTIZACION")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/admin/reports/COTIZACION/excel-template",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("renders the final quotation from the approved execution snapshot", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("PK", {
+      headers: { "Content-Disposition": "attachment; filename=cotizacion-document.xlsx" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(downloadReportDocumentXlsx("COTIZACION", "10d693fd-ecc3-4759-aec7-d3d7cb086eb7"))
+      .resolves.toMatchObject({ filename: "cotizacion-document.xlsx" });
+    // The backend rejects a body that mixes the id with report parameters, so
+    // `execution_id` has to travel alone.
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/document/xlsx",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ execution_id: "10d693fd-ecc3-4759-aec7-d3d7cb086eb7" }),
+      }),
+    );
   });
 });

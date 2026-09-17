@@ -7,6 +7,12 @@ import { getUserErrorMessage } from "@/lib/api/errors";
 import { downloadReportData } from "@/lib/api/reports";
 import { triggerBrowserDownload } from "@/lib/download";
 
+/**
+ * These are the *data* exports, which sit beside the final document downloads:
+ * the labels say so, so the two pairs of buttons can never be confused.
+ */
+const DOWNLOAD_LABELS = { xlsx: "Excel de datos", csv: "CSV de datos" } as const;
+
 export function ReportDataDownloadButtons({
   code,
   parameters,
@@ -52,9 +58,9 @@ export function ReportDataDownloadButtons({
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-2">
         {(["xlsx", "csv"] as const).map((format) => (
-          <Button key={format} type="button" size="sm" variant="outline" disabled={disabled || active != null} onClick={() => download(format)}>
+          <Button key={format} type="button" size="sm" variant={format === "xlsx" ? "default" : "outline"} disabled={disabled || active != null} onClick={() => download(format)}>
             {active === format ? <Loader2 className="animate-spin" /> : <Download />}
-            {active === format ? "Descargando..." : `Descargar ${format.toUpperCase()}`}
+            {active === format ? "Descargando..." : `Descargar ${DOWNLOAD_LABELS[format]}`}
           </Button>
         ))}
         {active != null && (

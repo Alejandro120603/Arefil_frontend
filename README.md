@@ -65,7 +65,7 @@ Esto:
 3. Corre `alembic upgrade head` sobre el backend.
 4. Corre el seed idempotente de Donaldson (`python -m app.db.seed`).
 5. Levanta FastAPI con `--reload` en `:8000`.
-6. Levanta Next.js dev en `:3000`.
+6. Levanta Next.js dev en `:3001`.
 7. Muestra los logs de ambos procesos en la misma terminal.
 8. `Ctrl+C` detiene ambos limpiamente; si uno de los dos procesos muere, el
    script detiene el otro y termina con código de error. No quedan procesos
@@ -74,7 +74,7 @@ Esto:
 Variables configurables (todas con default razonable):
 
 ```bash
-make run_panel BACKEND_DIR=../Arefil_backend/backend BACKEND_PORT=8000 FRONTEND_PORT=3000
+make run_panel BACKEND_DIR=../Arefil_backend/backend BACKEND_PORT=8000 FRONTEND_PORT=3001
 ```
 
 ### `make setup_panel`
@@ -89,7 +89,7 @@ make setup_panel
 
 ## URLs
 
-- Frontend: <http://localhost:3000>
+- Frontend: <http://localhost:3001>
 - Backend: <http://localhost:8000>
 - Swagger / OpenAPI: <http://localhost:8000/docs>
 
@@ -107,6 +107,41 @@ src/
   types/
     api.ts                # contrato TypeScript espejo de app/schemas del backend
 ```
+
+## Reportes
+
+La experiencia oficial de reportes es **Report Builder → vista previa web →
+Excel**. No hay diseñador de plantillas ni visor embebido: el backend es la
+única autoridad sobre columnas, fórmulas, totales y el archivo generado.
+
+Operación (`/donaldson/reports`), con dos acciones por reporte:
+
+- **Generar** abre `/donaldson/reports/[code]`, captura los parámetros
+  escalares y los renglones repetibles del reporte, ejecuta
+  `POST /reports/{code}/data` y renderiza la vista previa en HTML.
+- **Configurar** abre `/administracion/reportes/[code]`, donde vive el Report
+  Builder (definición, parámetros, grupos repetibles, columnas, fórmulas,
+  layout Excel y vista previa).
+
+La vista previa es React: consume `columns`, `rows` y `totals` tal como los
+devuelve el backend y respeta etiquetas, orden, visibilidad y `format_type`.
+El frontend **no** recalcula fórmulas ni reconstruye totales.
+
+La exportación principal es **Descargar Excel**: el frontend envía los mismos
+parámetros de la vista previa, recibe el blob y respeta el nombre de
+`Content-Disposition`. CSV se conserva como acción secundaria. No se usa
+ninguna librería de Excel en el navegador.
+
+El nombre del documento XLSX final se configura por reporte en
+`/administracion/reportes/[code]` mediante `filename_template` (Backend #26).
+Solo se ofrecen los placeholders que el backend admite —`{{parameters.*}}`,
+`{{report.code}}` y `{{report.name}}`— y el campo muestra una vista previa del
+nombre resuelto cuando hay valores de ejemplo. Vacío significa conservar el
+nombre genérico `<code>-document.xlsx` que arma el backend.
+
+Los reportes se configuran en la base de datos, no en el código: `SQL_QUERY` y
+`HANDLER` (incluidos `PRICE_LIST_COMPARISON` y los renglones repetibles que dan
+soporte a cotizaciones) se renderizan con el mismo runtime genérico.
 
 ## API client
 
@@ -169,7 +204,7 @@ copies una base SQLite/WAL activa. Para un respaldo consistente usa
 
 Los defaults son:
 
-- Frontend: <http://localhost:3000>
+- Frontend: <http://localhost:3001>
 - Backend: <http://localhost:8000>
 - Swagger: <http://localhost:8000/docs>
 
@@ -208,11 +243,11 @@ imagen.
 Desde otra laptop en la misma LAN abre:
 
 ```text
-http://IP-DE-LAPTOP-SERVIDOR:3000
+http://IP-DE-LAPTOP-SERVIDOR:3001
 ```
 
 No uses `localhost` en la laptop cliente: apuntaría a esa laptop, no al servidor.
-Compose publica 3000 y 8000 en las interfaces del host; permitir tráfico en el
+Compose publica 3001 y 8000 en las interfaces del host; permitir tráfico en el
 firewall/red local es responsabilidad del operador. Los scripts no modifican
 reglas de firewall.
 

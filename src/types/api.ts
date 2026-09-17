@@ -167,15 +167,9 @@ export interface HealthStatus {
  *
  * The backend derives this dataset at request time from two price lists that
  * must share supplier and currency (it answers 422 otherwise). Keep this shape
- * stable: Frontend #9 will feed the very same `PriceListComparisonResponse`
- * into the Stimulsoft viewer without a second endpoint.
+ * stable: the native comparison preview and exports consume this same payload.
  */
 export type ComparisonStatus = "INCREASED" | "DECREASED" | "UNCHANGED" | "NEW" | "REMOVED";
-
-export interface PriceListComparisonRequest {
-  price_list_a_id: number;
-  price_list_b_id: number;
-}
 
 export interface ComparisonReportMetadata {
   code: "PRICE_LIST_COMPARISON";
@@ -243,21 +237,28 @@ export interface ReportDefinition {
   name: string;
   description: string | null;
   category: string | null;
+  /**
+   * Pattern for the final XLSX document name (Backend #26). `null` keeps the
+   * backend's generic fallback (`<code>-document.xlsx`). Only
+   * `{{parameters.*}}`, `{{report.code}}` and `{{report.name}}` are supported.
+   */
+  filename_template: string | null;
   enabled: boolean;
-  data_source_type: ReportDataSourceType;
-  active_template_version: number | null;
+  data_source_id: number;
+  data_source: ReportDataSourceSummary;
   parameters: ReportParameter[];
+  parameter_groups: ReportParameterGroup[];
   created_at: string;
   updated_at: string;
 }
 
-export type ReportDataSourceType = "HANDLER" | "SQL_QUERY";
 export type ReportParameterDataType = "integer" | "string" | "decimal" | "boolean" | "date" | "datetime";
 export type ReportParameterInputType = "text" | "number" | "date" | "datetime" | "checkbox" | "select";
-export type ReportOptionsSource = "price_lists" | "suppliers";
+export type ReportOptionsSource = "price_lists" | "suppliers" | "products" | "products_by_price_list";
+export type ReportScalarOptionsSource = Exclude<ReportOptionsSource, "products_by_price_list">;
 
 export interface ReportParameterConfiguration {
-  options_source: ReportOptionsSource;
+  options_source: ReportScalarOptionsSource;
 }
 
 export interface ReportParameter {
@@ -271,19 +272,67 @@ export interface ReportParameter {
   configuration_json: ReportParameterConfiguration | null;
 }
 
-export interface ReportAdminDefinition extends ReportDefinition {
-  data_source_key: string | null;
-  query_text: string | null;
+export interface ReportNumericConfiguration {
+  minimum?: number | string;
+  maximum?: number | string;
+  exclusive_minimum?: boolean;
+  exclusive_maximum?: boolean;
 }
+
+export interface ReportDependentOptionsConfiguration {
+  options_source: "products_by_price_list";
+  context_parameter: string;
+}
+
+export type ReportParameterGroupFieldConfiguration =
+  | ReportNumericConfiguration
+  | ReportDependentOptionsConfiguration;
+
+export interface ReportParameterGroupField {
+  name: string;
+  label: string;
+  data_type: ReportParameterDataType;
+  input_type: ReportParameterInputType;
+  required: boolean;
+  default_value: unknown | null;
+  display_order: number;
+  configuration_json: ReportParameterGroupFieldConfiguration | null;
+}
+
+export interface ReportParameterGroup {
+  name: string;
+  label: string;
+  resolver_key: "products_by_price_list";
+  context_parameter: string;
+  min_items: number;
+  max_items: number | null;
+  display_order: number;
+  fields: ReportParameterGroupField[];
+}
+
+export interface ReportDataSourceSummary {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  capabilities: string[];
+}
+
+export interface ReportDataSource extends ReportDataSourceSummary {
+  parameters: ReportParameter[];
+  fields: ReportFieldDescriptor[];
+}
+
+export type ReportAdminDefinition = ReportDefinition;
 
 export interface ReportCreateRequest {
   code: string;
   name: string;
   description: string | null;
   category: string | null;
-  data_source_type: ReportDataSourceType;
-  data_source_key: string | null;
-  query_text: string | null;
+  filename_template: string | null;
+  data_source_id: number;
   enabled: boolean;
   parameters: ReportParameter[];
 }
@@ -297,7 +346,7 @@ export interface ReportPreviewResponse {
   truncated: boolean;
 }
 
-/** Generic payload returned by POST /reports/{code}/data for SQL_QUERY reports. */
+/** Generic tabular payload returned by reusable tabular data sources. */
 export interface SQLReportExecutionResponse {
   columns: string[];
   rows: Record<string, unknown>[];
@@ -309,10 +358,207 @@ export interface ReportOption {
   label: string;
 }
 
-export interface ReportTemplateVersion {
+/**
+ * One product of the selected price list (Backend #21). The search endpoint
+ * answers with these so a quotation line can show part number, description and
+ * unit price without a second round trip after picking a product.
+ */
+export interface ReportProductOption extends ReportOption {
+  product_id: number;
+  part_number: string;
+  item_number: string | null;
+  description: string | null;
+  unit_price: DecimalString;
+  currency: string;
+  classification: string | null;
+}
+
+/**
+ * Report Builder — mirrored from Backend #12/#13
+ * (`Arefil_backend/backend/app/schemas/reports.py`, `app/db/enums.py`).
+ *
+ * The builder describes the *logical shell* of a report: which columns exist,
+ * where each one takes its value from, and how the Excel export is laid out.
+ * It is the official presentation contract for web preview and Excel output.
+ */
+export type ReportColumnType = "FIELD" | "PARAMETER" | "FORMULA";
+
+/**
+ * `ReportFormatType` is the *presentation* enum and is intentionally narrower
+ * than `ReportParameterDataType`: the backend has no `integer`/`decimal`
+ * format, both render through `number`. Never mirror data types into here.
+ */
+export type ReportFormatType = "text" | "number" | "currency" | "percent" | "date" | "datetime";
+
+/**
+ * One allow-listed business field the builder may bind a FIELD column to.
+ * `key` is the technical reference the backend validates (`product.part_number`);
+ * `group` is the human bucket the UI renders it under ("Producto").
+ */
+export interface ReportFieldDescriptor {
+  key: string;
+  label: string;
+  data_type: ReportParameterDataType;
+  group: string;
+  required_context: string;
+}
+
+export interface ReportColumn {
+  key: string;
+  label: string;
+  column_type: ReportColumnType;
+  /** Set only when `column_type === "FIELD"`; a key from the field catalog. */
+  source_field: string | null;
+  /** Set only when `column_type === "PARAMETER"`; a declared parameter name. */
+  source_parameter: string | null;
+  /** Set only when `column_type === "FORMULA"`; validated by the backend. */
+  formula_definition: string | null;
+  data_type: ReportParameterDataType;
+  format_type: ReportFormatType | null;
+  display_order: number;
+  visible: boolean;
+  width: number | null;
+}
+
+/**
+ * The pre-#20 totals row: one SUM pinned to a column, rendered under it.
+ * Reports saved before the summary contract still answer in this shape, so the
+ * builder reads it and upgrades it to `ReportSummaryConfiguration` in memory.
+ */
+export interface ReportLegacyTotalConfiguration {
+  column_key: string;
+  operation: "SUM";
+}
+
+/**
+ * A report-level summary (Backend #20). `SUM` folds one numeric visible column;
+ * `FORMULA` computes from other summaries and numeric report parameters — that
+ * is how IVA and Total exist once per report instead of once per row.
+ *
+ * The backend forbids the unused half of the pair: `SUM` requires `column_key`
+ * and rejects `formula_definition`, `FORMULA` requires the opposite.
+ */
+export interface ReportSummaryConfiguration {
+  key: string;
+  label: string;
+  column_key: string | null;
+  operation: "SUM" | "FORMULA";
+  formula_definition: string | null;
+  format_type: ReportFormatType | null;
+}
+
+export type ReportTotalConfiguration =
+  | ReportLegacyTotalConfiguration
+  | ReportSummaryConfiguration;
+
+/** The layout the UI edits and writes: totals are always the summary shape. */
+export interface ReportExcelLayout {
+  sheet_name: string;
+  title: string | null;
+  show_report_name: boolean;
+  show_generated_at: boolean;
+  show_parameters: boolean;
+  freeze_header: boolean;
+  header_row: number;
+  totals: ReportSummaryConfiguration[];
+}
+
+/** What the backend answers: a legacy report still returns the old totals. */
+export interface ReportExcelLayoutResponse extends Omit<ReportExcelLayout, "totals"> {
+  totals: ReportTotalConfiguration[];
+}
+
+/** `excel_layout` is null until the builder has been saved at least once. */
+export interface ReportBuilderDefinition {
+  report: ReportAdminDefinition;
+  columns: ReportColumn[];
+  parameter_groups: ReportParameterGroup[];
+  excel_layout: ReportExcelLayoutResponse | null;
+}
+
+/** Body of `PUT /reports/{code}/builder` — columns and layout save together. */
+export interface ReportBuilderWriteRequest {
+  columns: ReportColumn[];
+  parameter_groups: ReportParameterGroup[];
+  excel_layout: ReportExcelLayout;
+}
+
+/**
+ * Document layer — mirrored from Backend #22
+ * (`Arefil_backend/backend/app/schemas/reports.py`).
+ *
+ * A report has at most one *active* Excel template: an `.xlsx` workbook the
+ * administrator uploads and the backend fills in. The file itself never travels
+ * as JSON — only this metadata does, so the panel can describe the template
+ * without ever holding its bytes.
+ */
+export interface ReportExcelTemplate {
   report_code: string;
+  original_filename: string;
+  size_bytes: number;
   version: number;
   checksum: string;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Preflight result of `PUT /reports/{code}/excel-template` (Backend #24).
+ *
+ * The backend parses every sheet against the saved builder before activating a
+ * template. On success the metadata carries this result; on rejection it comes
+ * back as the `detail` of a `422`, with `valid: false` — and no version is
+ * created.
+ */
+export interface ReportExcelTemplateValidationIssue {
+  code: string;
+  message: string;
+  sheet: string;
+  cell: string | null;
+  placeholder: string | null;
+  range: string | null;
+}
+
+export interface ReportExcelTemplateValidationResult {
+  valid: boolean;
+  placeholder_count: number;
+  repeatable_rows: number;
+  warnings: ReportExcelTemplateValidationIssue[];
+  errors: ReportExcelTemplateValidationIssue[];
+}
+
+/** The upload response: the same metadata plus the preflight that admitted it. */
+export interface ReportExcelTemplateUpload extends ReportExcelTemplate {
+  validation: ReportExcelTemplateValidationResult;
+}
+
+export interface ReportBuilderPreviewColumn {
+  key: string;
+  label: string;
+  data_type: ReportParameterDataType;
+  format_type: ReportFormatType | null;
+}
+
+/**
+ * Only visible columns reach `columns`/`rows`. Decimal cells and `totals`
+ * values arrive as strings, like every other backend Decimal.
+ */
+export interface ReportBuilderPreviewResponse {
+  /**
+   * Public id of the immutable execution snapshot the backend persisted
+   * (Backend #25). The final document renders from this id, never from the
+   * parameters again; it is absent for datasets the backend cannot persist.
+   */
+  execution_id?: string | null;
+  columns: ReportBuilderPreviewColumn[];
+  /** Normalized scalar parameters the backend actually ran with (no groups). */
+  parameters?: Record<string, unknown>;
+  rows: Record<string, unknown>[];
+  /** Report-level summaries keyed by summary key (Subtotal, IVA, Total…). */
+  summary?: Record<string, DecimalString | null>;
+  /** Same values as `summary`; kept because legacy layouts key it by column. */
+  totals: Record<string, DecimalString | null>;
+  row_count: number;
+  truncated: boolean;
 }
