@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type KeyboardEvent } from "react";
 import { Image as ImageIcon, LineChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -24,32 +24,45 @@ import type {
 } from "@/types/api";
 
 /**
- * The grid, one HTML `<table>` covering the sheet's `used_range`.
+ * The shared workbook grid (Frontend #29/#30/#31): one HTML `<table>`
+ * covering a sheet's `used_range`, used both for the editable template
+ * inspector/mapper and for the read-only rendered-document preview. There is
+ * deliberately only one grid implementation — a preview must never drift
+ * visually from the mapper it was built from.
  *
  * Ordinary blank cells the backend omitted are synthesized here from bounds
  * alone; merge slaves are never rendered as their own cell — the anchor
  * carries `rowSpan`/`colSpan` instead, so a click anywhere in the merged
  * region always resolves to the anchor coordinate.
  *
- * `overlays` (Frontend #30) replaces a mapped/cleared cell's raw content with
- * a friendly badge; `errorCoordinates` rings a cell the backend just rejected;
+ * Omitting `onSelectCell` makes the grid read-only: cells render as plain,
+ * non-focusable table cells with no click/selection affordance at all (the
+ * preview mode; #31 requires selecting/mapping to stay unavailable there).
+ *
+ * `overlays` (#30) replaces a mapped/cleared cell's raw content with a
+ * friendly badge; `errorCoordinates` rings a cell the backend just rejected
+ * (destructive); `warningCoordinates` rings a cell with a lesser problem, e.g.
+ * a leftover unresolved placeholder in a rendered preview (#31, amber);
  * `repeatableRow` tints the sheet's one repeatable-row, if it has one.
  */
-export function ReportExcelTemplateGrid({
+export function WorkbookGrid({
   sheet,
   styles,
-  selectedCoordinate,
+  selectedCoordinate = null,
   onSelectCell,
   overlays,
   errorCoordinates,
+  warningCoordinates,
   repeatableRow = null,
 }: {
   sheet: ReportWorkbookSheetInspection;
   styles: Record<string, ReportWorkbookStyleDescriptor>;
-  selectedCoordinate: string | null;
-  onSelectCell: (cell: ReportWorkbookCellInspection) => void;
+  selectedCoordinate?: string | null;
+  /** Absent = read-only grid: no cell is selectable or focusable. */
+  onSelectCell?: (cell: ReportWorkbookCellInspection) => void;
   overlays?: Map<string, CellOverlay>;
   errorCoordinates?: Set<string>;
+  warningCoordinates?: Set<string>;
   repeatableRow?: number | null;
 }) {
   const bounds = useMemo(() => sheetGridBounds(sheet), [sheet]);
@@ -138,23 +151,38 @@ export function ReportExcelTemplateGrid({
                 const drawings = drawingsByAnchor.get(coordinate) ?? [];
                 const overlay = overlays?.get(coordinate);
                 const hasError = errorCoordinates?.has(coordinate) ?? false;
+                const hasWarning = !hasError && (warningCoordinates?.has(coordinate) ?? false);
                 const isFormula = cell.value_type === "formula";
+                const interactive = onSelectCell != null;
 
                 return (
                   <td
                     key={key}
-                    role="button"
-                    tabIndex={0}
+                    {...(interactive
+                      ? {
+                          role: "button",
+                          tabIndex: 0,
+                          "aria-pressed": isSelected,
+                          onClick: () => onSelectCell(cell),
+                          onKeyDown: (event: KeyboardEvent<HTMLTableCellElement>) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              onSelectCell(cell);
+                            }
+                          },
+                        }
+                      : {})}
                     aria-label={`Celda ${coordinate}`}
-                    aria-pressed={isSelected}
                     rowSpan={span.rowSpan}
                     colSpan={span.columnSpan}
                     className={cn(
-                      "cursor-pointer select-none overflow-hidden text-ellipsis whitespace-nowrap border px-1 align-top outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary",
+                      "select-none overflow-hidden text-ellipsis whitespace-nowrap border px-1 align-top outline-none",
+                      interactive && "cursor-pointer focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary",
                       isSelected && "ring-2 ring-inset ring-primary",
                       hasPlaceholders && !isSelected && !overlay && "bg-primary/10",
                       row === repeatableRow && !overlay && "bg-amber-500/10",
                       hasError && "ring-2 ring-inset ring-destructive",
+                      hasWarning && "ring-2 ring-inset ring-amber-500",
                     )}
                     style={{
                       fontWeight: resolved.fontWeight,
@@ -169,13 +197,6 @@ export function ReportExcelTemplateGrid({
                       borderRightWidth: resolved.borderRight ? 2 : undefined,
                       borderBottomWidth: resolved.borderBottom ? 2 : undefined,
                       borderLeftWidth: resolved.borderLeft ? 2 : undefined,
-                    }}
-                    onClick={() => onSelectCell(cell)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        onSelectCell(cell);
-                      }
                     }}
                   >
                     {overlay ? (

@@ -7,12 +7,20 @@ import { ReportExcelTemplateInspector } from "./report-excel-template-inspector"
 import { ApiError } from "@/lib/api/errors";
 import type { ReportBuilderDefinition, ReportExcelTemplateInspection, ReportWorkbookCellInspection } from "@/types/api";
 
-const { inspectReportExcelTemplate, getReportBuilder, updateReportExcelTemplateMappings } = vi.hoisted(() => ({
+const {
+  inspectReportExcelTemplate, getReportBuilder, updateReportExcelTemplateMappings,
+  executeReport, renderReportExcelTemplatePreview,
+} = vi.hoisted(() => ({
   inspectReportExcelTemplate: vi.fn(),
   getReportBuilder: vi.fn(),
   updateReportExcelTemplateMappings: vi.fn(),
+  executeReport: vi.fn(),
+  renderReportExcelTemplatePreview: vi.fn(),
 }));
-vi.mock("@/lib/api/reports", () => ({ inspectReportExcelTemplate, getReportBuilder, updateReportExcelTemplateMappings }));
+vi.mock("@/lib/api/reports", () => ({
+  inspectReportExcelTemplate, getReportBuilder, updateReportExcelTemplateMappings,
+  executeReport, renderReportExcelTemplatePreview,
+}));
 
 const BUILDER: ReportBuilderDefinition = {
   report: {
@@ -288,12 +296,12 @@ describe("ReportExcelTemplateInspector", () => {
     expect(screen.getByText("Ninguna celda seleccionada.")).toBeTruthy();
   });
 
-  it("does not show sheet tabs for a single-sheet template", async () => {
+  it("does not show sheet tabs for a single-sheet template, only the Diseño/Vista previa mode tabs", async () => {
     mockReady();
     render(<ReportExcelTemplateInspector code="COTIZACION" />);
 
     await screen.findByText("COTIZACION.xlsx · v3");
-    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Diseño", "Vista previa"]);
   });
 
   it("flags an empty sheet without hiding the grid", async () => {
@@ -329,5 +337,32 @@ describe("ReportExcelTemplateInspector", () => {
     rerender(<ReportExcelTemplateInspector code="OTRO" />);
     expect(screen.queryByLabelText("Celda B2")).toBeNull();
     expect(screen.queryByText("COTIZACION.xlsx · v3")).toBeNull();
+  });
+
+  it("switches to the Vista previa tab, which reuses the report's runtime controls for test parameters", async () => {
+    mockReady();
+    const user = userEvent.setup();
+    render(<ReportExcelTemplateInspector code="COTIZACION" />);
+
+    await screen.findByLabelText("Celda B2");
+    await user.click(screen.getByRole("tab", { name: "Vista previa" }));
+
+    expect(screen.getByLabelText(/Cliente/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Generar vista previa" })).toBeTruthy();
+  });
+
+  it("blocks generating a preview while there are unsaved mappings, with the exact required message", async () => {
+    mockReady();
+    const user = userEvent.setup();
+    render(<ReportExcelTemplateInspector code="COTIZACION" />);
+
+    await user.click(await screen.findByLabelText("Celda D4"));
+    await user.selectOptions(screen.getByLabelText("Asignar dato"), "parameters.customer_name");
+    await user.click(screen.getByRole("button", { name: "Asignar" }));
+
+    await user.click(screen.getByRole("tab", { name: "Vista previa" }));
+    expect(screen.getByText("Guarda los cambios de la plantilla antes de generar la vista previa.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Generar vista previa" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(executeReport).not.toHaveBeenCalled();
   });
 });

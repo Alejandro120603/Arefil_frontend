@@ -13,7 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { getReportBuilder, inspectReportExcelTemplate, updateReportExcelTemplateMappings } from "@/lib/api/reports";
-import { ReportExcelTemplateGrid } from "@/components/reports/report-excel-template-grid";
+import { ReportExcelTemplatePreview } from "@/components/reports/report-excel-template-preview";
+import { WorkbookGrid } from "@/components/reports/workbook-grid";
 import {
   MAX_RENDERABLE_CELLS,
   VALUE_TYPE_LABELS,
@@ -77,6 +78,7 @@ function TemplateMapper({ code }: { code: string }) {
   const [globalErrors, setGlobalErrors] = useState<ExcelMappingIssue[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [mode, setMode] = useState<"design" | "preview">("design");
 
   const load = useCallback(
     (signal?: AbortSignal) =>
@@ -338,103 +340,124 @@ function TemplateMapper({ code }: { code: string }) {
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <p className="text-sm text-muted-foreground">
-          Selecciona una celda y asígnale un dato del reporte — no necesitas escribir <code>{"{{...}}"}</code>.
-        </p>
+        <Tabs value={mode} onValueChange={(value) => setMode(value === "preview" ? "preview" : "design")}>
+          <TabsList>
+            <TabsTrigger value="design">Diseño</TabsTrigger>
+            <TabsTrigger value="preview">Vista previa</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
-        {conflict && (
-          <Alert variant="destructive">
-            <TriangleAlert className="h-4 w-4" />
-            <AlertTitle>La plantilla cambió</AlertTitle>
-            <AlertDescription>
-              <p>La plantilla activa cambió desde que abriste el editor.</p>
-              <p>Recarga la versión actual antes de guardar.</p>
-              <Button type="button" size="sm" className="mt-2" onClick={handleReload}>
-                Recargar
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
+        {/* `display: contents` (not `hidden`) keeps each mode's children as direct
+            flex items of this CardContent, so both panes keep their state across a
+            switch instead of remounting — only one is ever visible. */}
+        <div className={mode === "design" ? "contents" : "hidden"}>
+          <p className="text-sm text-muted-foreground">
+            Selecciona una celda y asígnale un dato del reporte — no necesitas escribir <code>{"{{...}}"}</code>.
+          </p>
 
-        {globalErrors.length > 0 && (
-          <Alert variant="destructive">
-            <TriangleAlert className="h-4 w-4" />
-            <AlertTitle>No se guardó ningún cambio</AlertTitle>
-            <AlertDescription>
-              <ul className="list-disc pl-4">
-                {globalErrors.map((issue, index) => (
-                  <li key={index}>{issue.message}</li>
+          {conflict && (
+            <Alert variant="destructive">
+              <TriangleAlert className="h-4 w-4" />
+              <AlertTitle>La plantilla cambió</AlertTitle>
+              <AlertDescription>
+                <p>La plantilla activa cambió desde que abriste el editor.</p>
+                <p>Recarga la versión actual antes de guardar.</p>
+                <Button type="button" size="sm" className="mt-2" onClick={handleReload}>
+                  Recargar
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {globalErrors.length > 0 && (
+            <Alert variant="destructive">
+              <TriangleAlert className="h-4 w-4" />
+              <AlertTitle>No se guardó ningún cambio</AlertTitle>
+              <AlertDescription>
+                <ul className="list-disc pl-4">
+                  {globalErrors.map((issue, index) => (
+                    <li key={index}>{issue.message}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {saveError && <ErrorAlert title="No se pudieron guardar los cambios" message={saveError} />}
+
+          {inspection.sheets.length > 1 && (
+            <Tabs
+              value={String(activeSheetIndex)}
+              onValueChange={(value) => {
+                setActiveSheetIndex(Number(value));
+                setSelectedCell(null);
+              }}
+            >
+              <TabsList>
+                {inspection.sheets.map((sheetOption, index) => (
+                  <TabsTrigger key={sheetOption.name} value={String(index)}>
+                    {sheetOption.hidden && <EyeOff className="h-3 w-3" />}
+                    {sheetOption.name}
+                  </TabsTrigger>
                 ))}
-              </ul>
-            </AlertDescription>
-          </Alert>
-        )}
+              </TabsList>
+            </Tabs>
+          )}
 
-        {saveError && <ErrorAlert title="No se pudieron guardar los cambios" message={saveError} />}
+          {inspection.sheets.length === 1 && sheet && <p className="text-sm font-medium">Hoja: {sheet.name}</p>}
 
-        {inspection.sheets.length > 1 && (
-          <Tabs
-            value={String(activeSheetIndex)}
-            onValueChange={(value) => {
-              setActiveSheetIndex(Number(value));
-              setSelectedCell(null);
-            }}
-          >
-            <TabsList>
-              {inspection.sheets.map((sheetOption, index) => (
-                <TabsTrigger key={sheetOption.name} value={String(index)}>
-                  {sheetOption.hidden && <EyeOff className="h-3 w-3" />}
-                  {sheetOption.name}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        )}
+          {sheet && sheet.cells.length === 0 && (
+            <p className="text-sm text-muted-foreground">Esta hoja no tiene contenido.</p>
+          )}
 
-        {inspection.sheets.length === 1 && sheet && <p className="text-sm font-medium">Hoja: {sheet.name}</p>}
+          {sheet &&
+            (tooLargeToRender ? (
+              <ErrorAlert
+                title="Hoja demasiado grande para mostrarse"
+                message={`Esta hoja tiene ${cellCount.toLocaleString("es-MX")} celdas en su rango usado, más de las ${MAX_RENDERABLE_CELLS.toLocaleString("es-MX")} que el inspector puede mostrar de forma legible. Reduce el rango usado en Excel (elimina filas/columnas con formato sobrante) para poder inspeccionarla aquí.`}
+              />
+            ) : (
+              <WorkbookGrid
+                sheet={sheet}
+                styles={inspection.styles}
+                selectedCoordinate={selectedCell?.coordinate ?? null}
+                onSelectCell={setSelectedCell}
+                overlays={overlays}
+                errorCoordinates={sheetErrorCoordinates}
+                repeatableRow={repeatableRow}
+              />
+            ))}
 
-        {sheet && sheet.cells.length === 0 && (
-          <p className="text-sm text-muted-foreground">Esta hoja no tiene contenido.</p>
-        )}
+          <MappingPanel
+            cell={selectedCell}
+            sheetName={sheet?.name ?? ""}
+            groups={groups}
+            optionsByPlaceholder={optionsByPlaceholder}
+            pendingMappings={pendingMappings}
+            repeatableRow={repeatableRow}
+            error={selectedCell ? cellErrors.get(pendingKey(sheet?.name ?? "", selectedCell.coordinate)) : undefined}
+            draftPlaceholder={draftPlaceholder}
+            onDraftChange={setDraftPlaceholder}
+            onAssign={() => stageMapping(draftPlaceholder)}
+            onClear={stageClear}
+            onRevert={revertPending}
+          />
 
-        {sheet &&
-          (tooLargeToRender ? (
-            <ErrorAlert
-              title="Hoja demasiado grande para mostrarse"
-              message={`Esta hoja tiene ${cellCount.toLocaleString("es-MX")} celdas en su rango usado, más de las ${MAX_RENDERABLE_CELLS.toLocaleString("es-MX")} que el inspector puede mostrar de forma legible. Reduce el rango usado en Excel (elimina filas/columnas con formato sobrante) para poder inspeccionarla aquí.`}
-            />
-          ) : (
-            <ReportExcelTemplateGrid
-              sheet={sheet}
-              styles={inspection.styles}
-              selectedCoordinate={selectedCell?.coordinate ?? null}
-              onSelectCell={setSelectedCell}
-              overlays={overlays}
-              errorCoordinates={sheetErrorCoordinates}
-              repeatableRow={repeatableRow}
-            />
-          ))}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+            <p className="text-sm text-muted-foreground">{savedNotice}</p>
+            <Button type="button" onClick={() => void handleSave()} disabled={!isDirty || saving}>
+              {saving && <Loader2 className="animate-spin" />} Guardar cambios
+            </Button>
+          </div>
+        </div>
 
-        <MappingPanel
-          cell={selectedCell}
-          sheetName={sheet?.name ?? ""}
-          groups={groups}
-          optionsByPlaceholder={optionsByPlaceholder}
-          pendingMappings={pendingMappings}
-          repeatableRow={repeatableRow}
-          error={selectedCell ? cellErrors.get(pendingKey(sheet?.name ?? "", selectedCell.coordinate)) : undefined}
-          draftPlaceholder={draftPlaceholder}
-          onDraftChange={setDraftPlaceholder}
-          onAssign={() => stageMapping(draftPlaceholder)}
-          onClear={stageClear}
-          onRevert={revertPending}
-        />
-
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-          <p className="text-sm text-muted-foreground">{savedNotice}</p>
-          <Button type="button" onClick={() => void handleSave()} disabled={!isDirty || saving}>
-            {saving && <Loader2 className="animate-spin" />} Guardar cambios
-          </Button>
+        <div className={mode === "preview" ? "contents" : "hidden"}>
+          <ReportExcelTemplatePreview
+            report={builder.report}
+            hasSummaries={(builder.excel_layout?.totals?.length ?? 0) > 0}
+            templateVersion={inspection.template.version}
+            hasUnsavedChanges={isDirty}
+          />
         </div>
       </CardContent>
     </Card>
