@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
-  CheckCircle2,
   Download,
   FileSpreadsheet,
   Loader2,
@@ -13,9 +11,10 @@ import {
   Trash2,
   Upload,
   X,
-  XCircle,
 } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
+import { ReportExcelTemplateValidationPanel } from "@/components/reports/report-excel-template-validation-panel";
+import { ReportExcelTemplateVersionHistory } from "@/components/reports/report-excel-template-version-history";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,8 +32,6 @@ import { triggerBrowserDownload } from "@/lib/download";
 import { normalizeSummaries } from "@/lib/reports/report-builder";
 import {
   EXCEL_TEMPLATE_STATUS_LABELS,
-  EXCEL_TEMPLATE_VALIDATION_LABELS,
-  excelTemplateIssueLocation,
   excelTemplatePlaceholders,
   excelTemplateStatus,
   excelTemplateValidationStatus,
@@ -50,7 +47,6 @@ import { formatDateTime } from "@/lib/format/date";
 import type {
   ReportColumn,
   ReportExcelTemplate,
-  ReportExcelTemplateValidationIssue,
   ReportExcelTemplateValidationResult,
   ReportParameter,
   ReportSummaryConfiguration,
@@ -262,7 +258,16 @@ export function ReportExcelTemplateCard({
               </p>
             )}
 
-            {validation != null && <ValidationPanel validation={validation} />}
+            {validation != null && (
+              <div className="flex flex-col gap-2">
+                <ReportExcelTemplateValidationPanel validation={validation} />
+                {excelTemplateValidationStatus(validation) === "invalid" && (
+                  <p className="text-sm text-muted-foreground">
+                    Corrige los errores y vuelve a subir el archivo; la plantilla vigente no fue modificada.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-2">
               <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border px-3 text-sm font-medium hover:bg-accent">
@@ -301,6 +306,14 @@ export function ReportExcelTemplateCard({
                   <PencilRuler /> Editar visualmente
                 </Button>
               )}
+              <ReportExcelTemplateVersionHistory
+                code={code}
+                onRestored={({ validation: restoredValidation, ...metadata }) => {
+                  setLoadError(null);
+                  setTemplate(metadata);
+                  setValidation(restoredValidation ?? null);
+                }}
+              />
               {template != null && !confirmingRemoval && (
                 <Button
                   type="button"
@@ -377,70 +390,5 @@ export function ReportExcelTemplateCard({
         )}
       </CardContent>
     </Card>
-  );
-}
-
-const VALIDATION_ICONS = {
-  valid: CheckCircle2,
-  warning: AlertTriangle,
-  invalid: XCircle,
-} as const;
-
-const VALIDATION_TONES = {
-  valid: "border-emerald-500/40 text-emerald-700 dark:text-emerald-400",
-  warning: "border-amber-500/40 text-amber-700 dark:text-amber-500",
-  invalid: "border-destructive/40 text-destructive",
-} as const;
-
-/**
- * The compatibility diagnosis of the last upload (Backend #24).
- *
- * It describes the *file the backend just read*, not the active template: an
- * incompatible workbook is reported here while the card above keeps showing
- * whichever template is really installed.
- */
-function ValidationPanel({ validation }: { validation: ReportExcelTemplateValidationResult }) {
-  const state = excelTemplateValidationStatus(validation);
-  const Icon = VALIDATION_ICONS[state];
-
-  return (
-    <section className={`flex flex-col gap-2 rounded-lg border p-3 ${VALIDATION_TONES[state]}`}>
-      <p className="flex items-center gap-2 font-medium">
-        <Icon className="h-4 w-4" aria-hidden="true" />
-        Compatibilidad: {EXCEL_TEMPLATE_VALIDATION_LABELS[state]}
-      </p>
-      <p className="text-sm text-muted-foreground">
-        Placeholders reconocidos: {validation.placeholder_count}
-      </p>
-      <p className="text-sm text-muted-foreground">
-        Filas repetibles detectadas: {validation.repeatable_rows}
-      </p>
-      {state === "invalid" && (
-        <p className="text-sm text-muted-foreground">
-          Corrige los errores y vuelve a subir el archivo; la plantilla vigente no fue modificada.
-        </p>
-      )}
-      <IssueList title="Errores" issues={validation.errors} />
-      <IssueList title="Advertencias" issues={validation.warnings} />
-    </section>
-  );
-}
-
-/** Every issue names its sheet, and its cell or merged range when it has one. */
-function IssueList({ title, issues }: { title: string; issues: ReportExcelTemplateValidationIssue[] }) {
-  if (issues.length === 0) return null;
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="text-sm font-medium">
-        {title} ({issues.length})
-      </p>
-      <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-muted-foreground">
-        {issues.map((issue, index) => (
-          <li key={`${issue.code}-${excelTemplateIssueLocation(issue)}-${index}`}>
-            <span className="font-mono text-xs">{excelTemplateIssueLocation(issue)}</span> — {issue.message}
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }

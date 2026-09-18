@@ -692,6 +692,21 @@ export interface ReportExcelRenderPreview extends ReportExcelTemplateInspection 
   generated_at: string;
 }
 
+/**
+ * Version history and restore (Frontend #32, Backend #31,
+ * `app/schemas/excel_template_history.py`).
+ *
+ * Restoring never deletes anything — it writes the historical version's
+ * bytes as a brand-new version and activates that. `base_version`/
+ * `base_checksum` are `null` together only when there is currently no active
+ * template to guard against (e.g. it was deleted); otherwise both must match
+ * the active template exactly, or the backend answers `409`.
+ */
+export interface ExcelTemplateRestoreRequest {
+  base_version: number | null;
+  base_checksum: string | null;
+}
+
 export interface ReportBuilderPreviewColumn {
   key: string;
   label: string;

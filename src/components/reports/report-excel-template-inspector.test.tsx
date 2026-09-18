@@ -9,17 +9,21 @@ import type { ReportBuilderDefinition, ReportExcelTemplateInspection, ReportWork
 
 const {
   inspectReportExcelTemplate, getReportBuilder, updateReportExcelTemplateMappings,
-  executeReport, renderReportExcelTemplatePreview,
+  executeReport, renderReportExcelTemplatePreview, listReportExcelTemplateVersions,
+  restoreReportExcelTemplateVersion,
 } = vi.hoisted(() => ({
   inspectReportExcelTemplate: vi.fn(),
   getReportBuilder: vi.fn(),
   updateReportExcelTemplateMappings: vi.fn(),
   executeReport: vi.fn(),
   renderReportExcelTemplatePreview: vi.fn(),
+  listReportExcelTemplateVersions: vi.fn(),
+  restoreReportExcelTemplateVersion: vi.fn(),
 }));
 vi.mock("@/lib/api/reports", () => ({
   inspectReportExcelTemplate, getReportBuilder, updateReportExcelTemplateMappings,
-  executeReport, renderReportExcelTemplatePreview,
+  executeReport, renderReportExcelTemplatePreview, listReportExcelTemplateVersions,
+  restoreReportExcelTemplateVersion,
 }));
 
 const BUILDER: ReportBuilderDefinition = {
@@ -364,5 +368,52 @@ describe("ReportExcelTemplateInspector", () => {
     expect(screen.getByText("Guarda los cambios de la plantilla antes de generar la vista previa.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Generar vista previa" }) as HTMLButtonElement).disabled).toBe(true);
     expect(executeReport).not.toHaveBeenCalled();
+  });
+
+  it("offers a version history entry point that blocks restoring while mappings are dirty", async () => {
+    mockReady();
+    listReportExcelTemplateVersions.mockResolvedValue([
+      { report_code: "COTIZACION", original_filename: "COTIZACION.xlsx", size_bytes: 100, version: 3, checksum: "abc",
+        is_active: true, created_at: "2026-09-16T10:00:00Z", updated_at: "2026-09-16T10:00:00Z" },
+    ]);
+    const user = userEvent.setup();
+    render(<ReportExcelTemplateInspector code="COTIZACION" />);
+
+    await user.click(await screen.findByLabelText("Celda D4"));
+    await user.selectOptions(screen.getByLabelText("Asignar dato"), "parameters.customer_name");
+    await user.click(screen.getByRole("button", { name: "Asignar" }));
+
+    await user.click(screen.getByRole("button", { name: /Historial de versiones/ }));
+    expect(await screen.findByText("Guarda o descarta tus cambios antes de restaurar otra versión.")).toBeTruthy();
+  });
+
+  it("reloads the inspection and builder after restoring a version from the history", async () => {
+    inspectReportExcelTemplate
+      .mockResolvedValueOnce(INSPECTION)
+      .mockResolvedValueOnce({ ...INSPECTION, template: { version: 4, filename: "COTIZACION.xlsx", checksum: "new" } });
+    getReportBuilder.mockResolvedValue(BUILDER);
+    listReportExcelTemplateVersions.mockResolvedValue([
+      { report_code: "COTIZACION", original_filename: "COTIZACION.xlsx", size_bytes: 100, version: 3, checksum: "abc",
+        is_active: true, created_at: "2026-09-16T10:00:00Z", updated_at: "2026-09-16T10:00:00Z" },
+      { report_code: "COTIZACION", original_filename: "COTIZACION.xlsx", size_bytes: 90, version: 2, checksum: "old",
+        is_active: false, created_at: "2026-09-15T10:00:00Z", updated_at: "2026-09-15T10:00:00Z" },
+    ]);
+    restoreReportExcelTemplateVersion.mockResolvedValue({
+      report_code: "COTIZACION", original_filename: "COTIZACION.xlsx", size_bytes: 90, version: 4, checksum: "new",
+      is_active: true, created_at: "2026-09-17T10:00:00Z", updated_at: "2026-09-17T10:00:00Z",
+      validation: { valid: true, placeholder_count: 1, repeatable_rows: 0, warnings: [], errors: [] },
+    });
+    const user = userEvent.setup();
+    render(<ReportExcelTemplateInspector code="COTIZACION" />);
+
+    await screen.findByText("COTIZACION.xlsx · v3");
+    await user.click(screen.getByRole("button", { name: /Historial de versiones/ }));
+    await user.click(await screen.findByRole("button", { name: /Restaurar esta versión/ }));
+    await user.click(screen.getByRole("button", { name: "Confirmar restauración" }));
+
+    await waitFor(() => expect(restoreReportExcelTemplateVersion).toHaveBeenCalledWith(
+      "COTIZACION", 2, { base_version: 3, base_checksum: "abc" },
+    ));
+    expect(await screen.findByText("COTIZACION.xlsx · v4")).toBeTruthy();
   });
 });
