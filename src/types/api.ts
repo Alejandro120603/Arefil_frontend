@@ -533,6 +533,145 @@ export interface ReportExcelTemplateUpload extends ReportExcelTemplate {
   validation: ReportExcelTemplateValidationResult;
 }
 
+/**
+ * Visual workbook inspection (Backend #28, `app/schemas/excel_inspection.py`).
+ *
+ * A read-only, JSON-only description of the active template's structure — it
+ * never carries workbook bytes and never modifies the template. Built so the
+ * admin can locate a cell to map a field onto without opening Excel.
+ */
+export type ReportWorkbookCellValueType =
+  | "empty"
+  | "text"
+  | "number"
+  | "boolean"
+  | "date"
+  | "time"
+  | "formula"
+  | "error";
+
+export type ReportWorkbookSheetState = "visible" | "hidden" | "veryHidden";
+
+export type ReportWorkbookDrawingType = "image" | "chart";
+
+/** Deduplicated by `style_id`: cells reference a key of `ReportExcelTemplateInspection.styles`. */
+export interface ReportWorkbookStyleDescriptor {
+  bold: boolean;
+  italic: boolean;
+  font_size: number | null;
+  horizontal_alignment: string | null;
+  vertical_alignment: string | null;
+  wrap_text: boolean;
+  fill_rgb: string | null;
+  font_rgb: string | null;
+  borders: Record<string, string | null>;
+  number_format: string;
+}
+
+export interface ReportWorkbookCellInspection {
+  coordinate: string;
+  row: number;
+  column: number;
+  value: string | number | boolean | null;
+  value_type: ReportWorkbookCellValueType;
+  formula: string | null;
+  /** Recognized `{{...}}` tokens found in the cell text; empty when there are none. */
+  placeholders: string[];
+  style_id: number;
+  number_format: string;
+  /** Set on every cell that belongs to a merge, anchor included. */
+  merged_range: string | null;
+  /** The top-left coordinate of the merge this cell belongs to; `null` outside one. */
+  merge_anchor: string | null;
+}
+
+export interface ReportWorkbookDrawingInspection {
+  type: ReportWorkbookDrawingType;
+  anchor: string | null;
+  end: string | null;
+  x_emu: number | null;
+  y_emu: number | null;
+  width_emu: number | null;
+  height_emu: number | null;
+}
+
+export interface ReportWorkbookSheetInspection {
+  name: string;
+  /** Base zero, in workbook order. */
+  index: number;
+  hidden: boolean;
+  state: ReportWorkbookSheetState;
+  max_row: number;
+  max_column: number;
+  used_range: string;
+  merged_ranges: string[];
+  row_heights: Record<string, number>;
+  column_widths: Record<string, number>;
+  default_row_height: number | null;
+  default_column_width: number | null;
+  /** Only cells with a value, a style, or merge membership — ordinary blanks are omitted. */
+  cells: ReportWorkbookCellInspection[];
+  drawings: ReportWorkbookDrawingInspection[];
+}
+
+export interface ReportExcelTemplateInspection {
+  template: {
+    version: number;
+    filename: string;
+    checksum: string;
+  };
+  sheets: ReportWorkbookSheetInspection[];
+  /** Keyed by `style_id` as text. */
+  styles: Record<string, ReportWorkbookStyleDescriptor>;
+  /** Always `false`: limits fail the request instead of truncating it silently. */
+  truncated: false;
+}
+
+/**
+ * Visual mapping (Backend #29, `app/schemas/excel_mappings.py`).
+ *
+ * `PUT .../excel-template/mappings` applies a batch of edits over the active
+ * template in one atomic write: `mappings` writes a `{{namespace.key}}`
+ * placeholder into a cell, `clear` blanks a cell that already holds one. The
+ * request is a conditional write keyed by `base_version`/`base_checksum`
+ * (from the last inspection) — a stale pair answers `409`.
+ */
+export interface ExcelCellTarget {
+  sheet: string;
+  cell: string;
+}
+
+export interface ExcelCellMapping extends ExcelCellTarget {
+  /** `"namespace.key"`, e.g. `"parameters.customer_name"` — never the `{{...}}` wrapper. */
+  placeholder: string;
+}
+
+export interface ExcelMappingsRequest {
+  base_version: number;
+  base_checksum: string;
+  mappings: ExcelCellMapping[];
+  clear: ExcelCellTarget[];
+}
+
+/**
+ * One entry of a `422`'s `detail.errors`. Per-target issues (`unknown_sheet`,
+ * `merge_slave`, `formula_target`, `not_placeholder`, `unknown_placeholder`,
+ * `duplicate_target`, `invalid_cell`) carry `cell`/`operation`; the workbook-wide
+ * `multiple_repeatable_rows` issue carries neither.
+ */
+export interface ExcelMappingIssue {
+  code: string;
+  message: string;
+  sheet: string;
+  cell?: string;
+  operation?: "mapping" | "clear";
+}
+
+/** The `PUT .../mappings` response: the saved template plus a fresh inspection of it. */
+export interface ExcelMappingsResponse extends ReportExcelTemplateUpload {
+  inspection: ReportExcelTemplateInspection;
+}
+
 export interface ReportBuilderPreviewColumn {
   key: string;
   label: string;

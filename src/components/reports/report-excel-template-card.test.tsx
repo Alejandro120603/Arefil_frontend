@@ -140,6 +140,20 @@ describe("ReportExcelTemplateCard", () => {
     expect(screen.getByText("Filas repetibles detectadas: 1")).toBeTruthy();
   });
 
+  it("offers `Editar visualmente` only once a template is configured, linking to the inspector route", async () => {
+    renderCard();
+    expect(await screen.findByText("Sin plantilla")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Editar visualmente/ })).toBeNull();
+
+    getReportExcelTemplate.mockResolvedValue(TEMPLATE);
+    uploadReportExcelTemplate.mockResolvedValue(UPLOAD);
+    const user = userEvent.setup();
+    await user.upload(screen.getByLabelText("Subir plantilla Excel"), xlsxFile());
+
+    const link = await screen.findByRole("button", { name: /Editar visualmente/ });
+    expect(link.getAttribute("href")).toBe("/administracion/reportes/COTIZACION/plantilla");
+  });
+
   it("rejects a file with the wrong extension in the client, without calling the backend", async () => {
     // `applyAccept: false` bypasses the input's own `accept` filter so the
     // component's guard is what rejects the file, exactly as it must for a
