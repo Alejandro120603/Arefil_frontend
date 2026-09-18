@@ -18,6 +18,7 @@ import type {
   ReportUpdateRequest,
   ExcelMappingsRequest,
   ExcelMappingsResponse,
+  ExcelTemplateRestoreRequest,
   ReportExcelRenderPreview,
   ReportExcelRenderPreviewRequest,
   Page,
@@ -311,6 +312,47 @@ export function renderReportExcelTemplatePreview(
 ): Promise<ReportExcelRenderPreview> {
   const request: ReportExcelRenderPreviewRequest = { execution_id: executionId };
   return browserApiClient.apiPostJson<ReportExcelRenderPreview>(excelTemplatePath(code, "/render-preview"), request, options);
+}
+
+function excelTemplateVersionPath(code: string, version: number, suffix = ""): string {
+  return excelTemplatePath(code, `/versions/${version}${suffix}`);
+}
+
+/**
+ * Version history and restore (Frontend #32 / Backend #31). The list is
+ * newest-first and never carries workbook bytes; restoring writes the
+ * chosen version's content as a brand-new version rather than reactivating
+ * it, so nothing in the history is ever deleted.
+ */
+export function listReportExcelTemplateVersions(
+  code: string,
+  options?: RequestOptions,
+): Promise<ReportExcelTemplate[]> {
+  return browserApiClient.apiGet<ReportExcelTemplate[]>(excelTemplatePath(code, "/versions"), options);
+}
+
+export function downloadReportExcelTemplateVersion(
+  code: string,
+  version: number,
+  options?: RequestOptions,
+): Promise<BlobDownload> {
+  return browserApiClient.apiDownloadBlob(excelTemplateVersionPath(code, version, "/download"), options);
+}
+
+/**
+ * Rejects with `404` when the version no longer exists, `409` when
+ * `base_version`/`base_checksum` no longer match the active template, and
+ * `422` (with the same `ReportExcelTemplateValidationResult` shape as an
+ * upload) when the historical version is no longer compatible with the
+ * report's current Builder contract — in every failure case, nothing changes.
+ */
+export function restoreReportExcelTemplateVersion(
+  code: string,
+  version: number,
+  request: ExcelTemplateRestoreRequest,
+  options?: RequestOptions,
+): Promise<ReportExcelTemplateUpload> {
+  return browserApiClient.apiPostJson<ReportExcelTemplateUpload>(excelTemplateVersionPath(code, version, "/restore"), request, options);
 }
 
 /**

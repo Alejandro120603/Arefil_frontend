@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { getReportBuilder, inspectReportExcelTemplate, updateReportExcelTemplateMappings } from "@/lib/api/reports";
 import { ReportExcelTemplatePreview } from "@/components/reports/report-excel-template-preview";
+import { ReportExcelTemplateVersionHistory } from "@/components/reports/report-excel-template-version-history";
 import { WorkbookGrid } from "@/components/reports/workbook-grid";
 import {
   MAX_RENDERABLE_CELLS,
@@ -337,6 +338,11 @@ function TemplateMapper({ code }: { code: string }) {
           <Badge variant="outline">
             {inspection.template.filename} · v{inspection.template.version}
           </Badge>
+          <ReportExcelTemplateVersionHistory
+            code={code}
+            disabledReason={isDirty ? "Guarda o descarta tus cambios antes de restaurar otra versión." : null}
+            onRestored={handleReload}
+          />
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
