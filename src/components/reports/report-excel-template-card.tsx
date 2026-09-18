@@ -67,9 +67,12 @@ const WRONG_EXTENSION_MESSAGE = "Solo se aceptan archivos .xlsx.";
 export function ReportExcelTemplateCard({
   code,
   parameters,
+  onTemplateChange,
 }: {
   code: string;
   parameters: ReportParameter[];
+  /** Fires once the initial load resolves, and again on every upload/delete/restore — the wizard (#33) uses it to gate advancing past this step. */
+  onTemplateChange?: (template: ReportExcelTemplate | null) => void;
 }) {
   const [template, setTemplate] = useState<ReportExcelTemplate | null>(null);
   const [loading, setLoading] = useState(true);
@@ -128,6 +131,10 @@ export function ReportExcelTemplateCard({
       });
     return () => controller.abort();
   }, [applyMetadata, code]);
+
+  useEffect(() => {
+    if (!loading) onTemplateChange?.(template);
+  }, [loading, template, onTemplateChange]);
 
   useEffect(() => {
     const controller = new AbortController();
