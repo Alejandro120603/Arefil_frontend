@@ -33,10 +33,12 @@ export function ReportWizardFinalizeStep({
   report,
   previewGeneratedThisSession,
   onReportChange,
+  active = true,
 }: {
   report: ReportAdminDefinition;
   previewGeneratedThisSession: boolean;
   onReportChange: (report: ReportAdminDefinition) => void;
+  active?: boolean;
 }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [refreshToken, setRefreshToken] = useState(0);
@@ -66,10 +68,11 @@ export function ReportWizardFinalizeStep({
   );
 
   useEffect(() => {
+    if (!active) return;
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load, refreshToken]);
+  }, [load, refreshToken, active]);
 
   function handleRefresh() {
     setState({ status: "loading" });

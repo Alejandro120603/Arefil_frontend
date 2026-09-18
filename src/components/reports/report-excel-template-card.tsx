@@ -68,11 +68,15 @@ export function ReportExcelTemplateCard({
   code,
   parameters,
   onTemplateChange,
+  refreshToken = 0,
+  hasUnsavedMappings = false,
 }: {
   code: string;
   parameters: ReportParameter[];
   /** Fires once the initial load resolves, and again on every upload/delete/restore — the wizard (#33) uses it to gate advancing past this step. */
   onTemplateChange?: (template: ReportExcelTemplate | null) => void;
+  refreshToken?: number;
+  hasUnsavedMappings?: boolean;
 }) {
   const [template, setTemplate] = useState<ReportExcelTemplate | null>(null);
   const [loading, setLoading] = useState(true);
@@ -130,7 +134,7 @@ export function ReportExcelTemplateCard({
         setLoading(false);
       });
     return () => controller.abort();
-  }, [applyMetadata, code]);
+  }, [applyMetadata, code, refreshToken]);
 
   useEffect(() => {
     if (!loading) onTemplateChange?.(template);
@@ -148,7 +152,7 @@ export function ReportExcelTemplateCard({
       // uploads, so a missing builder must not block this section.
       .catch(() => undefined);
     return () => controller.abort();
-  }, [code]);
+  }, [code, refreshToken]);
 
   async function upload(file: File) {
     if (uploadingRef.current) return;
@@ -315,6 +319,7 @@ export function ReportExcelTemplateCard({
               )}
               <ReportExcelTemplateVersionHistory
                 code={code}
+                disabledReason={hasUnsavedMappings ? "Guarda o descarta tus cambios antes de restaurar otra versión." : null}
                 onRestored={({ validation: restoredValidation, ...metadata }) => {
                   setLoadError(null);
                   setTemplate(metadata);

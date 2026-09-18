@@ -58,10 +58,12 @@ export function ReportBuilderWorkspace({
   code,
   parameters,
   dataSourceCapabilities,
+  onSaved,
 }: {
   code: string;
   parameters: ReportParameter[];
   dataSourceCapabilities: string[];
+  onSaved?: () => void;
 }) {
   const [value, setValue] = useState<ReportBuilderFormValue | null>(null);
   const [fields, setFields] = useState<ReportFieldDescriptor[] | null>(null);
@@ -180,6 +182,7 @@ export function ReportBuilderWorkspace({
       setRuntimeGroupValues(initialRuntimeGroupValues(builder.parameter_groups));
       setDirty(false);
       setSaved(true);
+      onSaved?.();
     } catch (error) {
       // The edited state is intentionally preserved on failure.
       setSaveError(getUserErrorMessage(error, "No se pudo guardar el constructor. Tus cambios siguen en pantalla."));

@@ -47,12 +47,12 @@ vi.mock("@/components/reports/report-builder-workspace", () => ({
   ReportBuilderWorkspace: ({ code }: { code: string }) => <div data-testid="builder-workspace">builder:{code}</div>,
 }));
 vi.mock("@/components/reports/report-excel-template-card", () => ({
-  ReportExcelTemplateCard: ({ onTemplateChange }: { onTemplateChange?: (template: ReportExcelTemplate | null) => void }) => {
+  ReportExcelTemplateCard: ({ onTemplateChange, hasUnsavedMappings }: { onTemplateChange?: (template: ReportExcelTemplate | null) => void; hasUnsavedMappings?: boolean }) => {
     // Mirrors the real component reporting its initial load (even a "no template" one) once mounted.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once on mount only, like a real initial-load effect
     useEffect(() => { onTemplateChange?.(null); }, []);
     return (
-      <div data-testid="template-card">
+      <div data-testid="template-card" data-mappings-dirty={String(hasUnsavedMappings)}>
         <button type="button" onClick={() => onTemplateChange?.(TEMPLATE)}>fake-upload</button>
         <button type="button" onClick={() => onTemplateChange?.(null)}>fake-report-no-template</button>
       </div>
@@ -60,13 +60,15 @@ vi.mock("@/components/reports/report-excel-template-card", () => ({
   },
 }));
 vi.mock("@/components/reports/report-excel-template-inspector", () => ({
-  ReportExcelTemplateInspector: ({ mode, onModeChange, onPreviewReady }: {
+  ReportExcelTemplateInspector: ({ mode, onModeChange, onPreviewReady, onDirtyChange }: {
     mode?: "design" | "preview";
     onModeChange?: (mode: "design" | "preview") => void;
     onPreviewReady?: () => void;
+    onDirtyChange?: (dirty: boolean) => void;
   }) => (
     <div data-testid="mapper">
       <p>mapper-mode:{mode}</p>
+      <button type="button" onClick={() => onDirtyChange?.(true)}>fake-dirty-mapping</button>
       <button type="button" onClick={() => onModeChange?.("preview")}>fake-switch-to-preview</button>
       <button type="button" onClick={() => onModeChange?.("design")}>fake-switch-to-design</button>
       <button type="button" onClick={() => onPreviewReady?.()}>fake-preview-ready</button>
@@ -213,4 +215,17 @@ describe("ReportConfigurationWizard — editing an existing report", () => {
     await user.click(screen.getByRole("button", { name: "Continuar" }));
     expect(replace).toHaveBeenCalledWith("/administracion/reportes/COTIZACION/configurar?step=2", { scroll: false });
   });
+});
+
+it("opens the preview tab when reloading the wizard at step 6", () => {
+  render(<ReportConfigurationWizard report={REPORT} initialStepParam={6} />);
+  expect(screen.getByText("mapper-mode:preview")).toBeTruthy();
+});
+
+it("shares unsaved mappings with the template-card history when going back to step 4", async () => {
+  const user = userEvent.setup();
+  render(<ReportConfigurationWizard report={REPORT} initialStepParam={5} />);
+  await user.click(screen.getByRole("button", { name: "fake-dirty-mapping" }));
+  await user.click(screen.getByRole("button", { name: "Anterior" }));
+  expect(screen.getByTestId("template-card").getAttribute("data-mappings-dirty")).toBe("true");
 });

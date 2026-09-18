@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
-import { executeReport, renderReportExcelTemplatePreview } from "@/lib/api/reports";
+import { previewReportBuilder, renderReportExcelTemplatePreview } from "@/lib/api/reports";
 import { MAX_RENDERABLE_CELLS, sheetGridBounds, usedRangeCellCount } from "@/lib/reports/report-excel-inspection";
 import { excelTemplateValidationSummary, parseExcelTemplateValidation } from "@/lib/reports/report-excel-template";
 import {
@@ -52,6 +52,7 @@ export function ReportExcelTemplatePreview({
   templateVersion,
   hasUnsavedChanges,
   onPreviewReady,
+  onPreviewInvalidated,
 }: {
   report: ReportDefinition;
   /** Whether the builder has any summary/total configured — never recomputed here. */
@@ -60,6 +61,7 @@ export function ReportExcelTemplatePreview({
   hasUnsavedChanges: boolean;
   /** Fires once a render actually succeeds — a session fact the wizard's checklist (#33) cannot re-derive from the backend. */
   onPreviewReady?: () => void;
+  onPreviewInvalidated?: () => void;
 }) {
   const groups = useMemo(() => report.parameter_groups ?? [], [report.parameter_groups]);
   const [values, setValues] = useState(() => initialRuntimeValues(report.parameters));
@@ -90,6 +92,7 @@ export function ReportExcelTemplatePreview({
   const noParameters = report.parameters.length === 0 && groups.length === 0;
 
   function invalidate() {
+    onPreviewInvalidated?.();
     controllerRef.current?.abort();
     controllerRef.current = null;
     setStage((current) => (current.status === "idle" ? current : { status: "idle" }));
@@ -116,7 +119,7 @@ export function ReportExcelTemplatePreview({
     setActiveSheetIndex(0);
     const parameters = structuredClone(validation.parameters);
     try {
-      const payload = await executeReport(report.code, parameters, { signal: controller.signal });
+      const payload = await previewReportBuilder(report.code, parameters, { signal: controller.signal });
       if (controller.signal.aborted) return;
       if (!isReportBuilderPreviewResponse(payload)) {
         setStage({ status: "error", message: "Este reporte no produce un documento Excel previsualizable." });
