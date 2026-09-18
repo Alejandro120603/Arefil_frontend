@@ -86,7 +86,7 @@ export default async function AdminReportsPage() {
                           size="sm"
                           variant="outline"
                           nativeButton={false}
-                          render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}`} />}
+                          render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/configurar`} />}
                         >
                           <Settings /> Configurar
                         </Button>

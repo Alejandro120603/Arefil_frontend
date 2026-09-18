@@ -62,11 +62,33 @@ function isMappingIssuesDetail(detail: unknown): detail is { errors: ExcelMappin
  * friendly report field — no `{{...}}` typing — and saves every pending edit
  * in one batch (`PUT /excel-template/mappings`, Backend #29).
  */
-export function ReportExcelTemplateInspector({ code }: { code: string }) {
-  return <TemplateMapper key={code} code={code} />;
+export function ReportExcelTemplateInspector({
+  code,
+  mode,
+  onModeChange,
+  onPreviewReady,
+}: {
+  code: string;
+  /** Controls the Diseño/Vista previa tab from outside (the wizard, #33); uncontrolled (internal tab state) when omitted. */
+  mode?: "design" | "preview";
+  onModeChange?: (mode: "design" | "preview") => void;
+  /** Fires once a rendered preview successfully loads — the wizard's checklist tracks this as a session fact. */
+  onPreviewReady?: () => void;
+}) {
+  return <TemplateMapper key={code} code={code} mode={mode} onModeChange={onModeChange} onPreviewReady={onPreviewReady} />;
 }
 
-function TemplateMapper({ code }: { code: string }) {
+function TemplateMapper({
+  code,
+  mode: controlledMode,
+  onModeChange,
+  onPreviewReady,
+}: {
+  code: string;
+  mode?: "design" | "preview";
+  onModeChange?: (mode: "design" | "preview") => void;
+  onPreviewReady?: () => void;
+}) {
   const [state, setState] = useState<MapperState>({ status: "loading" });
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
   const [selectedCell, setSelectedCell] = useState<ReportWorkbookCellInspection | null>(null);
@@ -79,7 +101,12 @@ function TemplateMapper({ code }: { code: string }) {
   const [globalErrors, setGlobalErrors] = useState<ExcelMappingIssue[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
-  const [mode, setMode] = useState<"design" | "preview">("design");
+  const [uncontrolledMode, setUncontrolledMode] = useState<"design" | "preview">("design");
+  const mode = controlledMode ?? uncontrolledMode;
+  function setMode(next: "design" | "preview") {
+    if (controlledMode === undefined) setUncontrolledMode(next);
+    onModeChange?.(next);
+  }
 
   const load = useCallback(
     (signal?: AbortSignal) =>
@@ -463,6 +490,7 @@ function TemplateMapper({ code }: { code: string }) {
             hasSummaries={(builder.excel_layout?.totals?.length ?? 0) > 0}
             templateVersion={inspection.template.version}
             hasUnsavedChanges={isDirty}
+            onPreviewReady={onPreviewReady}
           />
         </div>
       </CardContent>

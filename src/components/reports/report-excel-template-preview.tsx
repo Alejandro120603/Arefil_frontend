@@ -51,12 +51,15 @@ export function ReportExcelTemplatePreview({
   hasSummaries,
   templateVersion,
   hasUnsavedChanges,
+  onPreviewReady,
 }: {
   report: ReportDefinition;
   /** Whether the builder has any summary/total configured — never recomputed here. */
   hasSummaries: boolean;
   templateVersion: number;
   hasUnsavedChanges: boolean;
+  /** Fires once a render actually succeeds — a session fact the wizard's checklist (#33) cannot re-derive from the backend. */
+  onPreviewReady?: () => void;
 }) {
   const groups = useMemo(() => report.parameter_groups ?? [], [report.parameter_groups]);
   const [values, setValues] = useState(() => initialRuntimeValues(report.parameters));
@@ -131,6 +134,7 @@ export function ReportExcelTemplatePreview({
       const preview = await renderReportExcelTemplatePreview(report.code, executionId, { signal: controller.signal });
       if (controller.signal.aborted) return;
       setStage({ status: "ready", preview, rowCount: payload.row_count });
+      onPreviewReady?.();
     } catch (error) {
       if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.status === 404) {
