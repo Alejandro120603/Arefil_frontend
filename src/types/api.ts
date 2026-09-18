@@ -672,6 +672,26 @@ export interface ExcelMappingsResponse extends ReportExcelTemplateUpload {
   inspection: ReportExcelTemplateInspection;
 }
 
+/**
+ * Rendered-document preview (Frontend #31, Backend #30,
+ * `app/schemas/excel_render_preview.py`). `POST .../render-preview` renders
+ * the template against one pinned execution snapshot and inspects the
+ * *result* — same shape as a template inspection, so the same grid renders
+ * both — never the frontend reconstructing a workbook itself.
+ */
+export interface ReportExcelRenderPreviewRequest {
+  execution_id: string;
+}
+
+export interface ReportExcelRenderPreview extends ReportExcelTemplateInspection {
+  kind: "rendered_document";
+  report_code: string;
+  template_version: number;
+  template_checksum: string;
+  execution_id: string;
+  generated_at: string;
+}
+
 export interface ReportBuilderPreviewColumn {
   key: string;
   label: string;

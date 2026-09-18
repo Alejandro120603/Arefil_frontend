@@ -4,6 +4,7 @@ import {
   excelTemplatePlaceholders,
   excelTemplateStatus,
   excelTemplateValidationStatus,
+  excelTemplateValidationSummary,
   formatFileSize,
   isXlsxFile,
   parseExcelTemplateValidation,
@@ -166,5 +167,22 @@ describe("excel template compatibility preflight", () => {
     expect(parseExcelTemplateValidation([{ loc: ["body"], msg: "field required" }])).toBeNull();
     expect(parseExcelTemplateValidation({ valid: false })).toBeNull();
     expect(parseExcelTemplateValidation({ valid: false, placeholder_count: 1, repeatable_rows: 0, errors: ["boom"] })?.errors).toEqual([]);
+  });
+});
+
+describe("excelTemplateValidationSummary", () => {
+  it("summarizes the first error and counts the rest", () => {
+    expect(excelTemplateValidationSummary({
+      valid: false, placeholder_count: 2, repeatable_rows: 0, warnings: [],
+      errors: [
+        { code: "unknown_placeholder", message: "Placeholder desconocido.", sheet: "Cotización", cell: "B4", placeholder: "{{rows.foo}}", range: null },
+        { code: "invalid_placeholder", message: "Inválido.", sheet: "Cotización", cell: "C5", placeholder: null, range: null },
+      ],
+    })).toBe("Cotización!B4: Placeholder desconocido. (+1 más)");
+  });
+
+  it("falls back to a generic message when the result carries no error detail", () => {
+    expect(excelTemplateValidationSummary({ valid: false, placeholder_count: 0, repeatable_rows: 0, warnings: [], errors: [] }))
+      .toBe("La plantilla ya no es compatible con el contrato del reporte.");
   });
 });

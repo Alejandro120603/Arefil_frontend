@@ -3,7 +3,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ReportExcelTemplateGrid } from "./report-excel-template-grid";
+import { WorkbookGrid } from "./workbook-grid";
 import type {
   ReportWorkbookCellInspection,
   ReportWorkbookSheetInspection,
@@ -51,10 +51,10 @@ const STYLES: Record<string, ReportWorkbookStyleDescriptor> = {};
 
 afterEach(cleanup);
 
-describe("ReportExcelTemplateGrid", () => {
+describe("WorkbookGrid", () => {
   it("renders column letters, row numbers and cell content within the used range", () => {
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ cells: [cell({ coordinate: "B4", row: 4, column: 2, value: "Cliente:", value_type: "text" })] })}
         styles={STYLES}
         selectedCoordinate={null}
@@ -73,7 +73,7 @@ describe("ReportExcelTemplateGrid", () => {
     const onSelectCell = vi.fn();
     const user = userEvent.setup();
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ cells: [cell({ coordinate: "B4", row: 4, column: 2, value: "Cliente:", value_type: "text" })] })}
         styles={STYLES}
         selectedCoordinate={null}
@@ -94,7 +94,7 @@ describe("ReportExcelTemplateGrid", () => {
     const user = userEvent.setup();
 
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ used_range: "A1:C4", cells: [anchor, slaveRight, slaveBelow, slaveDiagonal] })}
         styles={STYLES}
         selectedCoordinate={null}
@@ -115,7 +115,7 @@ describe("ReportExcelTemplateGrid", () => {
 
   it("highlights the currently selected coordinate", () => {
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ cells: [cell({ coordinate: "A1", row: 1, column: 1 })] })}
         styles={STYLES}
         selectedCoordinate="A1"
@@ -128,7 +128,7 @@ describe("ReportExcelTemplateGrid", () => {
 
   it("shows an image/chart marker on the drawing's anchor cell", () => {
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ drawings: [{ type: "image", anchor: "A1", end: null, x_emu: null, y_emu: null, width_emu: null, height_emu: null }] })}
         styles={STYLES}
         selectedCoordinate={null}
@@ -141,7 +141,7 @@ describe("ReportExcelTemplateGrid", () => {
 
   it("keeps drawings visible beyond used_range and inside a merged region", () => {
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({
           used_range: "A1:B1",
           cells: [
@@ -165,7 +165,7 @@ describe("ReportExcelTemplateGrid", () => {
 
   it("applies column widths, row heights and the backend style catalog", () => {
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ column_widths: { A: 20 }, row_heights: { "1": 30 }, cells: [cell()] })}
         styles={{ "0": { bold: true, italic: true, font_size: 14, horizontal_alignment: "center", vertical_alignment: "center", wrap_text: true, fill_rgb: "#ABCDEF", font_rgb: "#123456", borders: { bottom: "thin" }, number_format: "General" } }}
         selectedCoordinate={null}
@@ -184,7 +184,7 @@ describe("ReportExcelTemplateGrid", () => {
 
   it("shows a friendly badge instead of the raw placeholder for a mapped cell", () => {
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ cells: [cell({ coordinate: "B2", row: 2, column: 2, value: "{{parameters.customer_name}}", placeholders: ["{{parameters.customer_name}}"] })] })}
         styles={STYLES}
         selectedCoordinate={null}
@@ -199,7 +199,7 @@ describe("ReportExcelTemplateGrid", () => {
 
   it("shows a formula indicator and never an overlay badge on a formula cell", () => {
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ cells: [cell({ coordinate: "C3", value_type: "formula", formula: "=A1+A2" })] })}
         styles={STYLES}
         selectedCoordinate={null}
@@ -212,7 +212,7 @@ describe("ReportExcelTemplateGrid", () => {
 
   it("rings a cell the backend just rejected", () => {
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ cells: [cell({ coordinate: "A1" })] })}
         styles={STYLES}
         selectedCoordinate={null}
@@ -226,7 +226,7 @@ describe("ReportExcelTemplateGrid", () => {
 
   it("tints the repeatable row's header", () => {
     render(
-      <ReportExcelTemplateGrid
+      <WorkbookGrid
         sheet={sheet({ cells: [cell({ coordinate: "A1" })] })}
         styles={STYLES}
         selectedCoordinate={null}
@@ -236,5 +236,37 @@ describe("ReportExcelTemplateGrid", () => {
     );
 
     expect(screen.getByText("1").className).toContain("bg-amber-500/20");
+  });
+
+  it("rings a cell with a lesser problem in amber, not destructive red", () => {
+    render(
+      <WorkbookGrid
+        sheet={sheet({ cells: [cell({ coordinate: "A1" })] })}
+        styles={STYLES}
+        onSelectCell={vi.fn()}
+        warningCoordinates={new Set(["A1"])}
+      />,
+    );
+
+    const target = screen.getByLabelText("Celda A1");
+    expect(target.className).toContain("ring-amber-500");
+    expect(target.className).not.toContain("ring-destructive");
+  });
+
+  it("renders read-only when onSelectCell is omitted: no button role, no focus, no click affordance", async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkbookGrid
+        sheet={sheet({ cells: [cell({ coordinate: "B4", row: 4, column: 2, value: "Cliente:", value_type: "text" })] })}
+        styles={STYLES}
+      />,
+    );
+
+    const target = screen.getByLabelText("Celda B4");
+    expect(target.getAttribute("role")).toBeNull();
+    expect(target.getAttribute("tabindex")).toBeNull();
+    expect(target.className).not.toContain("cursor-pointer");
+    await user.click(target);
+    expect(target.getAttribute("aria-pressed")).toBeNull();
   });
 });

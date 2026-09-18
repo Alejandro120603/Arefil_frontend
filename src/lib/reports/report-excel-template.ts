@@ -99,6 +99,14 @@ export function parseExcelTemplateValidation(
   };
 }
 
+/** A one-line summary of a structured validation failure, for a toast/alert that has no room for the full `IssueList`. */
+export function excelTemplateValidationSummary(validation: ReportExcelTemplateValidationResult): string {
+  const [first, ...rest] = validation.errors;
+  if (!first) return "La plantilla ya no es compatible con el contrato del reporte.";
+  const suffix = rest.length > 0 ? ` (+${rest.length} más)` : "";
+  return `${excelTemplateIssueLocation(first)}: ${first.message}${suffix}`;
+}
+
 export const XLSX_EXTENSION = ".xlsx";
 export const XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 

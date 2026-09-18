@@ -18,6 +18,8 @@ import type {
   ReportUpdateRequest,
   ExcelMappingsRequest,
   ExcelMappingsResponse,
+  ReportExcelRenderPreview,
+  ReportExcelRenderPreviewRequest,
   Page,
 } from "@/types/api";
 import type { BlobDownload } from "./client";
@@ -293,6 +295,22 @@ export function updateReportExcelTemplateMappings(
   options?: RequestOptions,
 ): Promise<ExcelMappingsResponse> {
   return browserApiClient.apiPutJson<ExcelMappingsResponse>(excelTemplatePath(code, "/mappings"), request, options);
+}
+
+/**
+ * Renders the template against one pinned execution and inspects the result
+ * (Frontend #31 / Backend #30). Rejects with `404` when the execution is
+ * gone or expired, `409` when it has no template version pinned, `504` on a
+ * render timeout, and `422` when the template is no longer compatible with
+ * the report's contract.
+ */
+export function renderReportExcelTemplatePreview(
+  code: string,
+  executionId: string,
+  options?: RequestOptions,
+): Promise<ReportExcelRenderPreview> {
+  const request: ReportExcelRenderPreviewRequest = { execution_id: executionId };
+  return browserApiClient.apiPostJson<ReportExcelRenderPreview>(excelTemplatePath(code, "/render-preview"), request, options);
 }
 
 /**
