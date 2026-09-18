@@ -69,6 +69,7 @@ export function ReportExcelTemplateInspector({
   onPreviewReady,
   onPreviewInvalidated,
   onDirtyChange,
+  onTemplateSaved,
   refreshToken = "",
 }: {
   code: string;
@@ -79,9 +80,10 @@ export function ReportExcelTemplateInspector({
   onPreviewReady?: () => void;
   onPreviewInvalidated?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  onTemplateSaved?: () => void;
   refreshToken?: string;
 }) {
-  return <TemplateMapper key={code} code={code} mode={mode} onModeChange={onModeChange} onPreviewReady={onPreviewReady} onPreviewInvalidated={onPreviewInvalidated} onDirtyChange={onDirtyChange} refreshToken={refreshToken} />;
+  return <TemplateMapper key={code} code={code} mode={mode} onModeChange={onModeChange} onPreviewReady={onPreviewReady} onPreviewInvalidated={onPreviewInvalidated} onDirtyChange={onDirtyChange} onTemplateSaved={onTemplateSaved} refreshToken={refreshToken} />;
 }
 
 function TemplateMapper({
@@ -91,6 +93,7 @@ function TemplateMapper({
   onPreviewReady,
   onPreviewInvalidated,
   onDirtyChange,
+  onTemplateSaved,
   refreshToken = "",
 }: {
   code: string;
@@ -99,6 +102,7 @@ function TemplateMapper({
   onPreviewReady?: () => void;
   onPreviewInvalidated?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  onTemplateSaved?: () => void;
   refreshToken?: string;
 }) {
   const [state, setState] = useState<MapperState>({ status: "loading" });
@@ -281,6 +285,7 @@ function TemplateMapper({
       setSelectedCell(null);
       setCellErrors(new Map());
       setSavedNotice(`Cambios guardados. Versión ${response.version}.`);
+      onTemplateSaved?.();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         setConflict(true);
@@ -385,7 +390,10 @@ function TemplateMapper({
           <ReportExcelTemplateVersionHistory
             code={code}
             disabledReason={isDirty ? "Guarda o descarta tus cambios antes de restaurar otra versión." : null}
-            onRestored={handleReload}
+            onRestored={() => {
+              onTemplateSaved?.();
+              handleReload();
+            }}
           />
         </div>
       </CardHeader>

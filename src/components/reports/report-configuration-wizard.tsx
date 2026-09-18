@@ -66,7 +66,7 @@ export function ReportConfigurationWizard({
   const [previewGenerated, setPreviewGenerated] = useState(false);
   const mounted = useRef(false);
   const [mappingsDirty, setMappingsDirty] = useState(false);
-  const [builderRevision, setBuilderRevision] = useState(0);
+  const [savedRevision, setSavedRevision] = useState(0);
 
   useEffect(() => {
     if (resumed || report == null) return;
@@ -157,7 +157,7 @@ export function ReportConfigurationWizard({
               code={report.code}
               parameters={report.parameters}
               dataSourceCapabilities={report.data_source.capabilities}
-              onSaved={() => setBuilderRevision((revision) => revision + 1)}
+              onSaved={() => setSavedRevision((revision) => revision + 1)}
             />
           </div>
           {step === "data" && (
@@ -168,7 +168,7 @@ export function ReportConfigurationWizard({
             <ReportExcelTemplateCard
               code={report.code}
               parameters={report.parameters}
-              refreshToken={builderRevision}
+              refreshToken={savedRevision}
               hasUnsavedMappings={mappingsDirty}
               onTemplateChange={(template) => {
                 setTemplateState(template);
@@ -211,11 +211,12 @@ export function ReportConfigurationWizard({
                 <ReportExcelTemplateInspector
                   code={report.code}
                   mode={templateMode}
-                  refreshToken={`${builderRevision}:${templateState?.version ?? "none"}`}
+                  refreshToken={`${savedRevision}:${templateState?.version ?? "none"}`}
                   onModeChange={handleTemplateModeChange}
                   onPreviewReady={() => setPreviewGenerated(true)}
                   onPreviewInvalidated={() => setPreviewGenerated(false)}
                   onDirtyChange={setMappingsDirty}
+                  onTemplateSaved={() => setSavedRevision((revision) => revision + 1)}
                 />
               </CardContent>
             </Card>

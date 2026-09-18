@@ -47,12 +47,12 @@ vi.mock("@/components/reports/report-builder-workspace", () => ({
   ReportBuilderWorkspace: ({ code }: { code: string }) => <div data-testid="builder-workspace">builder:{code}</div>,
 }));
 vi.mock("@/components/reports/report-excel-template-card", () => ({
-  ReportExcelTemplateCard: ({ onTemplateChange, hasUnsavedMappings }: { onTemplateChange?: (template: ReportExcelTemplate | null) => void; hasUnsavedMappings?: boolean }) => {
+  ReportExcelTemplateCard: ({ onTemplateChange, hasUnsavedMappings, refreshToken }: { onTemplateChange?: (template: ReportExcelTemplate | null) => void; hasUnsavedMappings?: boolean; refreshToken?: number }) => {
     // Mirrors the real component reporting its initial load (even a "no template" one) once mounted.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once on mount only, like a real initial-load effect
     useEffect(() => { onTemplateChange?.(null); }, []);
     return (
-      <div data-testid="template-card" data-mappings-dirty={String(hasUnsavedMappings)}>
+      <div data-testid="template-card" data-mappings-dirty={String(hasUnsavedMappings)} data-refresh-token={refreshToken}>
         <button type="button" onClick={() => onTemplateChange?.(TEMPLATE)}>fake-upload</button>
         <button type="button" onClick={() => onTemplateChange?.(null)}>fake-report-no-template</button>
       </div>
@@ -60,14 +60,16 @@ vi.mock("@/components/reports/report-excel-template-card", () => ({
   },
 }));
 vi.mock("@/components/reports/report-excel-template-inspector", () => ({
-  ReportExcelTemplateInspector: ({ mode, onModeChange, onPreviewReady, onDirtyChange }: {
+  ReportExcelTemplateInspector: ({ mode, onModeChange, onPreviewReady, onDirtyChange, onTemplateSaved }: {
     mode?: "design" | "preview";
     onModeChange?: (mode: "design" | "preview") => void;
     onPreviewReady?: () => void;
     onDirtyChange?: (dirty: boolean) => void;
+    onTemplateSaved?: () => void;
   }) => (
     <div data-testid="mapper">
       <p>mapper-mode:{mode}</p>
+      <button type="button" onClick={() => onTemplateSaved?.()}>fake-mapper-save</button>
       <button type="button" onClick={() => onDirtyChange?.(true)}>fake-dirty-mapping</button>
       <button type="button" onClick={() => onModeChange?.("preview")}>fake-switch-to-preview</button>
       <button type="button" onClick={() => onModeChange?.("design")}>fake-switch-to-design</button>
@@ -228,4 +230,12 @@ it("shares unsaved mappings with the template-card history when going back to st
   await user.click(screen.getByRole("button", { name: "fake-dirty-mapping" }));
   await user.click(screen.getByRole("button", { name: "Anterior" }));
   expect(screen.getByTestId("template-card").getAttribute("data-mappings-dirty")).toBe("true");
+});
+
+it("refreshes the template-card metadata after saving or restoring in the mounted mapper", async () => {
+  const user = userEvent.setup();
+  render(<ReportConfigurationWizard report={REPORT} initialStepParam={5} />);
+  await user.click(screen.getByRole("button", { name: "fake-mapper-save" }));
+  await user.click(screen.getByRole("button", { name: "Anterior" }));
+  expect(screen.getByTestId("template-card").getAttribute("data-refresh-token")).toBe("1");
 });
