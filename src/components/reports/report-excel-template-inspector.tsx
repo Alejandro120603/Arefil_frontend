@@ -67,6 +67,9 @@ export function ReportExcelTemplateInspector({
   mode,
   onModeChange,
   onPreviewReady,
+  onPreviewInvalidated,
+  onDirtyChange,
+  refreshToken = "",
 }: {
   code: string;
   /** Controls the Diseño/Vista previa tab from outside (the wizard, #33); uncontrolled (internal tab state) when omitted. */
@@ -74,8 +77,11 @@ export function ReportExcelTemplateInspector({
   onModeChange?: (mode: "design" | "preview") => void;
   /** Fires once a rendered preview successfully loads — the wizard's checklist tracks this as a session fact. */
   onPreviewReady?: () => void;
+  onPreviewInvalidated?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  refreshToken?: string;
 }) {
-  return <TemplateMapper key={code} code={code} mode={mode} onModeChange={onModeChange} onPreviewReady={onPreviewReady} />;
+  return <TemplateMapper key={code} code={code} mode={mode} onModeChange={onModeChange} onPreviewReady={onPreviewReady} onPreviewInvalidated={onPreviewInvalidated} onDirtyChange={onDirtyChange} refreshToken={refreshToken} />;
 }
 
 function TemplateMapper({
@@ -83,11 +89,17 @@ function TemplateMapper({
   mode: controlledMode,
   onModeChange,
   onPreviewReady,
+  onPreviewInvalidated,
+  onDirtyChange,
+  refreshToken = "",
 }: {
   code: string;
   mode?: "design" | "preview";
   onModeChange?: (mode: "design" | "preview") => void;
   onPreviewReady?: () => void;
+  onPreviewInvalidated?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  refreshToken?: string;
 }) {
   const [state, setState] = useState<MapperState>({ status: "loading" });
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
@@ -139,7 +151,11 @@ function TemplateMapper({
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [load, refreshToken]);
+
+  useEffect(() => {
+    onDirtyChange?.(pendingMappings.size > 0);
+  }, [pendingMappings.size, onDirtyChange]);
 
   useEffect(() => {
     if (pendingMappings.size === 0) return;
@@ -167,6 +183,7 @@ function TemplateMapper({
   }
 
   function handleReload() {
+    onPreviewInvalidated?.();
     setPendingMappings(new Map());
     setSelectedCell(null);
     setConflict(false);
@@ -491,6 +508,7 @@ function TemplateMapper({
             templateVersion={inspection.template.version}
             hasUnsavedChanges={isDirty}
             onPreviewReady={onPreviewReady}
+            onPreviewInvalidated={onPreviewInvalidated}
           />
         </div>
       </CardContent>

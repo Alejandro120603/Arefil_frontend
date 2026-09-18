@@ -9,20 +9,20 @@ import type { ReportBuilderDefinition, ReportExcelTemplateInspection, ReportWork
 
 const {
   inspectReportExcelTemplate, getReportBuilder, updateReportExcelTemplateMappings,
-  executeReport, renderReportExcelTemplatePreview, listReportExcelTemplateVersions,
+  previewReportBuilder, renderReportExcelTemplatePreview, listReportExcelTemplateVersions,
   restoreReportExcelTemplateVersion,
 } = vi.hoisted(() => ({
   inspectReportExcelTemplate: vi.fn(),
   getReportBuilder: vi.fn(),
   updateReportExcelTemplateMappings: vi.fn(),
-  executeReport: vi.fn(),
+  previewReportBuilder: vi.fn(),
   renderReportExcelTemplatePreview: vi.fn(),
   listReportExcelTemplateVersions: vi.fn(),
   restoreReportExcelTemplateVersion: vi.fn(),
 }));
 vi.mock("@/lib/api/reports", () => ({
   inspectReportExcelTemplate, getReportBuilder, updateReportExcelTemplateMappings,
-  executeReport, renderReportExcelTemplatePreview, listReportExcelTemplateVersions,
+  previewReportBuilder, renderReportExcelTemplatePreview, listReportExcelTemplateVersions,
   restoreReportExcelTemplateVersion,
 }));
 
@@ -367,7 +367,7 @@ describe("ReportExcelTemplateInspector", () => {
     await user.click(screen.getByRole("tab", { name: "Vista previa" }));
     expect(screen.getByText("Guarda los cambios de la plantilla antes de generar la vista previa.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Generar vista previa" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(executeReport).not.toHaveBeenCalled();
+    expect(previewReportBuilder).not.toHaveBeenCalled();
   });
 
   it("offers a version history entry point that blocks restoring while mappings are dirty", async () => {
@@ -416,4 +416,15 @@ describe("ReportExcelTemplateInspector", () => {
     ));
     expect(await screen.findByText("COTIZACION.xlsx · v4")).toBeTruthy();
   });
+});
+
+it("refreshes a mounted no-template editor when the wizard uploads a template", async () => {
+  inspectReportExcelTemplate.mockRejectedValue(new ApiError(404, "no template"));
+  getReportBuilder.mockResolvedValue(BUILDER);
+  const view = render(<ReportExcelTemplateInspector code="COTIZACION" refreshToken="none" />);
+  expect(await screen.findByText(/todavía no tiene una plantilla Excel activa/)).toBeTruthy();
+  mockReady();
+  view.rerender(<ReportExcelTemplateInspector code="COTIZACION" refreshToken="3" />);
+  expect(await screen.findByText("COTIZACION.xlsx · v3")).toBeTruthy();
+  expect(screen.getByLabelText("Celda B2")).toBeTruthy();
 });

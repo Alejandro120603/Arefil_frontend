@@ -118,3 +118,18 @@ describe("ReportWizardFinalizeStep", () => {
     expect(screen.getByRole("button", { name: /Reintentar/ })).toBeTruthy();
   });
 });
+
+it("reads fresh backend state when entering Finalizar after it was kept hidden", async () => {
+  getReportBuilder.mockResolvedValue(BUILDER);
+  getReportExcelTemplate.mockResolvedValue(TEMPLATE);
+  inspectReportExcelTemplate.mockResolvedValue({ sheets: [], styles: {}, truncated: false });
+  const props = { report: REPORT, previewGeneratedThisSession: false, onReportChange: vi.fn() };
+  const view = render(<ReportWizardFinalizeStep {...props} active={false} />);
+  expect(getReportBuilder).not.toHaveBeenCalled();
+  view.rerender(<ReportWizardFinalizeStep {...props} active />);
+  expect(await screen.findByText("Plantilla Excel · v4")).toBeTruthy();
+  view.rerender(<ReportWizardFinalizeStep {...props} active={false} />);
+  getReportExcelTemplate.mockResolvedValue({ ...TEMPLATE, version: 5 });
+  view.rerender(<ReportWizardFinalizeStep {...props} active />);
+  expect(await screen.findByText("Plantilla Excel · v5")).toBeTruthy();
+});

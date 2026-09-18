@@ -58,13 +58,15 @@ export function ReportConfigurationWizard({
   // For an existing report opened with no explicit ?step=, land on the first
   // structurally incomplete step instead of always Información.
   const [resumed, setResumed] = useState(initialStepParam != null || initialReport == null);
-  const [templateMode, setTemplateMode] = useState<"design" | "preview">("design");
+  const [templateMode, setTemplateMode] = useState<"design" | "preview">(initialStepParam === 6 ? "preview" : "design");
   const [templateState, setTemplateState] = useState<ReportExcelTemplate | null>(null);
   /** Whether `ReportExcelTemplateCard` has reported back at least once — `templateState == null` is ambiguous otherwise. */
   const [templateChecked, setTemplateChecked] = useState(false);
   const [templateSkipped, setTemplateSkipped] = useState(false);
   const [previewGenerated, setPreviewGenerated] = useState(false);
   const mounted = useRef(false);
+  const [mappingsDirty, setMappingsDirty] = useState(false);
+  const [builderRevision, setBuilderRevision] = useState(0);
 
   useEffect(() => {
     if (resumed || report == null) return;
@@ -132,15 +134,10 @@ export function ReportConfigurationWizard({
         </CardContent>
       </Card>
 
-      <div className={step === "information" ? "contents" : "hidden"}>
-        <ReportDefinitionForm report={report} section="information" />
-      </div>
-      {step === "information" && <WizardNav onPrevious={null} onNext={() => goTo("source")} nextLabel="Continuar" />}
-
-      <div className={step === "source" ? "contents" : "hidden"}>
+      <div className={step === "information" || step === "source" ? "contents" : "hidden"}>
         <ReportDefinitionForm
           report={report}
-          section="source"
+          section={step === "information" ? "information" : "source"}
           createRedirectPath={(code) => `/administracion/reportes/${encodeURIComponent(code)}/configurar?step=3`}
           onSaved={(saved) => {
             if (report != null) {
@@ -150,6 +147,7 @@ export function ReportConfigurationWizard({
           }}
         />
       </div>
+      {step === "information" && <WizardNav onPrevious={null} onNext={() => goTo("source")} nextLabel="Continuar" />}
       {step === "source" && <WizardNav onPrevious={() => goTo("information")} onNext={null} />}
 
       {report != null && (
@@ -159,6 +157,7 @@ export function ReportConfigurationWizard({
               code={report.code}
               parameters={report.parameters}
               dataSourceCapabilities={report.data_source.capabilities}
+              onSaved={() => setBuilderRevision((revision) => revision + 1)}
             />
           </div>
           {step === "data" && (
@@ -169,6 +168,8 @@ export function ReportConfigurationWizard({
             <ReportExcelTemplateCard
               code={report.code}
               parameters={report.parameters}
+              refreshToken={builderRevision}
+              hasUnsavedMappings={mappingsDirty}
               onTemplateChange={(template) => {
                 setTemplateState(template);
                 setTemplateChecked(true);
@@ -210,8 +211,11 @@ export function ReportConfigurationWizard({
                 <ReportExcelTemplateInspector
                   code={report.code}
                   mode={templateMode}
+                  refreshToken={`${builderRevision}:${templateState?.version ?? "none"}`}
                   onModeChange={handleTemplateModeChange}
                   onPreviewReady={() => setPreviewGenerated(true)}
+                  onPreviewInvalidated={() => setPreviewGenerated(false)}
+                  onDirtyChange={setMappingsDirty}
                 />
               </CardContent>
             </Card>
@@ -229,6 +233,7 @@ export function ReportConfigurationWizard({
               <CardContent>
                 <ReportWizardFinalizeStep
                   report={report}
+                  active={step === "finalize"}
                   previewGeneratedThisSession={previewGenerated}
                   onReportChange={setReport}
                 />

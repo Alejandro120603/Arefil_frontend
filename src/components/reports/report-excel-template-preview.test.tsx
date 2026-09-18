@@ -8,10 +8,10 @@ import { ApiError } from "@/lib/api/errors";
 import type { ReportBuilderPreviewResponse, ReportDefinition, ReportExcelRenderPreview } from "@/types/api";
 
 const {
-  executeReport, renderReportExcelTemplatePreview, downloadReportDocumentXlsx,
+  previewReportBuilder, renderReportExcelTemplatePreview, downloadReportDocumentXlsx,
   listAllReportParameterOptions, resolveReportProductOption, searchReportProductOptions,
 } = vi.hoisted(() => ({
-  executeReport: vi.fn(),
+  previewReportBuilder: vi.fn(),
   renderReportExcelTemplatePreview: vi.fn(),
   downloadReportDocumentXlsx: vi.fn(),
   listAllReportParameterOptions: vi.fn(),
@@ -19,7 +19,7 @@ const {
   searchReportProductOptions: vi.fn(),
 }));
 vi.mock("@/lib/api/reports", () => ({
-  executeReport, renderReportExcelTemplatePreview, downloadReportDocumentXlsx,
+  previewReportBuilder, renderReportExcelTemplatePreview, downloadReportDocumentXlsx,
   listAllReportParameterOptions, resolveReportProductOption, searchReportProductOptions,
 }));
 
@@ -73,22 +73,22 @@ afterEach(() => {
 });
 
 describe("ReportExcelTemplatePreview", () => {
-  it("captures test parameters, runs a real execution, and renders the preview with its execution_id", async () => {
-    executeReport.mockResolvedValue(executionPayload());
+  it("uses builder preview for a disabled report and renders its persisted execution_id", async () => {
+    previewReportBuilder.mockResolvedValue(executionPayload());
     renderReportExcelTemplatePreview.mockResolvedValue(renderPreview());
     const user = userEvent.setup();
-    render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} />);
+    render(<ReportExcelTemplatePreview report={{ ...REPORT, enabled: false }} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} />);
 
     await fillRequiredAndGenerate(user);
 
-    await waitFor(() => expect(executeReport).toHaveBeenCalledWith("COTIZACION", { customer_name: "BONATTI" }, expect.anything()));
+    await waitFor(() => expect(previewReportBuilder).toHaveBeenCalledWith("COTIZACION", { customer_name: "BONATTI" }, expect.anything()));
     await waitFor(() => expect(renderReportExcelTemplatePreview).toHaveBeenCalledWith("COTIZACION", "exec-1", expect.anything()));
     expect(await screen.findByText("Vista previa basada en plantilla v4")).toBeTruthy();
     expect(screen.getByLabelText("Celda B2").textContent).toContain("BONATTI MÉXICO");
   });
 
   it("shows the summaries badge only when the report has summaries configured", async () => {
-    executeReport.mockResolvedValue(executionPayload());
+    previewReportBuilder.mockResolvedValue(executionPayload());
     renderReportExcelTemplatePreview.mockResolvedValue(renderPreview());
     const user = userEvent.setup();
     render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={true} templateVersion={4} hasUnsavedChanges={false} />);
@@ -98,7 +98,7 @@ describe("ReportExcelTemplatePreview", () => {
   });
 
   it("shows a plain informational note, not an error, for a 0-row dataset", async () => {
-    executeReport.mockResolvedValue(executionPayload({ row_count: 0 }));
+    previewReportBuilder.mockResolvedValue(executionPayload({ row_count: 0 }));
     renderReportExcelTemplatePreview.mockResolvedValue(renderPreview());
     const user = userEvent.setup();
     render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} />);
@@ -109,7 +109,7 @@ describe("ReportExcelTemplatePreview", () => {
   });
 
   it("uses singular wording for exactly one rendered partida", async () => {
-    executeReport.mockResolvedValue(executionPayload({ row_count: 1 }));
+    previewReportBuilder.mockResolvedValue(executionPayload({ row_count: 1 }));
     renderReportExcelTemplatePreview.mockResolvedValue(renderPreview());
     const user = userEvent.setup();
     render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} />);
@@ -119,7 +119,7 @@ describe("ReportExcelTemplatePreview", () => {
   });
 
   it("switches sheets in the rendered preview", async () => {
-    executeReport.mockResolvedValue(executionPayload());
+    previewReportBuilder.mockResolvedValue(executionPayload());
     renderReportExcelTemplatePreview.mockResolvedValue(renderPreview({
       sheets: [
         renderPreview().sheets[0],
@@ -136,16 +136,16 @@ describe("ReportExcelTemplatePreview", () => {
   });
 
   it("blocks generating a preview while the template has unsaved changes", async () => {
-    executeReport.mockResolvedValue(executionPayload());
+    previewReportBuilder.mockResolvedValue(executionPayload());
     render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={true} />);
 
     expect(screen.getByText("Guarda los cambios de la plantilla antes de generar la vista previa.")).toBeTruthy();
     expect((screen.getByRole("button", { name: /Generar vista previa/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect(executeReport).not.toHaveBeenCalled();
+    expect(previewReportBuilder).not.toHaveBeenCalled();
   });
 
   it("treats a 404 from render-preview as an expired execution, with the exact regenerate message", async () => {
-    executeReport.mockResolvedValue(executionPayload());
+    previewReportBuilder.mockResolvedValue(executionPayload());
     renderReportExcelTemplatePreview.mockRejectedValue(new ApiError(404, "La ejecución ya no está disponible."));
     const user = userEvent.setup();
     render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} />);
@@ -157,7 +157,7 @@ describe("ReportExcelTemplatePreview", () => {
   });
 
   it("surfaces a render error from the backend", async () => {
-    executeReport.mockResolvedValue(executionPayload());
+    previewReportBuilder.mockResolvedValue(executionPayload());
     renderReportExcelTemplatePreview.mockRejectedValue(new ApiError(422, "La celda C1 contiene una fórmula que no puede evaluarse."));
     const user = userEvent.setup();
     render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} />);
@@ -168,7 +168,7 @@ describe("ReportExcelTemplatePreview", () => {
   });
 
   it("flags cells that still carry an unresolved placeholder in the rendered document", async () => {
-    executeReport.mockResolvedValue(executionPayload());
+    previewReportBuilder.mockResolvedValue(executionPayload());
     renderReportExcelTemplatePreview.mockResolvedValue(renderPreview({
       sheets: [{
         ...renderPreview().sheets[0],
@@ -186,7 +186,7 @@ describe("ReportExcelTemplatePreview", () => {
   });
 
   it("the download button reuses the preview's own execution_id, not local state", async () => {
-    executeReport.mockResolvedValue(executionPayload({ execution_id: "exec-1" }));
+    previewReportBuilder.mockResolvedValue(executionPayload({ execution_id: "exec-1" }));
     renderReportExcelTemplatePreview.mockResolvedValue(renderPreview({ execution_id: "exec-1" }));
     downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["x"]), filename: "cotizacion.xlsx" });
     const user = userEvent.setup();
@@ -200,7 +200,7 @@ describe("ReportExcelTemplatePreview", () => {
   });
 
   it("invalidates the previous preview as soon as a parameter changes", async () => {
-    executeReport.mockResolvedValue(executionPayload());
+    previewReportBuilder.mockResolvedValue(executionPayload());
     renderReportExcelTemplatePreview.mockResolvedValue(renderPreview());
     const user = userEvent.setup();
     render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} />);
@@ -212,4 +212,18 @@ describe("ReportExcelTemplatePreview", () => {
     expect(screen.queryByText("Vista previa basada en plantilla v4")).toBeNull();
     expect(screen.getByRole("button", { name: "Generar vista previa" })).toBeTruthy();
   });
+});
+
+it("notifies the wizard when editing parameters invalidates a generated preview", async () => {
+  previewReportBuilder.mockResolvedValue(executionPayload());
+  renderReportExcelTemplatePreview.mockResolvedValue(renderPreview());
+  const onPreviewInvalidated = vi.fn();
+  const user = userEvent.setup();
+  render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} onPreviewInvalidated={onPreviewInvalidated} />);
+  await fillRequiredAndGenerate(user);
+  expect(await screen.findByText("Vista previa basada en plantilla v4")).toBeTruthy();
+  onPreviewInvalidated.mockClear();
+  await user.type(screen.getByLabelText(/Cliente/), " nuevo");
+  expect(onPreviewInvalidated).toHaveBeenCalled();
+  expect(screen.queryByText("Vista previa basada en plantilla v4")).toBeNull();
 });

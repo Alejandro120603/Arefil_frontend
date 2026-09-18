@@ -280,11 +280,11 @@ export function ReportDefinitionForm({
         </>
       )}
 
-      <div className="flex justify-end">
+      {section !== "information" && <div className="flex justify-end">
         <Button type="submit" disabled={saving || sources == null}>
           {saving ? <Loader2 className="animate-spin" /> : <Save />}{saving ? "Guardando..." : creating ? "Crear reporte" : "Guardar cambios"}
         </Button>
-      </div>
+      </div>}
     </form>
   );
 }
