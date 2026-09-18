@@ -13,8 +13,11 @@ import type {
   ReportPreviewResponse,
   ReportProductOption,
   ReportExcelTemplate,
+  ReportExcelTemplateInspection,
   ReportExcelTemplateUpload,
   ReportUpdateRequest,
+  ExcelMappingsRequest,
+  ExcelMappingsResponse,
   Page,
 } from "@/types/api";
 import type { BlobDownload } from "./client";
@@ -263,6 +266,33 @@ export function downloadReportExcelTemplate(code: string, options?: RequestOptio
 /** Deactivates the active template; the report keeps running and exporting data without it. */
 export function deleteReportExcelTemplate(code: string, options?: RequestOptions): Promise<void> {
   return browserApiClient.apiDelete<void>(excelTemplatePath(code), options);
+}
+
+/**
+ * Read-only visual inspection of the active template (Backend #28). Rejects
+ * with a 404 `ApiError` when there is no active template, and with a 422 when
+ * the workbook cannot be inspected or exceeds the backend's limits.
+ */
+export function inspectReportExcelTemplate(
+  code: string,
+  options?: RequestOptions,
+): Promise<ReportExcelTemplateInspection> {
+  return browserApiClient.apiGet<ReportExcelTemplateInspection>(excelTemplatePath(code, "/inspect"), options);
+}
+
+/**
+ * Visual Template Mapper (Frontend #30 / Backend #29): applies a batch of
+ * cell mappings/clears in one atomic write. Rejects with a `409` `ApiError`
+ * when `base_version`/`base_checksum` no longer match the active template,
+ * and with a `422` whose `detail` is `{ errors: ExcelMappingIssue[] }` when
+ * any target fails validation — nothing is saved in either case.
+ */
+export function updateReportExcelTemplateMappings(
+  code: string,
+  request: ExcelMappingsRequest,
+  options?: RequestOptions,
+): Promise<ExcelMappingsResponse> {
+  return browserApiClient.apiPutJson<ExcelMappingsResponse>(excelTemplatePath(code, "/mappings"), request, options);
 }
 
 /**

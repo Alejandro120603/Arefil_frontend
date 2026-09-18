@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
   CheckCircle2,
   Download,
   FileSpreadsheet,
   Loader2,
+  PencilRuler,
   RefreshCw,
   Trash2,
   Upload,
@@ -287,6 +289,16 @@ export function ReportExcelTemplateCard({
               {template != null && (
                 <Button type="button" size="sm" variant="outline" disabled={busy} onClick={handleDownload}>
                   {downloading ? <Loader2 className="animate-spin" /> : <Download />} Descargar plantilla
+                </Button>
+              )}
+              {template != null && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  nativeButton={false}
+                  render={<Link href={`/administracion/reportes/${encodeURIComponent(code)}/plantilla`} />}
+                >
+                  <PencilRuler /> Editar visualmente
                 </Button>
               )}
               {template != null && !confirmingRemoval && (
