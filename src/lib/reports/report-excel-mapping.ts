@@ -75,10 +75,13 @@ export function buildMappingFieldGroups(builder: ReportBuilderDefinition): Mappi
   const visibleColumns = [...builder.columns]
     .filter((column) => column.visible)
     .sort((a, b) => a.display_order - b.display_order);
-  const rowsOptions = [
-    fieldOption("rows", "row_number", "Número de renglón (Item)"),
-    ...visibleColumns.map((column) => fieldOption("rows", column.key, column.label)),
-  ];
+  // `rows.row_number` is always available, but a report may also expose it as
+  // an ordinary visible column (a `system.row_number` field). Emitting both
+  // would hand the picker two options with the same placeholder.
+  const columnOptions = visibleColumns.map((column) => fieldOption("rows", column.key, column.label));
+  const rowsOptions = visibleColumns.some((column) => column.key === "row_number")
+    ? columnOptions
+    : [fieldOption("rows", "row_number", "Número de renglón (Item)"), ...columnOptions];
 
   const totals = builder.excel_layout?.totals ?? [];
   const summaryOptions = totals.map((total) => {
