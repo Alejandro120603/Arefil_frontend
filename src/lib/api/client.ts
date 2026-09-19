@@ -50,7 +50,12 @@ export interface RequestOptions {
 export interface ApiClient {
   apiGet<T>(path: string, options?: RequestOptions): Promise<T>;
   apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
+  apiPatchJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T>;
+  apiPutJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T>;
+  apiDelete<T>(path: string, options?: RequestOptions): Promise<T>;
+  apiPostBlob(path: string, body: unknown, options?: RequestOptions): Promise<BlobDownload>;
   apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T>;
+  apiPutForm<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T>;
   apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload>;
 }
 
@@ -75,9 +80,62 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return parseJson<T>(response);
   }
 
+  async function apiPatchJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
+  async function apiPutJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
+  async function apiDelete<T>(path: string, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
+  async function apiPostBlob(path: string, body: unknown, options?: RequestOptions): Promise<BlobDownload> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+    await ensureOk(response);
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition");
+    return { blob, filename: disposition ? extractFilename(disposition) : null };
+  }
+
   async function apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
     const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
       method: "POST",
+      headers: { Accept: "application/json" },
+      body: formData,
+      signal: options?.signal,
+    });
+    return parseJson<T>(response);
+  }
+
+  /** Multipart replace (`PUT`); the browser writes the multipart Content-Type itself. */
+  async function apiPutForm<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
+    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+      method: "PUT",
       headers: { Accept: "application/json" },
       body: formData,
       signal: options?.signal,
@@ -96,7 +154,17 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
     return { blob, filename: disposition ? extractFilename(disposition) : null };
   }
 
-  return { apiGet, apiPostJson, apiUpload, apiDownloadBlob };
+  return {
+    apiGet,
+    apiPostJson,
+    apiPatchJson,
+    apiPutJson,
+    apiDelete,
+    apiPostBlob,
+    apiUpload,
+    apiPutForm,
+    apiDownloadBlob,
+  };
 }
 
 export interface BlobDownload {
@@ -105,6 +173,14 @@ export interface BlobDownload {
 }
 
 function extractFilename(disposition: string): string | null {
-  const match = /filename="?([^";]+)"?/i.exec(disposition);
-  return match ? match[1] : null;
+  const encodedMatch = /filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i.exec(disposition);
+  const plainMatch = /filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;]+)/i.exec(disposition);
+  const raw = encodedMatch?.[1] ?? plainMatch?.[1] ?? plainMatch?.[2];
+  if (raw == null) return null;
+  const unquoted = raw.trim().replace(/^"|"$/g, "");
+  try {
+    return decodeURIComponent(unquoted).replace(/[\\/]/g, "_");
+  } catch {
+    return unquoted.replace(/[\\/]/g, "_");
+  }
 }

@@ -44,6 +44,16 @@ function formatDetail(detail: unknown): string {
   return GENERIC_ERROR_MESSAGE;
 }
 
+/**
+ * Like `getErrorMessage`, but only trusts wording the backend actually wrote.
+ * Transport failures carry runtime text (`fetch failed`, `ECONNREFUSED`, an
+ * abort reason) that means nothing to a user, so anything that is not an
+ * `ApiError` collapses into `fallback`.
+ */
+export function getUserErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.message : fallback;
+}
+
 export function getErrorMessage(error: unknown, fallback = "No se pudo comunicar con el backend."): string {
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error) return error.message;

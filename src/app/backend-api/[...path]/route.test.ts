@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GET, POST } from "./route";
+import { GET, POST, PUT } from "./route";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -72,5 +72,29 @@ describe("backend API proxy", () => {
     expect(response.status).toBe(502);
     expect(body).toContain("No se pudo comunicar con el backend.");
     expect(body).not.toContain("backend:8000");
+  });
+
+  it("forwards a report builder JSON request and its content type on PUT", async () => {
+    vi.stubEnv("API_INTERNAL_URL", "http://backend:8000/api");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ columns: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const builder = '{"columns":[],"parameter_groups":[],"excel_layout":{"sheet_name":"Reporte"}}';
+    const request = new NextRequest(
+      "http://frontend:3000/backend-api/reports/PRICE_LIST_COMPARISON/builder",
+      { method: "PUT", headers: { "Content-Type": "application/json" }, body: builder },
+    );
+
+    const response = await PUT(request, {
+      params: Promise.resolve({ path: ["reports", "PRICE_LIST_COMPARISON", "builder"] }),
+    });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "http://backend:8000/api/reports/PRICE_LIST_COMPARISON/builder",
+    );
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.method).toBe("PUT");
+    expect((init?.headers as Headers).get("content-type")).toBe("application/json");
+    expect(new TextDecoder().decode(init?.body as ArrayBuffer)).toBe(builder);
+    expect(response.status).toBe(200);
   });
 });

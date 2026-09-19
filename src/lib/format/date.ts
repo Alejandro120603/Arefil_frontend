@@ -14,3 +14,15 @@ export function formatDate(value: string | null | undefined): string {
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("es-MX", { dateStyle: "medium" }).format(date);
 }
+
+/**
+ * Date + time for report headers (e.g. `report.generated_at`, a real instant).
+ * `formatDate` deliberately drops the time, and a generated-at stamp without
+ * one is ambiguous when two comparisons are run on the same day.
+ */
+export function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
