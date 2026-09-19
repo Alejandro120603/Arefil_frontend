@@ -76,6 +76,22 @@ describe("buildMappingFieldGroups", () => {
     expect(groups.map((g) => g.namespace)).toEqual(["report", "rows"]);
   });
 
+  it("never duplicates rows.row_number when the report exposes it as a column", () => {
+    const groups = buildMappingFieldGroups({
+      ...BUILDER,
+      columns: [
+        { key: "row_number", label: "Número de renglón", column_type: "FIELD", source_field: "system.row_number", source_parameter: null, formula_definition: null, data_type: "integer", format_type: "number", display_order: 0, visible: true, width: null },
+        ...(BUILDER as unknown as { columns: unknown[] }).columns,
+      ],
+    } as unknown as ReportBuilderDefinition);
+    const rows = groups.find((g) => g.namespace === "rows")!;
+    const placeholders = rows.options.map((o) => o.placeholder);
+
+    expect(placeholders.filter((p) => p === "rows.row_number")).toHaveLength(1);
+    expect(new Set(placeholders).size).toBe(placeholders.length);
+    expect(rows.options.find((o) => o.key === "row_number")?.label).toBe("Número de renglón");
+  });
+
   it("only offers visible columns as row fields, never hidden ones", () => {
     const groups = buildMappingFieldGroups(BUILDER);
     const rows = groups.find((g) => g.namespace === "rows")!;
