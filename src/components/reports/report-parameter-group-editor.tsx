@@ -101,10 +101,14 @@ export function ReportParameterGroupEditor({
 
   function replaceGroup(patch: Partial<ReportParameterGroup>) {
     const context = patch.context_parameter ?? group.context_parameter;
+    // The rewrite below only re-points the product selector at the current
+    // context parameter, so it has to start from the patch's own fields;
+    // reading group.fields here would silently drop every add/remove/edit.
+    const fields = patch.fields ?? group.fields;
     onChange([{
       ...group,
       ...patch,
-      fields: group.fields.map((field) => field.input_type === "select"
+      fields: fields.map((field) => field.input_type === "select"
         ? { ...field, configuration_json: { options_source: "products_by_price_list", context_parameter: context } }
         : field),
     }]);
