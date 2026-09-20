@@ -49,32 +49,59 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
-## `make run_panel`
+## Desarrollo local
 
-Comando principal: levanta backend + frontend juntos desde la raíz de este repo.
+### Iniciar
+
+El comando principal levanta backend + frontend juntos desde la raíz de este
+repo:
 
 ```bash
-make run_panel
+make compose_up
 ```
 
 Esto:
 
 1. Valida que `Arefil_backend` y su entorno virtual existan (falla con mensaje
    accionable si no).
-2. Instala dependencias de frontend si `node_modules` no existe.
-3. Corre `alembic upgrade head` sobre el backend.
-4. Corre el seed idempotente de Donaldson (`python -m app.db.seed`).
-5. Levanta FastAPI con `--reload` en `:8000`.
-6. Levanta Next.js dev en `:3001`.
-7. Muestra los logs de ambos procesos en la misma terminal.
-8. `Ctrl+C` detiene ambos limpiamente; si uno de los dos procesos muere, el
-   script detiene el otro y termina con código de error. No quedan procesos
-   `uvicorn`/`node` huérfanos (ver `scripts/run_panel.sh`).
+2. Valida que los puertos `8000` y `3001` estén libres, sin detener al proceso
+   que los ocupa si existe.
+3. Instala dependencias de frontend si `node_modules` no existe.
+4. Corre `alembic upgrade head` sobre el backend.
+5. Corre el seed idempotente de Donaldson (`python -m app.db.seed`).
+6. Levanta FastAPI con `--reload` en `:8000`.
+7. Levanta Next.js dev en `:3001`.
+8. Muestra los logs de ambos procesos en la misma terminal.
+9. `Ctrl+C` detiene los grupos de procesos completos; si uno de los servicios
+   muere, el script cierra el otro (ver `scripts/compose_up.sh`).
+
+La metadata de la instancia se guarda con permisos privados bajo
+`${XDG_RUNTIME_DIR:-/tmp}`. No se escribe dentro del repositorio y se valida
+contra PID, tiempo de inicio y comando antes de enviar señales.
 
 Variables configurables (todas con default razonable):
 
 ```bash
-make run_panel BACKEND_DIR=../Arefil_backend/backend BACKEND_PORT=8000 FRONTEND_PORT=3001
+make compose_up BACKEND_DIR=../Arefil_backend/backend BACKEND_PORT=8000 FRONTEND_PORT=3001
+```
+
+### Detener
+
+```bash
+make compose_down
+```
+
+Primero detiene la instancia conocida por su metadata. Después revisa
+exclusivamente los listeners de `8000` y `3001`. Si Docker publica uno de esos
+puertos, detiene solo el container que tiene ese binding; para un proceso
+convencional envía `SIGTERM`, espera y usa `SIGKILL` únicamente si hace falta.
+El comando es idempotente y no usa kills globales.
+
+### Puertos
+
+```text
+Frontend: 127.0.0.1:3001
+Backend:  127.0.0.1:8000
 ```
 
 ### `make setup_panel`
@@ -164,11 +191,13 @@ usa `src/lib/format/decimal.ts` para parsearlos al momento de mostrarlos.
 
 ## Docker
 
-Docker Compose es la forma portable oficial y una alternativa a
-`make run_panel`; no reemplaza el desarrollo local. Desde este repositorio:
+El stack Docker es un flujo separado del desarrollo local. `compose_up` y
+`compose_down` ejecutan los procesos del host; `docker_up` y `docker_down`
+administran Docker Compose. Desde este repositorio:
 
 ```bash
 make docker_up
+make docker_down
 ```
 
 El preflight valida Docker, el daemon, Compose, ambos Dockerfiles, el repo
@@ -307,5 +336,7 @@ npm run lint
 npm test
 npm run typecheck
 npm run build
-make run_panel
+make test_lifecycle
+make compose_up
+make compose_down
 ```

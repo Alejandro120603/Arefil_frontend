@@ -17,7 +17,7 @@ COMPOSE_PROJECT_NAME ?= arefil
 BACKEND_VENV ?= $(BACKEND_DIR)/../.venv
 BACKEND_PY ?= $(BACKEND_VENV)/bin/python
 
-.PHONY: run_panel setup_panel check_backend check_frontend docker_preflight docker_up docker_down docker_logs docker_ps docker_rebuild
+.PHONY: compose_up compose_down test_lifecycle setup_panel check_backend check_frontend docker_preflight docker_up docker_down docker_logs docker_ps docker_rebuild
 
 ## Validate the sibling backend + its venv, or fail with an actionable message.
 check_backend:
@@ -61,16 +61,25 @@ setup_panel:
 	@"$(BACKEND_PY)" -m pip install -r "$(BACKEND_DIR)/requirements.txt"
 	@echo "[setup_panel] Instalando dependencias de frontend..."
 	@cd "$(FRONTEND_DIR)" && npm install
-	@echo "[setup_panel] Listo. Ejecuta 'make run_panel'."
+	@echo "[setup_panel] Listo. Ejecuta 'make compose_up'."
 
 ## Migrate + seed the backend, then run FastAPI (:$(BACKEND_PORT)) and
 ## Next.js (:$(FRONTEND_PORT)) together. Ctrl+C, or either process dying,
-## stops both cleanly (see scripts/run_panel.sh).
-run_panel: check_backend check_frontend
+## stops both process groups cleanly (see scripts/compose_up.sh).
+compose_up: check_backend check_frontend
 	@BACKEND_DIR="$(BACKEND_DIR)" FRONTEND_DIR="$(FRONTEND_DIR)" \
 		BACKEND_PORT="$(BACKEND_PORT)" FRONTEND_PORT="$(FRONTEND_PORT)" \
 		BACKEND_PY="$(BACKEND_PY)" \
-		exec ./scripts/run_panel.sh
+		exec ./scripts/compose_up.sh
+
+## Stop a known local AREFIL instance and free only its configured ports.
+compose_down:
+	@FRONTEND_DIR="$(FRONTEND_DIR)" BACKEND_PORT="$(BACKEND_PORT)" \
+		FRONTEND_PORT="$(FRONTEND_PORT)" exec ./scripts/compose_down.sh
+
+## Exercise lifecycle behavior with isolated temporary listeners and fake deps.
+test_lifecycle:
+	@./tests/compose_lifecycle_test.sh
 
 ## Validate Docker, Compose, the sibling backend, and the persistent data path.
 docker_preflight:
