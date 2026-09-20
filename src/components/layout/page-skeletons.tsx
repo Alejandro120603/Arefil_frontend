@@ -66,3 +66,11 @@ export function DetailPageSkeleton() {
     </div>
   );
 }
+
+// Compatibility names used by the pending route loading boundaries.
+export {
+  DetailPageSkeleton as FormPageSkeleton,
+  DetailPageSkeleton as ReportBuilderSkeleton,
+  DetailPageSkeleton as ReportRuntimeSkeleton,
+  ListPageSkeleton as ImportPageSkeleton,
+};
