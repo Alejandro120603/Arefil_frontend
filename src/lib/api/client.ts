@@ -179,8 +179,8 @@ function extractFilename(disposition: string): string | null {
   if (raw == null) return null;
   const unquoted = raw.trim().replace(/^"|"$/g, "");
   try {
-    return decodeURIComponent(unquoted).replace(/[\\/]/g, "_");
+    return decodeURIComponent(unquoted).replace(/[\\/]/g, "_").trim() || null;
   } catch {
-    return unquoted.replace(/[\\/]/g, "_");
+    return unquoted.replace(/[\\/]/g, "_").trim() || null;
   }
 }

@@ -18,6 +18,22 @@ afterEach(() => {
 });
 
 describe("ReportDataDownloadButtons", () => {
+  it("uses the stable report-code fallback for an XLSX export", async () => {
+    const user = userEvent.setup();
+    downloadReportData.mockResolvedValue({
+      blob: new Blob(["PK"]),
+      filename: "COTIZACION_PRODUCTOS.xlsx",
+    });
+    render(<ReportDataDownloadButtons code="COTIZACION_PRODUCTOS" parameters={{}} />);
+
+    await user.click(screen.getByRole("button", { name: "Descargar Excel de datos" }));
+
+    await waitFor(() => expect(triggerBrowserDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: "COTIZACION_PRODUCTOS.xlsx" }),
+      "COTIZACION_PRODUCTOS.xlsx",
+    ));
+  });
+
   it("rejects an empty backend export instead of saving a misleading file", async () => {
     const user = userEvent.setup();
     downloadReportData.mockResolvedValue({ blob: new Blob([]), filename: "empty.csv" });

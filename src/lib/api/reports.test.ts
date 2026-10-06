@@ -341,12 +341,12 @@ describe("report builder API", () => {
 
   it("renders the final quotation from the approved execution snapshot", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("PK", {
-      headers: { "Content-Disposition": "attachment; filename=cotizacion-document.xlsx" },
+      headers: { "Content-Disposition": 'attachment; filename="COTIZACION.xlsx"' },
     }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(downloadReportDocumentXlsx("COTIZACION", "10d693fd-ecc3-4759-aec7-d3d7cb086eb7"))
-      .resolves.toMatchObject({ filename: "cotizacion-document.xlsx" });
+      .resolves.toMatchObject({ filename: "COTIZACION.xlsx" });
     // The backend rejects a body that mixes the id with report parameters, so
     // `execution_id` has to travel alone.
     expect(fetchMock).toHaveBeenCalledWith(

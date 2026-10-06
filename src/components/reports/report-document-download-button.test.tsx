@@ -20,18 +20,22 @@ afterEach(() => {
 });
 
 describe("ReportDocumentDownloadButton", () => {
-  it("renders the quotation from the execution snapshot alone", async () => {
-    downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["PK"]), filename: "cotizacion-bonatti.xlsx" });
+  it("keeps the backend filename and uses the report code only as fallback", async () => {
+    downloadReportDocumentXlsx.mockResolvedValue({
+      blob: new Blob(["PK"]),
+      filename: "COTIZACION_PRODUCTOS.xlsx",
+    });
     const user = userEvent.setup();
-    render(<ReportDocumentDownloadButton code="COTIZACION" executionId={EXECUTION_ID} />);
+    render(<ReportDocumentDownloadButton code="COTIZACION_PRODUCTOS" executionId={EXECUTION_ID} />);
 
     await user.click(screen.getByRole("button", { name: "Descargar cotización Excel" }));
     await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledWith(
-      "COTIZACION", EXECUTION_ID, expect.anything(),
+      "COTIZACION_PRODUCTOS", EXECUTION_ID, expect.anything(),
     ));
-    // `triggerBrowserDownload` prefers the backend's Content-Disposition name;
-    // this is only the fallback it falls back to.
-    expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "cotizacion-document.xlsx");
+    expect(triggerBrowserDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: "COTIZACION_PRODUCTOS.xlsx" }),
+      "COTIZACION_PRODUCTOS.xlsx",
+    );
   });
 
   it("cannot be used without an execution id", async () => {
@@ -98,7 +102,10 @@ describe("ReportDocumentDownloadButton", () => {
     expect(await screen.findByText("Falló el render.")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Descargar cotización Excel" }));
-    await waitFor(() => expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "cotizacion-document.xlsx"));
+    await waitFor(() => expect(triggerBrowserDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: null }),
+      "COTIZACION.xlsx",
+    ));
     expect(screen.queryByText("Falló el render.")).toBeNull();
   });
 
