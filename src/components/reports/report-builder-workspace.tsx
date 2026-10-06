@@ -259,8 +259,8 @@ export function ReportBuilderWorkspace({
         <CardHeader><CardTitle>Columnas del reporte</CardTitle></CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Cada columna toma su valor de un campo del catálogo, de un parámetro del reporte o de una fórmula
-            calculada por el backend.
+            Cada columna muestra un dato de la fuente, un dato capturado al generar el reporte o un cálculo
+            hecho a partir de otras columnas.
           </p>
           {catalogError && <ErrorAlert title="No se pudo cargar el catálogo de campos" message={catalogError} />}
           {fields == null ? (
@@ -292,8 +292,8 @@ export function ReportBuilderWorkspace({
         <CardHeader><CardTitle>Resumen y totales</CardTitle></CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Valores calculados una sola vez para todo el reporte: Subtotal suma una columna, IVA y Total se derivan
-            de otros resúmenes y de los parámetros numéricos del reporte.
+            Valores calculados una sola vez para todo el reporte: Subtotal totaliza una columna, IVA y Total se
+            calculan a partir de otros totales y de los datos capturados numéricos.
           </p>
           <ReportSummaryEditor
             summaries={value.layout.totals}
