@@ -2,15 +2,14 @@ import Link from "next/link";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { PaginationControls } from "@/components/donaldson/pagination-controls";
-import { Badge } from "@/components/ui/badge";
+import { PriceListRow } from "@/components/donaldson/price-list-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getErrorMessage } from "@/lib/api/errors";
 import { listPriceLists } from "@/lib/api/price-lists";
-import { formatDate } from "@/lib/format/date";
 import type { Page, PriceList } from "@/types/api";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -116,31 +115,12 @@ export default async function PriceListsPage({ searchParams }: PriceListsPagePro
                   <TableHead>Archivo fuente</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Creada</TableHead>
-                  <TableHead className="text-right">Acción</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.items.map((priceList) => (
-                  <TableRow key={priceList.id}>
-                    <TableCell className="font-medium">{formatDate(priceList.effective_date)}</TableCell>
-                    <TableCell>{priceList.supplier}</TableCell>
-                    <TableCell>{priceList.currency}</TableCell>
-                    <TableCell className="max-w-xs truncate" title={priceList.source_filename}>{priceList.source_filename}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{priceList.status}</Badge>
-                    </TableCell>
-                    <TableCell>{formatDate(priceList.created_at)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        nativeButton={false}
-                        render={<Link href={`/donaldson/price-lists/${priceList.id}`} />}
-                      >
-                        Ver detalle
-                      </Button>
-                    </TableCell>
-                  </TableRow>
+                  <PriceListRow key={priceList.id} priceList={priceList} />
                 ))}
               </TableBody>
             </Table>

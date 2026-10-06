@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FileText, Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { FileText, Loader2, MoreHorizontal, Settings, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { EnabledBadge } from "@/components/shared/status-badge";
 import {
@@ -37,7 +37,7 @@ export function AdminReportRow({ report }: { report: ReportDefinition }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
-  const configureHref = `${BASE_PATH}/${encodeURIComponent(report.code)}`;
+  const configureHref = `${BASE_PATH}/${encodeURIComponent(report.code)}/configurar`;
   const runHref = `/donaldson/reports/${encodeURIComponent(report.code)}`;
 
   async function handleDelete() {
@@ -68,7 +68,7 @@ export function AdminReportRow({ report }: { report: ReportDefinition }) {
   return (
     <>
       <TableRow>
-        <TableCell className="min-w-64 max-w-[40rem] whitespace-normal align-top">
+        <TableCell className="min-w-64 max-w-[40rem] whitespace-normal">
           <div className="flex flex-col gap-0.5 py-0.5">
             <Link
               href={configureHref}
@@ -81,34 +81,36 @@ export function AdminReportRow({ report }: { report: ReportDefinition }) {
             </span>
           </div>
         </TableCell>
-        <TableCell className="align-top font-mono text-xs text-muted-foreground">
+        <TableCell className="font-mono text-xs text-muted-foreground">
           {report.code}
         </TableCell>
-        <TableCell className="align-top text-muted-foreground">
-          {report.data_source?.name ?? "—"}
-        </TableCell>
-        <TableCell className="align-top">
+        <TableCell>
           {report.category ? (
             <Badge variant="outline">{report.category}</Badge>
           ) : (
             <span className="text-muted-foreground">—</span>
           )}
         </TableCell>
-        <TableCell className="align-top">
+        <TableCell>
           <EnabledBadge enabled={report.enabled} />
         </TableCell>
-        <TableCell className="align-top text-right">
+        <TableCell className="text-right">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button variant="ghost" size="icon-sm" aria-label={`Acciones de ${report.name}`}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={deleting}
+                  aria-label={`Acciones de ${report.name}`}
+                >
                   <MoreHorizontal />
                 </Button>
               }
             />
             <DropdownMenuContent align="end">
               <DropdownMenuItem render={<Link href={configureHref} />}>
-                <Pencil /> Editar
+                <Settings /> Configurar
               </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={!report.enabled}

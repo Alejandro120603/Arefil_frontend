@@ -131,5 +131,6 @@ describe("PriceListRow", () => {
     await waitFor(() =>
       expect(mocks.replace).toHaveBeenCalledWith("/donaldson/price-lists"),
     );
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 });

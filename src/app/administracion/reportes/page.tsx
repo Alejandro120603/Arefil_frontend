@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { Plus, Settings } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
-import { Badge } from "@/components/ui/badge";
+import { AdminReportRow } from "@/components/reports/admin-report-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { listReportDefinitions } from "@/lib/api/report-catalog";
 import type { ReportDefinition } from "@/types/api";
@@ -63,36 +63,12 @@ export default async function AdminReportsPage() {
                   <TableHead>Código</TableHead>
                   <TableHead>Categoría</TableHead>
                   <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acción</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {reports.map((report) => (
-                  <TableRow key={report.code}>
-                    <TableCell className="min-w-64 whitespace-normal">
-                      <p className="font-medium">{report.name}</p>
-                      <p className="text-xs text-muted-foreground">{report.description ?? "Sin descripción"}</p>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{report.code}</TableCell>
-                    <TableCell>{report.category ?? "—"}</TableCell>
-                    <TableCell>
-                      <Badge variant={report.enabled ? "secondary" : "outline"}>
-                        {report.enabled ? "Habilitado" : "Deshabilitado"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          nativeButton={false}
-                          render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/configurar`} />}
-                        >
-                          <Settings /> Configurar
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                  <AdminReportRow key={report.code} report={report} />
                 ))}
               </TableBody>
             </Table>

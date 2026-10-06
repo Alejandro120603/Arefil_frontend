@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
+import { DeletePriceListButton } from "@/components/donaldson/delete-price-list-button";
 import { DownloadButtons } from "@/components/donaldson/download-buttons";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { HeaderStat } from "@/components/donaldson/header-stat";
@@ -128,9 +129,12 @@ export default async function PriceListDetailPage({ params, searchParams }: Pric
     <div className="flex flex-col gap-6">
       <Breadcrumbs items={breadcrumbs} />
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Lista de precios #{priceList.id}</h1>
-        <p className="text-sm text-muted-foreground">{priceList.source_filename}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Lista de precios #{priceList.id}</h1>
+          <p className="text-sm text-muted-foreground">{priceList.source_filename}</p>
+        </div>
+        <DeletePriceListButton priceList={priceList} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

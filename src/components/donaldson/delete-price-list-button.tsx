@@ -20,7 +20,10 @@ export function DeletePriceListButton({ priceList }: { priceList: PriceList }) {
         priceList={priceList}
         open={confirming}
         onOpenChange={setConfirming}
-        onDeleted={() => router.replace("/donaldson/price-lists")}
+        onDeleted={() => {
+          router.replace("/donaldson/price-lists");
+          router.refresh();
+        }}
       />
     </>
   );

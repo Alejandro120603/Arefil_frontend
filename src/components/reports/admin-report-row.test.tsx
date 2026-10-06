@@ -65,13 +65,13 @@ afterEach(() => {
 });
 
 describe("AdminReportRow", () => {
-  it("shows Editar and the destructive Eliminar action", async () => {
+  it("shows Configurar and the destructive Eliminar action", async () => {
     renderRow();
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: `Acciones de ${REPORT.name}` }));
 
-    expect(await screen.findByRole("menuitem", { name: /Editar/ })).toBeTruthy();
+    expect(await screen.findByRole("menuitem", { name: /Configurar/ })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: /Eliminar/ }).getAttribute("data-variant")).toBe(
       "destructive",
     );
@@ -110,6 +110,7 @@ describe("AdminReportRow", () => {
     expect(busyButton.disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Cancelar" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(mocks.deleteReport).toHaveBeenCalledWith(REPORT.code);
     expect(mocks.deleteReport).toHaveBeenCalledTimes(1);
 
     resolveDelete?.();

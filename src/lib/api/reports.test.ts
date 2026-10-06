@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createReport,
+  deleteReport,
   downloadReportData,
   executeReport,
   getReportParameterOptions,
@@ -36,6 +37,18 @@ function optionsPage<T>(items: T[], meta: Partial<{ page: number; page_size: num
 }
 
 describe("report manager API", () => {
+  it("deletes one report using its encoded public code", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteReport("REPORT / Q4")).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/REPORT%20%2F%20Q4",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
   it("executes any report through the generic data endpoint", async () => {
     const payload = { columns: ["id"], rows: [{ id: 1 }], row_count: 1 };
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(payload));

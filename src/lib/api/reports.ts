@@ -33,6 +33,10 @@ export function createReport(request: ReportCreateRequest, options?: RequestOpti
   return browserApiClient.apiPostJson<ReportDefinition>("/reports", request, options);
 }
 
+export function deleteReport(code: string, options?: RequestOptions): Promise<void> {
+  return browserApiClient.apiDelete<void>(reportPath(code), options);
+}
+
 export function listReportDataSources(options?: RequestOptions): Promise<ReportDataSource[]> {
   return browserApiClient.apiGet<ReportDataSource[]>("/report-data-sources", options);
 }
