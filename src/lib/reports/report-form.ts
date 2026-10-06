@@ -26,12 +26,7 @@ export const INPUTS_BY_DATA_TYPE: Record<ReportParameterDataType, ReportParamete
   datetime: ["datetime", "select"],
 };
 
-/**
- * `filename_template` is deliberately absent (Frontend #36): naming the XLSX is
- * the system's job, not the admin's. Create and update payloads simply omit
- * the key, so the backend's partial PATCH keeps whatever legacy pattern a
- * report already stores until Backend #35 standardizes the name.
- */
+/** XLSX naming is deliberately absent: the backend owns download filenames. */
 export interface ReportFormValue {
   code: string;
   name: string;

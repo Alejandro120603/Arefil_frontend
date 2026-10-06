@@ -19,18 +19,18 @@ afterEach(() => {
 
 describe("triggerBrowserDownload", () => {
   it("saves under the name the backend sent in Content-Disposition", () => {
-    // Backend #26 resolves `filename_template` server-side; the client must not
-    // overwrite that name with one of its own.
     const name = saveAndReadName(
-      { blob: new Blob(["PK"]), filename: "BONATTI_FILTROS_LMR850205-048.xlsx" },
-      "cotizacion-document.xlsx",
+      { blob: new Blob(["PK"]), filename: "COTIZACION_PRODUCTOS.xlsx" },
+      "REPORT.xlsx",
     );
 
-    expect(name).toBe("BONATTI_FILTROS_LMR850205-048.xlsx");
+    expect(name).toBe("COTIZACION_PRODUCTOS.xlsx");
   });
 
   it("uses the fallback only when the response carries no filename", () => {
-    expect(saveAndReadName({ blob: new Blob(["PK"]), filename: null }, "cotizacion-document.xlsx"))
-      .toBe("cotizacion-document.xlsx");
+    expect(saveAndReadName({ blob: new Blob(["PK"]), filename: null }, "COTIZACION_PRODUCTOS.xlsx"))
+      .toBe("COTIZACION_PRODUCTOS.xlsx");
+    expect(saveAndReadName({ blob: new Blob(["PK"]), filename: "   " }, "COTIZACION_PRODUCTOS.xlsx"))
+      .toBe("COTIZACION_PRODUCTOS.xlsx");
   });
 });

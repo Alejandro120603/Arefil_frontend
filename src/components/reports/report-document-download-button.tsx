@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { downloadReportDocumentXlsx } from "@/lib/api/reports";
 import { triggerBrowserDownload } from "@/lib/download";
-import { fallbackReportFilename } from "@/lib/reports/report-filename-template";
 
 /** A report with no active template is a configuration state, not a failure. */
 const MISSING_TEMPLATE_MESSAGE =
@@ -77,13 +76,10 @@ export function ReportDocumentDownloadButton({
         return;
       }
       /*
-       * The name always comes from the backend's `Content-Disposition`: with
-       * Backend #26 it carries the report's configured `filename_template`
-       * (`BONATTI_FILTROS_LMR850205-048.xlsx`), which no name built here could
-       * know. This mirrors only the backend's own fallback, for the case where
-       * the header is missing.
+       * The backend's Content-Disposition is authoritative. The code-based
+       * name is only a defensive fallback for a missing or unusable header.
        */
-      triggerBrowserDownload(result, fallbackReportFilename(code));
+      triggerBrowserDownload(result, `${code}.xlsx`);
     } catch (downloadError) {
       if (controller.signal.aborted) return;
       if (isStaleExecution(downloadError)) setStaleExecutionId(executionId);

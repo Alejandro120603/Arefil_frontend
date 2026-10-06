@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Apply the COTIZACION configuration this issue closes, through the public API.
 
-It only touches what the BONATTI template needs: the scalar parameters that
-feed {{parameters.*}} and the filename pattern. Columns, formulas, summaries and
-the repeatable group already stored in the report are left untouched.
+It only touches what the BONATTI template needs: its scalar parameters.
+Columns, formulas, summaries and the repeatable group already stored in the
+report are left untouched.
 
 Usage:
     python codex/scripts/configure_cotizacion.py --api http://127.0.0.1:8000/api \
@@ -46,9 +46,6 @@ PARAMETERS = [
      "display_order": 6, "configuration_json": None},
 ]
 
-FILENAME_TEMPLATE = "{{parameters.customer_name}} {{parameters.requisition}}"
-
-
 def request(method: str, url: str, payload: dict | None = None) -> dict:
     data = json.dumps(payload).encode() if payload is not None else None
     headers = {"Content-Type": "application/json"} if data else {}
@@ -86,10 +83,8 @@ def main() -> None:
 
     report = request("PATCH", f"{arguments.api}/reports/{CODE}", {
         "parameters": PARAMETERS,
-        "filename_template": FILENAME_TEMPLATE,
     })
     print("parámetros:", ", ".join(item["name"] for item in report["parameters"]))
-    print("filename_template:", report["filename_template"])
 
     if arguments.template is not None:
         result = upload_template(arguments.api, arguments.template)

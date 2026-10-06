@@ -93,6 +93,7 @@ describe("GenericReportRuntime", () => {
     const report: ReportDefinition = {
       ...REPORT,
       code: "COTIZACION",
+      filename_template: "legacy_{{parameters.cliente}}",
       data_source_id: 5,
       data_source: { ...REPORT.data_source, id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización", capabilities: ["REPEATABLE_ROWS"] },
       parameters: [{ name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: 7, display_order: 0, configuration_json: { options_source: "price_lists" } }],
@@ -152,15 +153,22 @@ describe("GenericReportRuntime", () => {
         { product_id: 202, quantity: 5, discount: "0" },
       ],
     }, expect.anything()));
-    expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "cotizacion.xlsx");
+    expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "COTIZACION.xlsx");
 
     // The document layer renders from the frozen execution snapshot, never
     // from the parameters the form still holds.
-    downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "cotizacion-bonatti.xlsx" });
+    downloadReportDocumentXlsx.mockResolvedValue({
+      blob: new Blob(["xlsx"]),
+      filename: "COTIZACION.xlsx",
+    });
     await user.click(screen.getByRole("button", { name: "Descargar cotización Excel" }));
     await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledWith(
       "COTIZACION", EXECUTION_ID, expect.anything(),
     ));
+    expect(triggerBrowserDownload).toHaveBeenLastCalledWith(
+      expect.objectContaining({ filename: "COTIZACION.xlsx" }),
+      "COTIZACION.xlsx",
+    );
 
     await user.clear(screen.getByLabelText("Cantidad * 1"));
     await user.type(screen.getByLabelText("Cantidad * 1"), "3");

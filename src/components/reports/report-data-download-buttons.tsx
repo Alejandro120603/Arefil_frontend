@@ -42,7 +42,10 @@ export function ReportDataDownloadButtons({
         setError("El backend devolvió un archivo vacío. Verifica los parámetros e intenta de nuevo.");
         return;
       }
-      triggerBrowserDownload(result, `${code.toLowerCase().replaceAll("_", "-")}.${format}`);
+      const fallbackFilename = format === "xlsx"
+        ? `${code}.xlsx`
+        : `${code.toLowerCase().replaceAll("_", "-")}.csv`;
+      triggerBrowserDownload(result, fallbackFilename);
     } catch (downloadError) {
       if (!controller.signal.aborted) {
         setError(getUserErrorMessage(downloadError, "No se pudieron descargar los datos del reporte."));

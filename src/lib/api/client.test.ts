@@ -89,4 +89,17 @@ describe("createApiClient", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "PATCH", body: JSON.stringify({ enabled: false }) });
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "POST", body: JSON.stringify({ supplier_id: 1 }) });
   });
+
+  it("treats an unusable Content-Disposition filename as absent", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("xlsx", {
+        headers: { "Content-Disposition": 'attachment; filename=""' },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createApiClient(() => "/backend-api");
+
+    await expect(api.apiPostBlob("/reports/REPORT/export/xlsx", {}))
+      .resolves.toMatchObject({ filename: null });
+  });
 });
