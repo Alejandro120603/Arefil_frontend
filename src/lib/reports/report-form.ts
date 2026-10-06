@@ -49,11 +49,10 @@ export function parametersFromDataSource(source: ReportDataSource): ReportParame
 }
 
 /**
- * Names the data source owns. Backend #20 stopped demanding an exact match
- * between the report and the source contract: the report must declare *at
- * least* these (with the same data type, and required when the source says
- * so), and is free to declare its own on top — that split is what lets a
- * quotation ask for Cliente or IVA % beside `price_list_id`.
+ * Names the data source owns. Backend #33 is authoritative for their technical
+ * contract (name, data/input type, requiredness and options source), while the
+ * report remains free to declare manual parameters on top — that split is what
+ * lets a quotation ask for Cliente or IVA % beside `price_list_id`.
  */
 export function sourceParameterNames(source: ReportDataSource | null): string[] {
   return source ? source.parameters.map((parameter) => parameter.name) : [];
@@ -220,7 +219,8 @@ export function validateReportForm(
     ),
   );
 
-  // The source contract is a floor, not a ceiling: only its absence is an error.
+  // Source-owned technical metadata must remain exactly as the backend sent it;
+  // manual parameters are still allowed in addition to this contract.
   for (const expected of source?.parameters ?? []) {
     const declared = value.parameters.find((parameter) => parameter.name === expected.name);
     if (!declared) {
@@ -230,8 +230,17 @@ export function validateReportForm(
     if (declared.data_type !== expected.data_type) {
       errors.push(`El tipo de '${expected.name}' no coincide con el contrato de la fuente.`);
     }
-    if (expected.required && !declared.required) {
-      errors.push(`El parámetro '${expected.name}' es requerido por la fuente de datos.`);
+    if (declared.input_type !== expected.input_type) {
+      errors.push(`El control de '${expected.name}' no coincide con el contrato de la fuente.`);
+    }
+    if (declared.required !== expected.required) {
+      errors.push(`La obligatoriedad de '${expected.name}' no coincide con el contrato de la fuente.`);
+    }
+    if (
+      declared.configuration_json?.options_source
+      !== expected.configuration_json?.options_source
+    ) {
+      errors.push(`La fuente de opciones de '${expected.name}' no coincide con el contrato de la fuente.`);
     }
   }
   return errors;

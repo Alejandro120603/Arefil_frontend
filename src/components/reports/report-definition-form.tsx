@@ -265,6 +265,7 @@ export function ReportDefinitionForm({
               <ReportParameterEditor
                 parameters={value.parameters}
                 sourceParameterNames={contractNames}
+                reportCode={report?.code}
                 onChange={(parameters) => change({ parameters })}
               />
             </CardContent>
