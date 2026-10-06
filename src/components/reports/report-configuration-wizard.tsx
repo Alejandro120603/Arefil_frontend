@@ -24,8 +24,8 @@ import type { ReportAdminDefinition, ReportExcelTemplate } from "@/types/api";
 
 const STEP_DESCRIPTIONS: Record<ReportWizardStepId, string> = {
   information: "Nombre, código y descripción — sin configuración técnica todavía.",
-  source: "De dónde vienen los datos y qué necesita capturar el usuario para generarlos.",
-  data: "Columnas, renglones repetibles, fórmulas y resumen del reporte.",
+  source: "De dónde vienen los datos y todo lo que captura el usuario para generarlos, incluidos los productos por renglón.",
+  data: "Columnas, fórmulas, resumen y formato Excel del reporte.",
   template: "El archivo Excel que se usará como diseño final del documento.",
   mapping: "Asocia cada dato del reporte a su celda en la plantilla, sin escribir placeholders.",
   preview: "Genera el documento con datos de prueba antes de habilitar el reporte.",
@@ -159,6 +159,8 @@ export function ReportConfigurationWizard({
           report={report}
           section={step === "information" ? "information" : "source"}
           createRedirectPath={(code) => `/administracion/reportes/${encodeURIComponent(code)}/configurar?step=3`}
+          builder={builder}
+          onDefinitionSaved={(saved) => { if (report != null) setReport(saved); }}
           onSaved={(saved) => {
             if (report != null) {
               setReport(saved);
@@ -177,7 +179,6 @@ export function ReportConfigurationWizard({
               code={report.code}
               builder={builder}
               parameters={report.parameters}
-              dataSourceCapabilities={report.data_source.capabilities}
               onSaved={() => setSavedRevision((revision) => revision + 1)}
             />
           </div>

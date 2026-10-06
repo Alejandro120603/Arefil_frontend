@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { ArrowDown, ArrowUp, ListPlus, Package, Plus, Trash2 } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +52,8 @@ export function ReportParameterGroupEditor({
   parameters,
   savedGroups = [],
   referencedSources = [],
+  fieldUsages,
+  required = false,
   disabled = false,
   onChange,
 }: {
@@ -59,11 +63,16 @@ export function ReportParameterGroupEditor({
   savedGroups?: readonly ReportParameterGroup[];
   /** `source_parameter` of every column, so a referenced `grupo.campo` is frozen too. */
   referencedSources?: readonly string[];
+  /** `grupo.campo` → title of a saved column showing it: such a subfield cannot be removed. */
+  fieldUsages?: ReadonlyMap<string, string>;
+  /** The source demands exactly one group (REPEATABLE_ROWS), so it is never offered for removal. */
+  required?: boolean;
   disabled?: boolean;
   onChange: (groups: ReportParameterGroup[]) => void;
 }) {
   const group = groups[0];
   const priceLists = priceListParameters(parameters);
+  const [blocked, setBlocked] = useState<string | null>(null);
 
   if (!group) {
     return (
@@ -194,6 +203,9 @@ export function ReportParameterGroupEditor({
           ))}
         </div>
 
+        {blocked && (
+          <Alert variant="destructive"><AlertDescription>{blocked}</AlertDescription></Alert>
+        )}
         <ul className="flex list-none flex-col gap-3 p-0">
           {group.fields.map((field, index) => (
             <GroupFieldCard
@@ -208,17 +220,27 @@ export function ReportParameterGroupEditor({
                 takenNames: takenFieldNames(index),
               }))}
               onMove={(direction) => moveField(index, direction)}
-              onRemove={() => replaceGroup({ fields: orderedFields(group.fields.filter((_, current) => current !== index)) })}
+              onRemove={() => {
+                const usedBy = fieldUsages?.get(`${group.name}.${field.name}`);
+                if (usedBy != null) {
+                  setBlocked(`No puedes quitar "${field.label || field.name}" porque se utiliza en la columna "${usedBy}".`);
+                  return;
+                }
+                setBlocked(null);
+                replaceGroup({ fields: orderedFields(group.fields.filter((_, current) => current !== index)) });
+              }}
             />
           ))}
         </ul>
       </section>
 
-      <div className="flex justify-end">
-        <Button type="button" variant="destructive" size="sm" disabled={disabled} onClick={() => onChange([])}>
-          <Trash2 /> Quitar productos por renglón
-        </Button>
-      </div>
+      {!required && (
+        <div className="flex justify-end">
+          <Button type="button" variant="destructive" size="sm" disabled={disabled} onClick={() => onChange([])}>
+            <Trash2 /> Quitar productos por renglón
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

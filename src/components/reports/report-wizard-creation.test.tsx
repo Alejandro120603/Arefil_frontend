@@ -16,14 +16,14 @@ it("preserves the real definition form across steps and creates only after selec
   render(<ReportConfigurationWizard report={null} initialStepParam={null} />);
   await user.type(screen.getByLabelText("Nombre", { exact: true }), "Cotización E2E");
   await user.type(screen.getByLabelText("Código", { exact: true }), "E2E_33");
-  expect(screen.queryByRole("button", { name: "Crear reporte" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Guardar y continuar" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "Continuar" }));
   await user.click(screen.getByRole("button", { name: "Anterior" }));
   expect((screen.getByLabelText("Nombre", { exact: true }) as HTMLInputElement).value).toBe("Cotización E2E");
   await user.click(screen.getByRole("button", { name: "Continuar" }));
   await user.selectOptions(screen.getByLabelText("Fuente de datos", { exact: true }), "5");
   expect(createReport).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: "Crear reporte" }));
+  await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
   await waitFor(() => expect(createReport).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: "E2E_33", name: "Cotización E2E", data_source_id: 5 })));
   expect(push).toHaveBeenCalledWith("/administracion/reportes/E2E_33/configurar?step=3");
 });
