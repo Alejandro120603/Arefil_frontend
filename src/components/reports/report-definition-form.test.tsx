@@ -4,7 +4,6 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportDefinitionForm } from "./report-definition-form";
-import { ApiError } from "@/lib/api/errors";
 import type { ReportAdminDefinition, ReportDataSource, ReportDefinition } from "@/types/api";
 
 const {
@@ -298,61 +297,80 @@ describe("ReportDefinitionForm", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("saves the filename pattern built from the supported placeholders", async () => {
-    const user = userEvent.setup();
-    updateReport.mockResolvedValue({ ...QUOTATION_REPORT, filename_template: "{{parameters.price_list_id}}" });
-    render(<ReportDefinitionForm report={QUOTATION_REPORT} />);
+  it("no longer exposes any filename configuration or technical placeholder", async () => {
+    render(<ReportDefinitionForm report={{ ...QUOTATION_REPORT, filename_template: "legacy_{{report.code}}" }} />);
     await screen.findByRole("option", { name: "Renglones de cotización" });
 
-    await user.click(screen.getByRole("button", { name: "{{parameters.price_list_id}}" }));
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
-
-    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
-    expect(updateReport.mock.calls[0]?.[1].filename_template).toBe("{{parameters.price_list_id}}");
+    expect(screen.queryByText(/Nombre del archivo/)).toBeNull();
+    expect(screen.queryByText("Patrón del nombre")).toBeNull();
+    expect(screen.queryByLabelText("Patrón del nombre")).toBeNull();
+    expect(screen.queryByText(/Placeholders disponibles/)).toBeNull();
+    expect(screen.queryByText(/filename_template/)).toBeNull();
+    expect(screen.queryByText(/\{\{/)).toBeNull();
+    expect(screen.queryByDisplayValue("legacy_{{report.code}}")).toBeNull();
+    expect(screen.queryByRole("button", { name: /\{\{/ })).toBeNull();
+    // Frontend #35 stays intact: source data is still summarized, not edited.
+    expect(screen.getByRole("region", { name: "Datos necesarios" })).toBeTruthy();
   });
 
-  it("sends null when the pattern is cleared, keeping the backend fallback", async () => {
+  it("creates a report without sending filename_template", async () => {
     const user = userEvent.setup();
-    updateReport.mockResolvedValue({ ...QUOTATION_REPORT, filename_template: null });
-    render(<ReportDefinitionForm report={{ ...QUOTATION_REPORT, filename_template: "{{report.code}}" }} />);
+    createReport.mockResolvedValue({ ...REPORT } satisfies ReportDefinition);
+    render(<ReportDefinitionForm />);
+    await screen.findByRole("option", { name: "Catálogo de productos" });
+
+    await user.type(screen.getByLabelText("Nombre"), "Catálogo");
+    await user.type(screen.getByLabelText("Código"), "product-report");
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(PRODUCT_SOURCE.id));
+    await user.click(screen.getByRole("button", { name: "Crear reporte" }));
+
+    await waitFor(() => expect(createReport).toHaveBeenCalledTimes(1));
+    expect(createReport.mock.calls[0]?.[0]).toEqual({
+      code: "PRODUCT_REPORT",
+      name: "Catálogo",
+      description: null,
+      category: null,
+      data_source_id: PRODUCT_SOURCE.id,
+      enabled: true,
+      parameters: [],
+    });
+  });
+
+  it("preserves a legacy filename_template when another field is saved", async () => {
+    const user = userEvent.setup();
+    const legacy = { ...QUOTATION_REPORT, filename_template: "legacy_{{report.code}}" };
+    updateReport.mockResolvedValue({ ...legacy, name: "Cotización final" });
+    render(<ReportDefinitionForm report={legacy} />);
     await screen.findByRole("option", { name: "Renglones de cotización" });
 
-    await user.clear(screen.getByLabelText("Patrón del nombre"));
+    const name = screen.getByLabelText("Nombre");
+    await user.clear(name);
+    await user.type(name, "Cotización final");
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
-
     await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
-    expect(updateReport.mock.calls[0]?.[1].filename_template).toBeNull();
+    // Omitting the key is what makes the backend's partial PATCH keep the stored
+    // pattern; sending null or a new default would overwrite it.
+    expect(updateReport.mock.calls[0]?.[1]).not.toHaveProperty("filename_template");
+    expect(updateReport.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ name: "Cotización final" }));
+
+    // A second save after the backend echoes the legacy value still leaves it alone.
+    await screen.findByText("Reporte actualizado");
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(2));
+    expect(updateReport.mock.calls[1]?.[1]).not.toHaveProperty("filename_template");
   });
 
-  it("refuses locally a placeholder the backend does not support", async () => {
+  it("does not block saving on a legacy pattern the admin can no longer edit", async () => {
     const user = userEvent.setup();
+    updateReport.mockResolvedValue({ ...QUOTATION_REPORT, filename_template: "{{execution.id}}" });
     render(<ReportDefinitionForm report={{ ...QUOTATION_REPORT, filename_template: "{{execution.id}}" }} />);
     await screen.findByRole("option", { name: "Renglones de cotización" });
 
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
-    expect(await screen.findAllByText("Placeholder no permitido en el nombre de archivo: {{execution.id}}."))
-      .toHaveLength(2);
-    expect(updateReport).not.toHaveBeenCalled();
-  });
-
-  it("keeps the edited pattern when the backend rejects it", async () => {
-    const user = userEvent.setup();
-    updateReport.mockRejectedValue(
-      new ApiError(400, "El parámetro 'folio' usado por filename_template no está definido."),
-    );
-    render(<ReportDefinitionForm report={{ ...QUOTATION_REPORT, filename_template: "{{report.code}}" }} />);
-    await screen.findByRole("option", { name: "Renglones de cotización" });
-
-    const field = screen.getByLabelText("Patrón del nombre");
-    await user.clear(field);
-    await user.click(field);
-    await user.paste("{{report.name}} final");
-    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
-
-    expect(await screen.findByText(/no está definido/)).toBeTruthy();
-    expect((screen.getByLabelText("Patrón del nombre") as HTMLInputElement).value)
-      .toBe("{{report.name}} final");
+    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/Placeholder no permitido/)).toBeNull();
+    expect(updateReport.mock.calls[0]?.[1]).not.toHaveProperty("filename_template");
   });
 
   it("shows a migrated report whose source is now disabled", async () => {

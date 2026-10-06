@@ -331,7 +331,11 @@ export interface ReportCreateRequest {
   name: string;
   description: string | null;
   category: string | null;
-  filename_template: string | null;
+  /**
+   * Optional by contract. The wizard never sends it (Frontend #36): omitted on
+   * PATCH, the backend keeps the stored value, so legacy patterns survive edits.
+   */
+  filename_template?: string | null;
   data_source_id: number;
   enabled: boolean;
   parameters: ReportParameter[];

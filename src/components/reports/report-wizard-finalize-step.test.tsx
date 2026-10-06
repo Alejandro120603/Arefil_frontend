@@ -88,6 +88,20 @@ describe("ReportWizardFinalizeStep", () => {
     expect(onReportChange).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
   });
 
+  it("enabling a report leaves its legacy filename_template untouched", async () => {
+    const legacy = { ...REPORT, filename_template: "legacy_{{report.code}}" };
+    getReportBuilder.mockResolvedValue(BUILDER);
+    getReportExcelTemplate.mockRejectedValue(new ApiError(404, "no template"));
+    updateReport.mockResolvedValue({ ...legacy, enabled: true });
+    const user = userEvent.setup();
+    render(<ReportWizardFinalizeStep report={legacy} previewGeneratedThisSession={false} onReportChange={vi.fn()} />);
+
+    await user.click(await screen.findByRole("button", { name: /Habilitar reporte/ }));
+
+    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
+    expect(updateReport.mock.calls[0]?.[1]).not.toHaveProperty("filename_template");
+  });
+
   it("shows a wrap-up action instead of a fake publish flow once already enabled", async () => {
     getReportBuilder.mockResolvedValue(BUILDER);
     getReportExcelTemplate.mockRejectedValue(new ApiError(404, "no template"));

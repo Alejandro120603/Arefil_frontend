@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CircleCheck, Database, Loader2, Save } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
-import { ReportFilenameTemplateField } from "@/components/reports/report-filename-template-field";
 import { ReportParameterEditor } from "@/components/reports/report-parameter-editor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +38,7 @@ export function ReportDefinitionForm({
   report?: ReportAdminDefinition | null;
   /**
    * Which cards to render — the wizard (Frontend #33) shows "Definición" as its
-   * own step and "Fuente de datos"/parámetros/filename as the next one, while
+   * own step and "Fuente de datos"/parámetros as the next one, while
    * every field still belongs to the one combined save this component already
    * does (the backend has no partial update). `"all"` (the default) is the
    * original single-page behavior, unchanged.
@@ -270,14 +269,6 @@ export function ReportDefinitionForm({
               />
             </CardContent>
           </Card>
-
-          <ReportFilenameTemplateField
-            value={value.filename_template}
-            code={value.code}
-            name={value.name}
-            parameters={value.parameters}
-            onChange={(filename_template) => change({ filename_template })}
-          />
         </>
       )}
 

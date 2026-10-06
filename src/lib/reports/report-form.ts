@@ -7,7 +7,6 @@ import type {
   ReportParameterInputType,
   ReportUpdateRequest,
 } from "@/types/api";
-import { validateFilenameTemplate } from "@/lib/reports/report-filename-template";
 
 export const DATA_TYPES: ReportParameterDataType[] = [
   "string",
@@ -27,13 +26,17 @@ export const INPUTS_BY_DATA_TYPE: Record<ReportParameterDataType, ReportParamete
   datetime: ["datetime", "select"],
 };
 
+/**
+ * `filename_template` is deliberately absent (Frontend #36): naming the XLSX is
+ * the system's job, not the admin's. Create and update payloads simply omit
+ * the key, so the backend's partial PATCH keeps whatever legacy pattern a
+ * report already stores until Backend #35 standardizes the name.
+ */
 export interface ReportFormValue {
   code: string;
   name: string;
   description: string;
   category: string;
-  /** Empty string means "no pattern": the backend keeps its generic fallback. */
-  filename_template: string;
   data_source_id: number | null;
   enabled: boolean;
   parameters: ReportParameter[];
@@ -155,7 +158,6 @@ export function emptyReportForm(): ReportFormValue {
     name: "",
     description: "",
     category: "",
-    filename_template: "",
     data_source_id: null,
     enabled: true,
     parameters: [],
@@ -168,7 +170,6 @@ export function reportFormFromDefinition(report: ReportAdminDefinition): ReportF
     name: report.name,
     description: report.description ?? "",
     category: report.category ?? "",
-    filename_template: report.filename_template ?? "",
     data_source_id: report.data_source_id,
     enabled: report.enabled,
     parameters: report.parameters.map((parameter) => ({ ...parameter })),
@@ -211,13 +212,6 @@ export function validateReportForm(
       errors.push(`El select '${parameter.name || position}' requiere una fuente de opciones.`);
     }
   }
-
-  errors.push(
-    ...validateFilenameTemplate(
-      value.filename_template,
-      value.parameters.map((parameter) => parameter.name.trim()),
-    ),
-  );
 
   // Source-owned technical metadata must remain exactly as the backend sent it;
   // manual parameters are still allowed in addition to this contract.
@@ -262,8 +256,6 @@ export function toReportRequest(value: ReportFormValue): ReportCreateRequest {
     name: value.name.trim(),
     description: value.description.trim() || null,
     category: value.category.trim() || null,
-    // An empty pattern is `null`, never "": the backend rejects a blank string.
-    filename_template: value.filename_template.trim() || null,
     data_source_id: value.data_source_id as number,
     enabled: value.enabled,
     parameters: normalizedParameters(value.parameters),
@@ -276,7 +268,6 @@ export function toReportUpdate(value: ReportFormValue): ReportUpdateRequest {
     name: request.name,
     description: request.description,
     category: request.category,
-    filename_template: request.filename_template,
     data_source_id: request.data_source_id,
     enabled: value.enabled,
     parameters: request.parameters,
