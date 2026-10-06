@@ -37,10 +37,15 @@ export const MAX_FORMULA_LENGTH = 512;
 /** Excel forbids these in a sheet name, and so does `ReportExcelLayoutWrite`. */
 const FORBIDDEN_SHEET_CHARACTERS = /[[\]:*?/\\]/;
 
+/**
+ * How each column kind is named in the UI. The kind is fixed by the action that
+ * created the column ("Agregar dato de la fuente", "Agregar dato capturado",
+ * "Agregar cálculo") and is never re-chosen afterwards.
+ */
 export const COLUMN_TYPE_LABELS: Record<ReportColumnType, string> = {
-  FIELD: "Campo",
-  PARAMETER: "Parámetro",
-  FORMULA: "Fórmula",
+  FIELD: "Dato de la fuente",
+  PARAMETER: "Dato capturado",
+  FORMULA: "Cálculo",
 };
 
 export const FORMAT_TYPE_LABELS: Record<ReportFormatType, string> = {
@@ -114,7 +119,7 @@ export function groupParameterReferences(groups: ReportParameterGroup[]): GroupP
   return groups.flatMap((group) => group.fields.map((field) => ({
     source: `${group.name}.${field.name}`,
     key: field.name,
-    label: `${group.label} · ${field.label}`,
+    label: `${group.label} → ${field.label}`,
     field,
   })));
 }
@@ -207,16 +212,22 @@ export function pruneTotals(layout: ReportExcelLayout, columns: ReportColumn[]):
   return totals.length === layout.totals.length ? layout : { ...layout, totals };
 }
 
-function takenSummaryKeys(totals: ReportSummaryConfiguration[]): Set<string> {
-  return new Set(totals.map((total) => total.key.toLocaleLowerCase()));
+/**
+ * Keys are generated once, when the summary is created, and never edited from
+ * the UI. `reserved` carries the report's parameter names: the backend refuses
+ * a summary key that collides with one, and the admin could not fix it.
+ */
+function takenSummaryKeys(totals: ReportSummaryConfiguration[], reserved: Iterable<string>): Set<string> {
+  return foldedKeys([...totals.map((total) => total.key), ...reserved]);
 }
 
 export function newSumSummary(
   column: ReportColumn,
   totals: ReportSummaryConfiguration[],
+  reserved: Iterable<string> = [],
 ): ReportSummaryConfiguration {
   return {
-    key: uniqueKey(column.key, takenSummaryKeys(totals)),
+    key: uniqueKey(column.key, takenSummaryKeys(totals, reserved)),
     label: column.label || column.key,
     column_key: column.key,
     operation: "SUM",
@@ -225,29 +236,18 @@ export function newSumSummary(
   };
 }
 
-export function newFormulaSummary(totals: ReportSummaryConfiguration[]): ReportSummaryConfiguration {
+export function newFormulaSummary(
+  totals: ReportSummaryConfiguration[],
+  reserved: Iterable<string> = [],
+): ReportSummaryConfiguration {
   return {
-    key: uniqueKey("resumen", takenSummaryKeys(totals)),
+    key: uniqueKey("resumen", takenSummaryKeys(totals, reserved)),
     label: "Resumen calculado",
     column_key: null,
     operation: "FORMULA",
     formula_definition: "",
     format_type: "number",
   };
-}
-
-/** Clears the half of the pair the chosen operation forbids. */
-export function retypeSummary(
-  summary: ReportSummaryConfiguration,
-  operation: ReportSummaryConfiguration["operation"],
-  columns: ReportColumn[],
-): ReportSummaryConfiguration {
-  if (summary.operation === operation) return summary;
-  if (operation === "SUM") {
-    const [candidate] = summableColumns(columns);
-    return { ...summary, operation, column_key: candidate?.key ?? null, formula_definition: null };
-  }
-  return { ...summary, operation, column_key: null, formula_definition: summary.formula_definition ?? "" };
 }
 
 export function moveSummary(
@@ -293,8 +293,18 @@ function uniqueKey(candidate: string, taken: Set<string>): string {
   }
 }
 
-function takenKeys(columns: ReportColumn[]): Set<string> {
-  return new Set(columns.map((column) => column.key.toLocaleLowerCase()));
+function foldedKeys(keys: Iterable<string>): Set<string> {
+  return new Set([...keys].map((key) => key.toLocaleLowerCase()));
+}
+
+/**
+ * Column keys are generated once, when the column is created, and then frozen:
+ * templates (`{{rows.<key>}}`), formulas and summaries may point at them.
+ * `reserved` carries the report's parameter names, which the backend keeps for
+ * their own PARAMETER column — a hidden key must never collide with one.
+ */
+function takenKeys(columns: ReportColumn[], reserved: Iterable<string> = []): Set<string> {
+  return foldedKeys([...columns.map((column) => column.key), ...reserved]);
 }
 
 /** `price_list_item.unit_price` → `unit_price`, the readable half of the key. */
@@ -303,10 +313,14 @@ export function suggestedKeyFromField(fieldKey: string): string {
   return COLUMN_KEY_PATTERN.test(tail) ? tail : "campo";
 }
 
-export function newFieldColumn(descriptor: ReportFieldDescriptor, columns: ReportColumn[]): ReportColumn {
+export function newFieldColumn(
+  descriptor: ReportFieldDescriptor,
+  columns: ReportColumn[],
+  reserved: Iterable<string> = [],
+): ReportColumn {
   const [format] = formatsForDataType(descriptor.data_type);
   return {
-    key: uniqueKey(suggestedKeyFromField(descriptor.key), takenKeys(columns)),
+    key: uniqueKey(suggestedKeyFromField(descriptor.key), takenKeys(columns, reserved)),
     label: descriptor.label,
     column_type: "FIELD",
     source_field: descriptor.key,
@@ -341,10 +355,14 @@ export function newParameterColumn(parameter: ReportParameter, columns: ReportCo
   };
 }
 
-export function newGroupParameterColumn(reference: GroupParameterReference, columns: ReportColumn[]): ReportColumn {
+export function newGroupParameterColumn(
+  reference: GroupParameterReference,
+  columns: ReportColumn[],
+  reserved: Iterable<string> = [],
+): ReportColumn {
   const dataType = reference.field.data_type;
   return {
-    key: uniqueKey(reference.key, takenKeys(columns)),
+    key: uniqueKey(reference.key, takenKeys(columns, reserved)),
     label: reference.field.label || reference.key,
     column_type: "PARAMETER",
     source_field: null,
@@ -359,9 +377,9 @@ export function newGroupParameterColumn(reference: GroupParameterReference, colu
 }
 
 /** Formula columns are always decimal — the backend refuses any other type. */
-export function newFormulaColumn(columns: ReportColumn[]): ReportColumn {
+export function newFormulaColumn(columns: ReportColumn[], reserved: Iterable<string> = []): ReportColumn {
   return {
-    key: uniqueKey("calculo", takenKeys(columns)),
+    key: uniqueKey("calculo", takenKeys(columns, reserved)),
     label: "Columna calculada",
     column_type: "FORMULA",
     source_field: null,
@@ -376,33 +394,9 @@ export function newFormulaColumn(columns: ReportColumn[]): ReportColumn {
 }
 
 /**
- * Rewrites a column when its type changes, clearing the two sources that no
- * longer apply. Leaving a stale `source_field` on a FORMULA column is an
- * immediate 422 ("no tiene una fuente coherente").
+ * Re-points a FIELD column and re-syncs the data type the backend compares.
+ * The key is kept: it is the column's identity, not a mirror of its source.
  */
-export function retypeColumn(column: ReportColumn, columnType: ReportColumnType): ReportColumn {
-  if (column.column_type === columnType) return column;
-  if (columnType === "FORMULA") {
-    return {
-      ...column,
-      column_type: "FORMULA",
-      source_field: null,
-      source_parameter: null,
-      formula_definition: column.formula_definition ?? "",
-      data_type: "decimal",
-      format_type: "number",
-    };
-  }
-  return {
-    ...column,
-    column_type: columnType,
-    source_field: null,
-    source_parameter: null,
-    formula_definition: null,
-  };
-}
-
-/** Re-points a FIELD column and re-syncs the data type the backend compares. */
 export function applyFieldSource(column: ReportColumn, descriptor: ReportFieldDescriptor): ReportColumn {
   return {
     ...column,
@@ -415,6 +409,10 @@ export function applyFieldSource(column: ReportColumn, descriptor: ReportFieldDe
   };
 }
 
+/**
+ * The one case where a column's key follows its source: the backend requires a
+ * scalar PARAMETER column to be keyed by the parameter's own name.
+ */
 export function applyParameterSource(column: ReportColumn, parameter: ReportParameter): ReportColumn {
   return {
     ...column,
@@ -428,15 +426,21 @@ export function applyParameterSource(column: ReportColumn, parameter: ReportPara
   };
 }
 
+/**
+ * Keeps the column's key, unless it was bound to a scalar parameter: that key
+ * *is* the parameter's name, which only its own PARAMETER column may use.
+ */
 export function applyGroupParameterSource(
   column: ReportColumn,
   reference: GroupParameterReference,
   columns: ReportColumn[],
+  reserved: Iterable<string> = [],
 ): ReportColumn {
   const others = columns.filter((candidate) => candidate !== column);
+  const boundToScalar = column.column_type === "PARAMETER" && column.source_parameter === column.key;
   return {
     ...column,
-    key: uniqueKey(reference.key, takenKeys(others)),
+    key: boundToScalar ? uniqueKey(reference.key, takenKeys(others, reserved)) : column.key,
     column_type: "PARAMETER",
     source_field: null,
     source_parameter: reference.source,
