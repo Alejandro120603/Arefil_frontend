@@ -6,7 +6,6 @@ import { CircleCheck, Database, Loader2, Save } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportParameterEditor } from "@/components/reports/report-parameter-editor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -52,6 +51,8 @@ export function ReportDefinitionForm({
   const creating = report == null;
   const router = useRouter();
   const [value, setValue] = useState<ReportFormValue>(() => report ? reportFormFromDefinition(report) : emptyReportForm());
+  /** The parameters the backend last confirmed: their names are frozen, and only they can load options. */
+  const [savedParameters, setSavedParameters] = useState(() => report?.parameters ?? []);
   const [sources, setSources] = useState<ReportDataSource[] | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -121,6 +122,7 @@ export function ReportDefinitionForm({
       }
       const updated = await updateReport(value.code, toReportUpdate(value));
       setValue(reportFormFromDefinition(updated));
+      setSavedParameters(updated.parameters);
       setSuccessMessage("La configuración se guardó con la confirmación del backend.");
       onSaved?.(updated);
       router.refresh();
@@ -226,34 +228,6 @@ export function ReportDefinitionForm({
                       </AlertDescription>
                     </Alert>
                   )}
-                  {selectedSource && (
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div>
-                        <p className="mb-2 text-sm font-medium">Parámetros requeridos</p>
-                        {selectedSource.parameters.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">No requiere parámetros.</p>
-                        ) : (
-                          <div className="flex flex-wrap gap-2">
-                            {selectedSource.parameters.map((parameter) => (
-                              <Badge key={parameter.name} variant="outline">
-                                {parameter.label}{parameter.required ? " · requerido" : ""}
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <p className="mb-2 text-sm font-medium">Campos disponibles</p>
-                        {selectedSource.fields.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">La fuente migrada no declara un catálogo para Builder.</p>
-                        ) : (
-                          <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
-                            {selectedSource.fields.map((field) => <Badge key={field.key} variant="secondary">{field.label}</Badge>)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </CardContent>
@@ -264,6 +238,7 @@ export function ReportDefinitionForm({
               <ReportParameterEditor
                 parameters={value.parameters}
                 sourceParameterNames={contractNames}
+                savedParameters={savedParameters}
                 reportCode={report?.code}
                 onChange={(parameters) => change({ parameters })}
               />

@@ -1,3 +1,9 @@
+import {
+  PARAMETER_NAME_PATTERN,
+  uniqueParameterName,
+  withParameterShape,
+  type ReportParameterKind,
+} from "@/lib/reports/report-parameter-kinds";
 import type {
   ReportAdminDefinition,
   ReportCreateRequest,
@@ -7,15 +13,6 @@ import type {
   ReportParameterInputType,
   ReportUpdateRequest,
 } from "@/types/api";
-
-export const DATA_TYPES: ReportParameterDataType[] = [
-  "string",
-  "integer",
-  "decimal",
-  "boolean",
-  "date",
-  "datetime",
-];
 
 export const INPUTS_BY_DATA_TYPE: Record<ReportParameterDataType, ReportParameterInputType[]> = {
   string: ["text", "select"],
@@ -80,7 +77,9 @@ export function mergeSourceParameters(
 /**
  * Ready-made general parameters for a quotation-shaped report. They are plain
  * report parameters with no backend meaning: the admin can rename, reorder or
- * delete any of them, and nothing here binds the builder to one customer.
+ * delete any of them, and nothing here binds the builder to one customer. Their
+ * technical shape comes from the same kind mapping the editor uses, and their
+ * well-known internal names never follow a label edit.
  */
 export interface ReportParameterPreset {
   key: string;
@@ -91,32 +90,33 @@ export interface ReportParameterPreset {
 function preset(
   name: string,
   label: string,
-  data_type: ReportParameterDataType,
-  input_type: ReportParameterInputType,
+  kind: ReportParameterKind,
+  decimals = false,
 ): ReportParameterPreset {
+  const shaped = withParameterShape({ ...emptyParameter(0), name, label }, kind, decimals);
   return {
     key: name,
     label,
     parameter: {
       name,
       label,
-      data_type,
-      input_type,
+      data_type: shaped.data_type,
+      input_type: shaped.input_type,
       required: false,
       default_value: null,
-      configuration_json: null,
+      configuration_json: shaped.configuration_json,
     },
   };
 }
 
 export const REPORT_PARAMETER_PRESETS: ReportParameterPreset[] = [
-  preset("customer_name", "Cliente", "string", "text"),
-  preset("customer_email", "Email", "string", "text"),
-  preset("attention_to", "Atención", "string", "text"),
-  preset("requisition", "Requisición", "string", "text"),
-  preset("quotation_date", "Fecha", "date", "date"),
-  preset("commercial_conditions", "Condiciones", "string", "text"),
-  preset("tax_rate", "IVA %", "decimal", "number"),
+  preset("customer_name", "Cliente", "text"),
+  preset("customer_email", "Email", "text"),
+  preset("attention_to", "Atención", "text"),
+  preset("requisition", "Requisición", "text"),
+  preset("quotation_date", "Fecha", "date"),
+  preset("commercial_conditions", "Condiciones", "text"),
+  preset("tax_rate", "IVA %", "number", true),
 ];
 
 /** Appends a preset under a name no other parameter is using. */
@@ -126,14 +126,11 @@ export function appendPresetParameter(
 ): ReportParameter[] {
   const found = REPORT_PARAMETER_PRESETS.find((candidate) => candidate.key === presetKey);
   if (!found) return parameters;
-  const taken = new Set(parameters.map((parameter) => parameter.name.toLocaleLowerCase()));
-  let name = found.parameter.name;
-  for (let suffix = 2; taken.has(name.toLocaleLowerCase()); suffix += 1) {
-    name = `${found.parameter.name}_${suffix}`;
-  }
+  const name = uniqueParameterName(found.parameter.name, parameters.map((parameter) => parameter.name));
   return [...parameters, { ...found.parameter, name, display_order: parameters.length }];
 }
 
+/** A new "Texto" input; its internal name is generated once the admin types a visible name. */
 export function emptyParameter(displayOrder: number): ReportParameter {
   return {
     name: "",
@@ -193,18 +190,21 @@ export function validateReportForm(
   const names = new Set<string>();
   for (const [index, parameter] of value.parameters.entries()) {
     const position = index + 1;
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(parameter.name)) {
-      errors.push(`El nombre del parámetro ${position} no es válido.`);
+    const label = parameter.label.trim();
+    const display = label || parameter.name || String(position);
+    if (!label) {
+      errors.push(`El dato ${position} necesita un nombre visible.`);
+    } else if (!PARAMETER_NAME_PATTERN.test(parameter.name)) {
+      errors.push(`El nombre interno del dato '${display}' no es válido.`);
     }
     const folded = parameter.name.toLocaleLowerCase();
-    if (folded && names.has(folded)) errors.push(`El parámetro '${parameter.name}' está duplicado.`);
+    if (folded && names.has(folded)) errors.push(`El dato '${display}' está duplicado.`);
     names.add(folded);
-    if (!parameter.label.trim()) errors.push(`La etiqueta del parámetro ${position} es requerida.`);
     if (!INPUTS_BY_DATA_TYPE[parameter.data_type].includes(parameter.input_type)) {
-      errors.push(`El control de '${parameter.name || position}' no es compatible con su tipo.`);
+      errors.push(`El tipo de entrada de '${display}' no es compatible con su tipo de dato.`);
     }
     if (parameter.input_type === "select" && parameter.configuration_json == null) {
-      errors.push(`El select '${parameter.name || position}' requiere una fuente de opciones.`);
+      errors.push(`La lista de '${display}' no tiene un origen de opciones.`);
     }
   }
 
