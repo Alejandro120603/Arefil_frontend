@@ -274,6 +274,26 @@ describe("builder validation", () => {
     expect(toBuilderRequest(value).parameter_groups[0].fields[1].name).toBe("line_quantity");
   });
 
+  it("explains repeatable-row problems by visible name, never by internal identifier", () => {
+    const broken: ReportParameterGroup = {
+      ...ITEMS_GROUP,
+      context_parameter: "missing",
+      fields: [
+        { ...ITEMS_GROUP.fields[0], configuration_json: { options_source: "products_by_price_list", context_parameter: "missing" } },
+        { ...ITEMS_GROUP.fields[1], label: "", configuration_json: { minimum: "0.5" } },
+      ],
+    };
+    const errors = validateBuilderForm(
+      { columns: [column({})], parameterGroups: [broken], layout: emptyExcelLayout() }, [QUANTITY], FIELDS,
+    );
+    expect(errors).toEqual(expect.arrayContaining([
+      "Para usar productos por renglón, la fuente necesita una lista de precios.",
+      "El dato 2 de cada renglón requiere un nombre visible.",
+      "Los límites de 'dato 2' deben ser enteros, o permite decimales.",
+    ]));
+    expect(errors.join(" ")).not.toMatch(/line_quantity|items|nombre interno|subcampo|select/);
+  });
+
   it("requires at least one column", () => {
     const errors = validateBuilderForm({ columns: [], parameterGroups: [], layout: emptyExcelLayout() }, [], FIELDS);
     expect(errors).toContain("Agrega al menos una columna al reporte.");
