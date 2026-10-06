@@ -10,6 +10,7 @@ import {
   resolveReportProductOption,
   searchReportProductOptions,
   updateReport,
+  updateReportInputs,
   getReportBuilder,
   getReportFieldCatalog,
   previewReportBuilder,
@@ -37,6 +38,33 @@ function optionsPage<T>(items: T[], meta: Partial<{ page: number; page_size: num
 }
 
 describe("report manager API", () => {
+  it("updates report inputs with one PUT and surfaces backend validation errors", async () => {
+    const request = {
+      name: "Cotización",
+      description: null,
+      category: "Ventas",
+      enabled: true,
+      data_source_id: 5,
+      parameters: [],
+      parameter_groups: [],
+    };
+    const response = { report: { code: "COTIZACION" }, columns: [], parameter_groups: [], excel_layout: null };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(response))
+      .mockResolvedValueOnce(Response.json({ detail: "El builder no es compatible." }, { status: 422 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateReportInputs("COTIZACION / 2026", request)).resolves.toEqual(response);
+    await expect(updateReportInputs("COTIZACION", request)).rejects.toMatchObject({
+      status: 422,
+      message: "El builder no es compatible.",
+    });
+    expect(fetchMock.mock.calls[0]).toEqual([
+      "/backend-api/reports/COTIZACION%20%2F%202026/inputs",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify(request) }),
+    ]);
+  });
+
   it("deletes one report using its encoded public code", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);

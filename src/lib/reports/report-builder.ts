@@ -784,18 +784,7 @@ export function toBuilderRequest(value: ReportBuilderFormValue): ReportBuilderWr
       source_parameter: column.column_type === "PARAMETER" ? column.source_parameter : null,
       display_order,
     })),
-    parameter_groups: value.parameterGroups.map((group, display_order) => ({
-      ...group,
-      name: group.name.trim(),
-      label: group.label.trim(),
-      display_order,
-      fields: group.fields.map((field, fieldOrder) => ({
-        ...field,
-        name: field.name.trim(),
-        label: field.label.trim(),
-        display_order: fieldOrder,
-      })),
-    })),
+    parameter_groups: toParameterGroupsRequest(value.parameterGroups),
     excel_layout: {
       ...value.layout,
       sheet_name: value.layout.sheet_name.trim(),
@@ -811,6 +800,21 @@ export function toBuilderRequest(value: ReportBuilderFormValue): ReportBuilderWr
       })),
     },
   };
+}
+
+export function toParameterGroupsRequest(groups: ReportParameterGroup[]): ReportParameterGroup[] {
+  return groups.map((group, display_order) => ({
+    ...group,
+    name: group.name.trim(),
+    label: group.label.trim(),
+    display_order,
+    fields: group.fields.map((field, fieldOrder) => ({
+      ...field,
+      name: field.name.trim(),
+      label: field.label.trim(),
+      display_order: fieldOrder,
+    })),
+  }));
 }
 
 export interface ReportFieldGroup {
