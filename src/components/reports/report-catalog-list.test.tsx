@@ -49,7 +49,7 @@ describe("ReportCatalogList", () => {
       { ...BASE, code: "DISABLED", name: "Deshabilitado", enabled: false },
     ]} />);
     expect((screen.getByRole("button", { name: "Generar" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByRole("button", { name: /Configurar/ }).getAttribute("href")).toBe("/administracion/reportes/DISABLED");
+    expect(screen.getByRole("button", { name: /Configurar/ }).getAttribute("href")).toBe("/administracion/reportes/DISABLED/configurar");
     expect(screen.queryByRole("button", { name: /Diseñar/ })).toBeNull();
     expect(screen.getByText(/está deshabilitado/)).toBeTruthy();
   });

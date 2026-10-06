@@ -29,7 +29,7 @@ export default async function VisualTemplatePage({ params }: VisualTemplatePageP
           { label: "Dashboard", href: "/" },
           { label: "Administración" },
           { label: "Reportes", href: "/administracion/reportes" },
-          { label: report?.name ?? code, href: `/administracion/reportes/${encodeURIComponent(code)}` },
+          { label: report?.name ?? code, href: `/administracion/reportes/${encodeURIComponent(code)}/configurar` },
           { label: "Editor visual" },
         ]}
       />

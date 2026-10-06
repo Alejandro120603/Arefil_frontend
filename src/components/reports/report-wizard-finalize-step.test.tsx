@@ -50,6 +50,16 @@ describe("ReportWizardFinalizeStep", () => {
     expect(screen.getAllByText("Pendiente").length).toBeGreaterThan(0);
   });
 
+  it("computes the checklist from the builder the wizard already owns, without reading it again", async () => {
+    getReportExcelTemplate.mockRejectedValue(new ApiError(404, "no template"));
+    const { rerender } = render(<ReportWizardFinalizeStep report={REPORT} builder={null} previewGeneratedThisSession={false} onReportChange={vi.fn()} />);
+    expect(getReportExcelTemplate).not.toHaveBeenCalled();
+
+    rerender(<ReportWizardFinalizeStep report={REPORT} builder={BUILDER} previewGeneratedThisSession={false} onReportChange={vi.fn()} />);
+    expect(await screen.findByText("1 columna configurada")).toBeTruthy();
+    expect(getReportBuilder).not.toHaveBeenCalled();
+  });
+
   it("shows the template version and mapped-field count once a template and inspection are available", async () => {
     getReportBuilder.mockResolvedValue(BUILDER);
     getReportExcelTemplate.mockResolvedValue(TEMPLATE);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { CircleCheck, Loader2, Play, Save } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportBuilderPreviewTable } from "@/components/reports/report-builder-preview-table";
@@ -15,20 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getUserErrorMessage } from "@/lib/api/errors";
-import {
-  getReportBuilder,
-  getReportFieldCatalog,
-  previewReportBuilder,
-  saveReportBuilder,
-} from "@/lib/api/reports";
-import {
-  builderFormFromDefinition,
-  emptyExcelLayout,
-  pruneTotals,
-  toBuilderRequest,
-  validateBuilderForm,
-  type ReportBuilderFormValue,
-} from "@/lib/reports/report-builder";
+import { previewReportBuilder } from "@/lib/api/reports";
+import type { ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
+import { pruneTotals, validateBuilderForm } from "@/lib/reports/report-builder";
 import {
   initialRuntimeValues,
   initialRuntimeGroupValues,
@@ -40,11 +29,12 @@ import type {
   ReportBuilderPreviewResponse,
   ReportColumn,
   ReportExcelLayout,
-  ReportFieldDescriptor,
   ReportParameter,
   ReportParameterGroup,
   ReportSummaryConfiguration,
 } from "@/types/api";
+
+const EMPTY_GROUPS: ReportParameterGroup[] = [];
 
 /**
  * The Report Builder: configures the *logical shell* of a report — columns,
@@ -56,33 +46,44 @@ import type {
  */
 export function ReportBuilderWorkspace({
   code,
+  builder,
   parameters,
   dataSourceCapabilities,
   onSaved,
 }: {
   code: string;
+  /**
+   * The wizard-owned builder (`useReportBuilderDraft`): this component never
+   * loads or saves the builder itself, it edits `builder.draft` and asks
+   * `builder.save()` to persist it.
+   */
+  builder: ReportBuilderDraft;
   parameters: ReportParameter[];
   dataSourceCapabilities: string[];
   onSaved?: () => void;
 }) {
-  const [value, setValue] = useState<ReportBuilderFormValue | null>(null);
-  const [fields, setFields] = useState<ReportFieldDescriptor[] | null>(null);
+  const { draft: value, fields, persisted, loadError, catalogError, dirty, saving, updateDraft } = builder;
   /** The repeatable groups as last persisted: their internal names are frozen. */
-  const [savedGroups, setSavedGroups] = useState<ReportParameterGroup[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const savedGroups = persisted?.parameter_groups ?? EMPTY_GROUPS;
 
-  const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   const [runtimeValues, setRuntimeValues] = useState<RuntimeParameterValues>(
     () => initialRuntimeValues(parameters),
   );
-  const [runtimeGroupValues, setRuntimeGroupValues] = useState<RuntimeGroupValues>({});
+  const [runtimeGroupValues, setRuntimeGroupValues] = useState<RuntimeGroupValues>(
+    () => initialRuntimeGroupValues(savedGroups),
+  );
+  // Every time the backend confirms a builder (load or save), the runtime rows
+  // restart from its groups — exactly what the workspace did when it loaded
+  // the builder itself.
+  const [runtimeSeed, setRuntimeSeed] = useState(persisted);
+  if (runtimeSeed !== persisted) {
+    setRuntimeSeed(persisted);
+    setRuntimeGroupValues(initialRuntimeGroupValues(savedGroups));
+  }
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({});
   const [runtimeGroupErrors, setRuntimeGroupErrors] = useState<Record<string, string>>({});
   const [runtimeRowErrors, setRuntimeRowErrors] = useState<Record<string, Record<number, Record<string, string>>>>({});
@@ -94,37 +95,6 @@ export function ReportBuilderWorkspace({
   const [preview, setPreview] = useState<ReportBuilderPreviewResponse | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void getReportBuilder(code, { signal: controller.signal })
-      .then((builder) => {
-        if (controller.signal.aborted) return;
-        setValue(builderFormFromDefinition(builder));
-        setSavedGroups(builder.parameter_groups);
-        setRuntimeGroupValues(initialRuntimeGroupValues(builder.parameter_groups));
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) return;
-        // Without a builder there is nothing to edit *and* nothing to lose, so
-        // fall back to an empty shell rather than blocking the whole screen.
-        setValue({ columns: [], parameterGroups: [], layout: emptyExcelLayout() });
-        setLoadError(getUserErrorMessage(error, "No se pudo cargar la configuración del constructor."));
-      });
-    return () => controller.abort();
-  }, [code]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void getReportFieldCatalog(code, { signal: controller.signal })
-      .then((catalog) => { if (!controller.signal.aborted) setFields(catalog); })
-      .catch((error) => {
-        if (controller.signal.aborted) return;
-        setFields([]);
-        setCatalogError(getUserErrorMessage(error, "No se pudo cargar el catálogo de campos."));
-      });
-    return () => controller.abort();
-  }, [code]);
 
   const changeRuntime = useCallback((name: string, next: string | boolean) => {
     setRuntimeValues((current) => ({ ...current, [name]: next }));
@@ -138,61 +108,48 @@ export function ReportBuilderWorkspace({
     setPreviewError(null);
   }, []);
 
-  function changeColumns(columns: ReportColumn[]) {
-    setValue((current) => current && { ...current, columns, layout: pruneTotals(current.layout, columns) });
-    setDirty(true);
+  function edited() {
     setSaved(false);
     setPreview(null);
+  }
+
+  function changeColumns(columns: ReportColumn[]) {
+    updateDraft((current) => ({ ...current, columns, layout: pruneTotals(current.layout, columns) }));
+    edited();
   }
 
   function changeParameterGroups(parameterGroups: ReportParameterGroup[]) {
-    setValue((current) => current && { ...current, parameterGroups });
+    updateDraft((current) => ({ ...current, parameterGroups }));
     setRuntimeGroupValues(initialRuntimeGroupValues(parameterGroups));
-    setDirty(true);
-    setSaved(false);
-    setPreview(null);
+    edited();
   }
 
   function changeSummaries(totals: ReportSummaryConfiguration[]) {
-    setValue((current) => current && { ...current, layout: { ...current.layout, totals } });
-    setDirty(true);
-    setSaved(false);
-    setPreview(null);
+    updateDraft((current) => ({ ...current, layout: { ...current.layout, totals } }));
+    edited();
   }
 
   function changeLayout(layout: ReportExcelLayout) {
-    setValue((current) => current && { ...current, layout });
-    setDirty(true);
-    setSaved(false);
-    setPreview(null);
+    updateDraft((current) => ({ ...current, layout }));
+    edited();
   }
 
   async function handleSave() {
-    if (value == null || savingRef.current) return;
+    if (value == null || saving) return;
     const validationErrors = validateBuilderForm(value, parameters, fields ?? []);
     setErrors(validationErrors);
     setSaveError(null);
     setSaved(false);
     if (validationErrors.length > 0) return;
 
-    savingRef.current = true;
-    setSaving(true);
     try {
-      const builder = await saveReportBuilder(code, toBuilderRequest(value));
-      // Re-seed from the persisted response, so what stays on screen is what
-      // the backend actually stored (normalized keys, ordering, totals).
-      setValue(builderFormFromDefinition(builder));
-      setSavedGroups(builder.parameter_groups);
-      setRuntimeGroupValues(initialRuntimeGroupValues(builder.parameter_groups));
-      setDirty(false);
+      const confirmed = await builder.save();
+      if (confirmed == null) return;
       setSaved(true);
       onSaved?.();
     } catch (error) {
       // The edited state is intentionally preserved on failure.
       setSaveError(getUserErrorMessage(error, "No se pudo guardar el constructor. Tus cambios siguen en pantalla."));
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
     }
   }
 

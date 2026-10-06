@@ -4,7 +4,9 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportBuilderWorkspace } from "./report-builder-workspace";
+import { useReportBuilderDraft, type ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
 import { ApiError } from "@/lib/api/errors";
+import { builderFormFromDefinition, toBuilderRequest } from "@/lib/reports/report-builder";
 import type {
   ReportBuilderDefinition,
   ReportBuilderPreviewResponse,
@@ -102,14 +104,21 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function renderWorkspace(dataSourceCapabilities: string[] = [], parameters: ReportParameter[] = [QUANTITY]) {
-  return render(
+/** The workspace is controlled: like the wizard, this harness owns the builder through the shared hook. */
+function WorkspaceWithBuilder({ dataSourceCapabilities, parameters }: { dataSourceCapabilities: string[]; parameters: ReportParameter[] }) {
+  const builder = useReportBuilderDraft("COTIZACION");
+  return (
     <ReportBuilderWorkspace
       code="COTIZACION"
+      builder={builder}
       parameters={parameters}
       dataSourceCapabilities={dataSourceCapabilities}
-    />,
+    />
   );
+}
+
+function renderWorkspace(dataSourceCapabilities: string[] = [], parameters: ReportParameter[] = [QUANTITY]) {
+  return render(<WorkspaceWithBuilder dataSourceCapabilities={dataSourceCapabilities} parameters={parameters} />);
 }
 
 async function addFieldColumn(user: ReturnType<typeof userEvent.setup>, fieldKey: string) {
@@ -118,6 +127,62 @@ async function addFieldColumn(user: ReturnType<typeof userEvent.setup>, fieldKey
 }
 
 describe("ReportBuilderWorkspace", () => {
+  it("never loads the builder itself: it renders and edits the draft it is given", async () => {
+    const updateDraft = vi.fn();
+    const save = vi.fn().mockResolvedValue(SAVED_BUILDER);
+    const builder: ReportBuilderDraft = {
+      code: "COTIZACION", loading: false, loadError: null, catalogError: null, fields: FIELDS,
+      draft: builderFormFromDefinition(SAVED_BUILDER), persisted: SAVED_BUILDER, dirty: false, saving: false,
+      updateDraft, save, reload: vi.fn(),
+    };
+    const onSaved = vi.fn();
+    const user = userEvent.setup();
+    render(<ReportBuilderWorkspace code="COTIZACION" builder={builder} parameters={[QUANTITY]} dataSourceCapabilities={[]} onSaved={onSaved} />);
+
+    expect((screen.getByLabelText("Título de columna") as HTMLInputElement).value).toBe("SKU");
+    expect(getReportBuilderMock).not.toHaveBeenCalled();
+    expect(getReportFieldCatalogMock).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("Título de columna"), "!");
+    expect(updateDraft).toHaveBeenCalled();
+    const [update] = updateDraft.mock.calls.at(-1)!;
+    expect(update(builderFormFromDefinition(SAVED_BUILDER)).columns[0].label).toBe("SKU!");
+
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends exactly the PUT payload the workspace built before #41A", async () => {
+    const legacy: ReportBuilderDefinition = {
+      ...SAVED_BUILDER,
+      columns: [
+        SAVED_BUILDER.columns[0],
+        { ...SAVED_BUILDER.columns[0], key: "price", label: "Precio", source_field: "price_list_item.unit_price", data_type: "decimal", format_type: "currency", display_order: 1, width: null },
+        { ...SAVED_BUILDER.columns[0], key: "line_total", label: "Importe", column_type: "FORMULA", source_field: null, formula_definition: "price * quantity", data_type: "decimal", format_type: "currency", display_order: 2, width: null },
+      ],
+      excel_layout: {
+        ...SAVED_BUILDER.excel_layout!,
+        totals: [
+          { key: "subtotal", label: "Subtotal", column_key: "line_total", operation: "SUM", formula_definition: null, format_type: "currency" },
+          { key: "tax", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "subtotal * 0.16", format_type: "currency" },
+        ],
+      },
+    };
+    getReportBuilderMock.mockResolvedValue(legacy);
+    const user = userEvent.setup();
+    renderWorkspace();
+    await screen.findByDisplayValue("IVA");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    // `toBuilderRequest(builderFormFromDefinition(...))` is exactly what the
+    // workspace computed from its own state before the builder moved to the wizard.
+    expect(saveReportBuilderMock).toHaveBeenCalledWith("COTIZACION", toBuilderRequest(builderFormFromDefinition(legacy)));
+    expect(getReportBuilderMock).toHaveBeenCalledTimes(1);
+  });
+
   it("loads the field catalog from the backend and groups it for the user", async () => {
     renderWorkspace();
     const select = await screen.findByLabelText("Agregar dato de la fuente");

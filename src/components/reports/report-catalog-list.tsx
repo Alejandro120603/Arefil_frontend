@@ -26,7 +26,7 @@ export function ReportCatalogList({ reports }: { reports: ReportDefinition[] }) 
       <TableBody>
         {reports.map((report) => {
           const operationHref = `/donaldson/reports/${encodeURIComponent(report.code)}`;
-          const configureHref = `/administracion/reportes/${encodeURIComponent(report.code)}`;
+          const configureHref = `/administracion/reportes/${encodeURIComponent(report.code)}/configurar`;
           return (
             <TableRow key={report.code}>
               <TableCell className="min-w-72 max-w-[46rem] whitespace-normal align-top">

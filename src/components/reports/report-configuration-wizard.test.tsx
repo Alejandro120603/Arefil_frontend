@@ -3,18 +3,21 @@
 import { useEffect } from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportConfigurationWizard } from "./report-configuration-wizard";
+import type { ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
 import type { ReportAdminDefinition, ReportBuilderDefinition, ReportExcelTemplate } from "@/types/api";
 
-const { push, replace, getReportBuilder, getReportExcelTemplate } = vi.hoisted(() => ({
+const { push, replace, getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder } = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
   getReportBuilder: vi.fn(),
   getReportExcelTemplate: vi.fn(),
+  getReportFieldCatalog: vi.fn(),
+  saveReportBuilder: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace }) }));
-vi.mock("@/lib/api/reports", () => ({ getReportBuilder, getReportExcelTemplate }));
+vi.mock("@/lib/api/reports", () => ({ getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder }));
 
 /**
  * The wizard shell is orchestration over five already-shipped, already-tested
@@ -44,7 +47,21 @@ vi.mock("@/components/reports/report-definition-form", () => ({
   ),
 }));
 vi.mock("@/components/reports/report-builder-workspace", () => ({
-  ReportBuilderWorkspace: ({ code }: { code: string }) => <div data-testid="builder-workspace">builder:{code}</div>,
+  // Stands in for the real (controlled) workspace: it shows the wizard-owned
+  // draft and edits/saves it only through the props it is given.
+  ReportBuilderWorkspace: ({ code, builder }: { code: string; builder: ReportBuilderDraft }) => (
+    <div data-testid="builder-workspace">
+      builder:{code}
+      <p>draft-columns:{builder.draft?.columns.map((column) => column.label).join(",") ?? "loading"}</p>
+      <p>persisted-columns:{builder.persisted?.columns.map((column) => column.label).join(",") ?? "none"}</p>
+      <p>dirty:{String(builder.dirty)}</p>
+      <button
+        type="button"
+        onClick={() => builder.updateDraft((draft) => ({ ...draft, columns: draft.columns.map((column) => ({ ...column, label: `${column.label} (editada)` })) }))}
+      >fake-edit-column</button>
+      <button type="button" onClick={() => { void builder.save(); }}>fake-save-builder</button>
+    </div>
+  ),
 }));
 vi.mock("@/components/reports/report-excel-template-card", () => ({
   ReportExcelTemplateCard: ({ onTemplateChange, hasUnsavedMappings, refreshToken }: { onTemplateChange?: (template: ReportExcelTemplate | null) => void; hasUnsavedMappings?: boolean; refreshToken?: number }) => {
@@ -107,6 +124,12 @@ const TEMPLATE: ReportExcelTemplate = {
   is_active: true, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
 };
 
+beforeEach(() => {
+  getReportBuilder.mockResolvedValue(BUILDER_WITH_COLUMNS);
+  getReportFieldCatalog.mockResolvedValue([]);
+  getReportExcelTemplate.mockResolvedValue(null);
+});
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -159,10 +182,69 @@ describe("ReportConfigurationWizard — editing an existing report", () => {
     await waitFor(() => expect(screen.getByTestId("template-card")).toBeTruthy());
   });
 
-  it("honors an explicit ?step= over the computed resume position", () => {
+  it("honors an explicit ?step= over the computed resume position", async () => {
     render(<ReportConfigurationWizard report={REPORT} initialStepParam={1} />);
     expect(screen.getByTestId("definition-form-information")).toBeTruthy();
+    // The builder is still loaded once — for the workspace — but never used to move the wizard.
+    await waitFor(() => expect(screen.getByText("draft-columns:No. Parte")).toBeTruthy());
+    expect(getReportBuilder).toHaveBeenCalledTimes(1);
+    expect(getReportExcelTemplate).not.toHaveBeenCalled();
+    expect(screen.getByText(/Información/, { selector: "h2" })).toBeTruthy();
+  });
+
+  it("opens an existing report with exactly one GET /builder, shared by resume and the workspace", async () => {
+    getReportExcelTemplate.mockResolvedValue(null);
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={null} />);
+    await waitFor(() => expect(screen.getByText(/Plantilla Excel/, { selector: "h2" })).toBeTruthy());
+    expect(screen.getByText("draft-columns:No. Parte")).toBeTruthy();
+    expect(getReportBuilder).toHaveBeenCalledTimes(1);
+    expect(getReportBuilder).toHaveBeenCalledWith("COTIZACION", expect.anything());
+    expect(getReportFieldCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it("never asks for a builder while creating a report", () => {
+    render(<ReportConfigurationWizard report={null} initialStepParam={null} />);
     expect(getReportBuilder).not.toHaveBeenCalled();
+    expect(getReportFieldCatalog).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unsaved builder draft while moving between steps, without reloading it", async () => {
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={3} />);
+    await waitFor(() => expect(screen.getByText("draft-columns:No. Parte")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: "fake-edit-column" }));
+    expect(screen.getByText("draft-columns:No. Parte (editada)")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Anterior" }));
+    expect(screen.getByText(/Fuente y entradas/, { selector: "h2" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Datos del reporte/ }));
+
+    expect(screen.getByText("draft-columns:No. Parte (editada)")).toBeTruthy();
+    expect(screen.getByText("persisted-columns:No. Parte")).toBeTruthy();
+    expect(screen.getByText("dirty:true")).toBeTruthy();
+    expect(getReportBuilder).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the saved builder after saving and coming back to the step", async () => {
+    saveReportBuilder.mockResolvedValue({
+      ...BUILDER_WITH_COLUMNS,
+      columns: BUILDER_WITH_COLUMNS.columns.map((column) => ({ ...column, label: "No. Parte (editada)" })),
+    });
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={3} />);
+    await waitFor(() => expect(screen.getByText("draft-columns:No. Parte")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: "fake-edit-column" }));
+    await user.click(screen.getByRole("button", { name: "fake-save-builder" }));
+    await waitFor(() => expect(screen.getByText("persisted-columns:No. Parte (editada)")).toBeTruthy());
+    expect(saveReportBuilder).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Continuar" }));
+    await user.click(screen.getByRole("button", { name: /Datos del reporte/ }));
+    expect(screen.getByText("draft-columns:No. Parte (editada)")).toBeTruthy();
+    expect(screen.getByText("dirty:false")).toBeTruthy();
+    expect(getReportBuilder).toHaveBeenCalledTimes(1);
   });
 
   it("blocks Continuar from Plantilla Excel until a template exists, offering Omitir por ahora instead", async () => {

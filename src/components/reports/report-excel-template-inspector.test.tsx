@@ -100,6 +100,17 @@ describe("ReportExcelTemplateInspector", () => {
     expect(screen.getByLabelText("Celda B2")).toBeTruthy();
   });
 
+  it("uses the builder the wizard already owns, and waits for it instead of reading it again", async () => {
+    inspectReportExcelTemplate.mockResolvedValue(INSPECTION);
+    const { rerender } = render(<ReportExcelTemplateInspector code="COTIZACION" builder={null} />);
+    expect(inspectReportExcelTemplate).not.toHaveBeenCalled();
+
+    rerender(<ReportExcelTemplateInspector code="COTIZACION" builder={BUILDER} />);
+    expect(await screen.findByText("COTIZACION.xlsx · v3")).toBeTruthy();
+    expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(1);
+    expect(getReportBuilder).not.toHaveBeenCalled();
+  });
+
   it("treats a 404 as the no-template state, not an error", async () => {
     inspectReportExcelTemplate.mockRejectedValue(new ApiError(404, "El reporte no tiene plantilla Excel activa."));
     getReportBuilder.mockResolvedValue(BUILDER);

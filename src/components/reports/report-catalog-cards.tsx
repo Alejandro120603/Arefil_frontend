@@ -26,14 +26,14 @@ export function ReportCatalogCards({ reports }: { reports: ReportDefinition[] })
                 {report.enabled ? (
                   <>
                     <Button size="sm" nativeButton={false} render={<Link href={operationHref} />}><FileText /> Generar</Button>
-                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}`} />}>
+                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/configurar`} />}>
                       <Settings /> Configurar
                     </Button>
                   </>
                 ) : (
                   <>
                     <Button size="sm" disabled><FileText /> Generar</Button>
-                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}`} />}>
+                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/configurar`} />}>
                       <Settings /> Configurar
                     </Button>
                   </>

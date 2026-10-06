@@ -34,8 +34,11 @@ export function ReportWizardFinalizeStep({
   previewGeneratedThisSession,
   onReportChange,
   active = true,
+  builder: ownedBuilder,
 }: {
   report: ReportAdminDefinition;
+  /** The saved builder when the wizard already owns it (#41A); `null` while it loads; omitted, the step reads it itself. */
+  builder?: ReportBuilderDefinition | null;
   previewGeneratedThisSession: boolean;
   onReportChange: (report: ReportAdminDefinition) => void;
   active?: boolean;
@@ -47,7 +50,7 @@ export function ReportWizardFinalizeStep({
 
   const load = useCallback(
     (signal?: AbortSignal) =>
-      getReportBuilder(report.code, { signal })
+      Promise.resolve(ownedBuilder ?? getReportBuilder(report.code, { signal }))
         .then(async (builder) => {
           const template = await getReportExcelTemplate(report.code, { signal }).catch((error: unknown) => {
             if (error instanceof ApiError && error.status === 404) return null;
@@ -64,15 +67,15 @@ export function ReportWizardFinalizeStep({
           if (signal?.aborted) return;
           setState({ status: "error", message: getUserErrorMessage(error, "No se pudo calcular el estado del reporte.") });
         }),
-    [report.code],
+    [report.code, ownedBuilder],
   );
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || ownedBuilder === null) return;
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load, refreshToken, active]);
+  }, [load, ownedBuilder, refreshToken, active]);
 
   function handleRefresh() {
     setState({ status: "loading" });

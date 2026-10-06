@@ -171,7 +171,7 @@ describe("ReportDefinitionForm", () => {
     }));
     expect(createReport.mock.calls[0]?.[0]).not.toHaveProperty("query_text");
     expect(createReport.mock.calls[0]?.[0]).not.toHaveProperty("data_source_type");
-    expect(push).toHaveBeenCalledWith("/administracion/reportes/PRODUCT_REPORT");
+    expect(push).toHaveBeenCalledWith("/administracion/reportes/PRODUCT_REPORT/configurar");
   });
 
   it("shows source parameters as friendly required data without any technical metadata", async () => {
