@@ -55,6 +55,11 @@ const CUSTOMER: ReportParameter = {
   required: false, default_value: null, display_order: 1, configuration_json: null,
 };
 
+const PRICE_LIST: ReportParameter = {
+  name: "price_list_id", label: "Lista de precios", data_type: "integer", input_type: "select",
+  required: true, default_value: null, display_order: 2, configuration_json: { options_source: "price_lists" },
+};
+
 const REPORT = {
   code: "COTIZACION", name: "Cotización", description: null, category: null, filename_template: null, enabled: true,
   data_source_id: 5,
@@ -347,23 +352,61 @@ describe("ReportBuilderWorkspace", () => {
 
   it("configures and saves repeatable metadata in the same transactional builder request", async () => {
     const user = userEvent.setup();
-    renderWorkspace(["REPEATABLE_ROWS"]);
-    await user.click(await screen.findByRole("button", { name: "Agregar grupo repetible" }));
-    expect((screen.getByLabelText("Nombre interno", { selector: "#group-name" }) as HTMLInputElement).value).toBe("items");
+    renderWorkspace(["REPEATABLE_ROWS"], [QUANTITY, PRICE_LIST]);
+    await user.click(await screen.findByRole("button", { name: /Agregar productos por renglón/ }));
+    expect(screen.queryByLabelText("Nombre interno")).toBeNull();
     expect(screen.getByDisplayValue("Producto")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Cantidad" }));
     await addFieldColumn(user, "product.part_number");
     await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
 
     await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
     expect(saveReportBuilderMock.mock.calls[0][1]).toMatchObject({
       parameter_groups: [{
-        name: "items", resolver_key: "products_by_price_list", context_parameter: "quantity", min_items: 1,
+        name: "productos", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id", min_items: 1,
         fields: [{
           name: "product_id", data_type: "integer", input_type: "select", required: true,
-          configuration_json: { options_source: "products_by_price_list", context_parameter: "quantity" },
+          configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" },
+        }, {
+          name: "cantidad", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1,
+          configuration_json: { minimum: 0, exclusive_minimum: true },
         }],
       }],
     });
+  });
+
+  it("keeps a saved group's identifiers and its columns' references when the group is edited", async () => {
+    const items = {
+      name: "items", label: "Productos", resolver_key: "products_by_price_list" as const, context_parameter: "price_list_id",
+      min_items: 1, max_items: null, display_order: 0,
+      fields: [
+        { name: "product_id", label: "Producto", data_type: "integer" as const, input_type: "select" as const, required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list" as const, context_parameter: "price_list_id" } },
+        { name: "quantity", label: "Cantidad", data_type: "integer" as const, input_type: "number" as const, required: true, default_value: 1, display_order: 1, configuration_json: { minimum: 0, exclusive_minimum: true } },
+      ],
+    };
+    const quantityColumn = {
+      key: "quantity", label: "Cantidad", column_type: "PARAMETER" as const, source_field: null, source_parameter: "items.quantity",
+      formula_definition: null, data_type: "integer" as const, format_type: "number" as const, display_order: 0, visible: true, width: null,
+    };
+    getReportBuilderMock.mockResolvedValue({ ...SAVED_BUILDER, columns: [quantityColumn], parameter_groups: [items] });
+    const user = userEvent.setup();
+    renderWorkspace(["REPEATABLE_ROWS"], [PRICE_LIST]);
+
+    const groupLabel = await screen.findByLabelText("Nombre visible del grupo");
+    await user.clear(groupLabel);
+    await user.type(groupLabel, "Artículos");
+    const fieldLabel = screen.getByLabelText("Nombre visible", { selector: "#group-field-label-1" });
+    await user.clear(fieldLabel);
+    await user.type(fieldLabel, "Piezas");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    const request = saveReportBuilderMock.mock.calls[0][1];
+    expect(request.parameter_groups).toEqual([{
+      ...items, label: "Artículos",
+      fields: [items.fields[0], { ...items.fields[1], label: "Piezas" }],
+    }]);
+    expect(request.columns).toEqual([quantityColumn]);
   });
 
   it("surfaces the backend save error and preserves the edited state", async () => {

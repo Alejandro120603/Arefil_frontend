@@ -154,8 +154,14 @@ export function uniqueParameterName(base: string, taken: Iterable<string>): stri
   }
 }
 
+/** Anything with an internal name derived from a visible one (parameters, repeatable groups and subfields). */
+interface NamedByLabel {
+  name: string;
+  label: string;
+}
+
 /** Whether `name` is still the one generated from `label` (and so may follow it). */
-function isGeneratedName(parameter: ReportParameter): boolean {
+function isGeneratedName(parameter: NamedByLabel): boolean {
   if (parameter.name === "") return true;
   const base = parameterNameBase(parameter.label);
   return parameter.name === base || new RegExp(`^${base}_\\d+$`).test(parameter.name);
@@ -167,11 +173,11 @@ function isGeneratedName(parameter: ReportParameter): boolean {
  * name is referenced by columns, formulas, summaries and Excel placeholders
  * (`{{parameters.<name>}}`), and a preset keeps its own well-known name.
  */
-export function relabelParameter(
-  parameter: ReportParameter,
+export function relabelParameter<T extends NamedByLabel>(
+  parameter: T,
   label: string,
   options: { locked: boolean; takenNames: Iterable<string> },
-): ReportParameter {
+): T {
   if (options.locked || !isGeneratedName(parameter)) return { ...parameter, label };
   return {
     ...parameter,

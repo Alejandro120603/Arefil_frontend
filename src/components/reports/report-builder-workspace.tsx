@@ -67,6 +67,8 @@ export function ReportBuilderWorkspace({
 }) {
   const [value, setValue] = useState<ReportBuilderFormValue | null>(null);
   const [fields, setFields] = useState<ReportFieldDescriptor[] | null>(null);
+  /** The repeatable groups as last persisted: their internal names are frozen. */
+  const [savedGroups, setSavedGroups] = useState<ReportParameterGroup[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
@@ -99,6 +101,7 @@ export function ReportBuilderWorkspace({
       .then((builder) => {
         if (controller.signal.aborted) return;
         setValue(builderFormFromDefinition(builder));
+        setSavedGroups(builder.parameter_groups);
         setRuntimeGroupValues(initialRuntimeGroupValues(builder.parameter_groups));
       })
       .catch((error) => {
@@ -179,6 +182,7 @@ export function ReportBuilderWorkspace({
       // Re-seed from the persisted response, so what stays on screen is what
       // the backend actually stored (normalized keys, ordering, totals).
       setValue(builderFormFromDefinition(builder));
+      setSavedGroups(builder.parameter_groups);
       setRuntimeGroupValues(initialRuntimeGroupValues(builder.parameter_groups));
       setDirty(false);
       setSaved(true);
@@ -247,10 +251,17 @@ export function ReportBuilderWorkspace({
 
       {dataSourceCapabilities.includes("REPEATABLE_ROWS") && (
         <Card>
-          <CardHeader><CardTitle>Renglones repetibles</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Productos por renglón</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <p className="text-sm text-muted-foreground">Define los datos que el usuario capturará una vez por producto. El backend resolverá producto, lista y precio.</p>
-            <ReportParameterGroupEditor groups={value.parameterGroups} parameters={parameters} disabled={saving} onChange={changeParameterGroups} />
+            <p className="text-sm text-muted-foreground">Define los datos que el usuario capturará una vez por producto. El precio y la descripción se toman de la lista seleccionada.</p>
+            <ReportParameterGroupEditor
+              groups={value.parameterGroups}
+              parameters={parameters}
+              savedGroups={savedGroups}
+              referencedSources={value.columns.flatMap((column) => column.source_parameter?.includes(".") ? [column.source_parameter] : [])}
+              disabled={saving}
+              onChange={changeParameterGroups}
+            />
           </CardContent>
         </Card>
       )}
