@@ -117,7 +117,7 @@ export function ReportDefinitionForm({
       if (creating) {
         const created = await createReport(toReportRequest(value));
         onSaved?.(created);
-        router.push(createRedirectPath ? createRedirectPath(created.code) : `/administracion/reportes/${encodeURIComponent(created.code)}`);
+        router.push(createRedirectPath ? createRedirectPath(created.code) : `/administracion/reportes/${encodeURIComponent(created.code)}/configurar`);
         return;
       }
       const updated = await updateReport(value.code, toReportUpdate(value));

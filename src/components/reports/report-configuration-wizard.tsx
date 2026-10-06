@@ -12,7 +12,8 @@ import { ReportWizardStepper } from "@/components/reports/report-wizard-stepper"
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/errors";
-import { getReportBuilder, getReportExcelTemplate } from "@/lib/api/reports";
+import { useReportBuilderDraft } from "@/hooks/use-report-builder-draft";
+import { getReportExcelTemplate } from "@/lib/api/reports";
 import {
   reportWizardStepFromOrder,
   reportWizardStepOrder,
@@ -42,6 +43,11 @@ const STEP_DESCRIPTIONS: Record<ReportWizardStepId, string> = {
  * Información *and* Fuente y entradas are saved together (`data_source_id` is
  * required to create a report at all) — so creating redirects to this same
  * wizard at the new code, exactly like editing one that already exists.
+ *
+ * The builder has one owner (Frontend #41A): `useReportBuilderDraft` loads it
+ * once here, and every step reads that same copy — the workspace edits its
+ * draft, the template, mapper and finalize steps read what was last saved,
+ * and the resume position is computed from it.
  */
 export function ReportConfigurationWizard({
   report: initialReport,
@@ -67,28 +73,42 @@ export function ReportConfigurationWizard({
   const mounted = useRef(false);
   const [mappingsDirty, setMappingsDirty] = useState(false);
   const [savedRevision, setSavedRevision] = useState(0);
+  const builder = useReportBuilderDraft(report?.code ?? null);
+  /**
+   * What the read-only steps receive: `null` while the builder loads (they
+   * wait), or `undefined` if it could not be loaded (they fall back to reading
+   * it themselves, as they did before #41A).
+   */
+  const savedBuilder = builder.loading ? null : builder.persisted ?? undefined;
+  const resumeBuilder = builder.persisted;
+  const resumeFailed = !builder.loading && builder.loadError != null;
 
   useEffect(() => {
     if (resumed || report == null) return;
+    if (resumeFailed) {
+      // Best-effort: if the builder cannot be read, the wizard simply opens on Información.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reacting to the shared builder load failing
+      setResumed(true);
+      return;
+    }
+    if (resumeBuilder == null) return;
     const controller = new AbortController();
-    Promise.all([
-      getReportBuilder(report.code, { signal: controller.signal }),
-      getReportExcelTemplate(report.code, { signal: controller.signal }).catch((error: unknown) => {
+    getReportExcelTemplate(report.code, { signal: controller.signal })
+      .catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 404) return null;
         throw error;
-      }),
-    ])
-      .then(([builder, template]) => {
+      })
+      .then((template) => {
         if (controller.signal.aborted) return;
         setTemplateState(template);
         setTemplateChecked(true);
-        setStep(resumeReportWizardStep({ builder, template }));
+        setStep(resumeReportWizardStep({ builder: resumeBuilder, template }));
         setResumed(true);
       })
       // Best-effort: if this fails, the wizard simply opens on Información.
       .catch(() => { if (!controller.signal.aborted) setResumed(true); });
     return () => controller.abort();
-  }, [resumed, report]);
+  }, [resumed, report, resumeBuilder, resumeFailed]);
 
   useEffect(() => {
     if (!mounted.current) {
@@ -155,6 +175,7 @@ export function ReportConfigurationWizard({
           <div className={step === "data" ? "contents" : "hidden"}>
             <ReportBuilderWorkspace
               code={report.code}
+              builder={builder}
               parameters={report.parameters}
               dataSourceCapabilities={report.data_source.capabilities}
               onSaved={() => setSavedRevision((revision) => revision + 1)}
@@ -168,6 +189,7 @@ export function ReportConfigurationWizard({
             <ReportExcelTemplateCard
               code={report.code}
               parameters={report.parameters}
+              builder={savedBuilder}
               refreshToken={savedRevision}
               hasUnsavedMappings={mappingsDirty}
               onTemplateChange={(template) => {
@@ -210,6 +232,7 @@ export function ReportConfigurationWizard({
               <CardContent>
                 <ReportExcelTemplateInspector
                   code={report.code}
+                  builder={savedBuilder}
                   mode={templateMode}
                   refreshToken={`${savedRevision}:${templateState?.version ?? "none"}`}
                   onModeChange={handleTemplateModeChange}
@@ -234,6 +257,7 @@ export function ReportConfigurationWizard({
               <CardContent>
                 <ReportWizardFinalizeStep
                   report={report}
+                  builder={savedBuilder}
                   active={step === "finalize"}
                   previewGeneratedThisSession={previewGenerated}
                   onReportChange={setReport}

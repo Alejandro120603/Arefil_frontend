@@ -6,8 +6,15 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
+        // The old all-in-one configuration page (#41A): answered with a real
+        // 308 before rendering. `nuevo` is the creation wizard, not a code.
+        source: "/administracion/reportes/:code((?!nuevo$)[^/]+)",
+        destination: "/administracion/reportes/:code/configurar",
+        permanent: true,
+      },
+      {
         source: "/administracion/reportes/:code/designer",
-        destination: "/administracion/reportes/:code",
+        destination: "/administracion/reportes/:code/configurar",
         permanent: true,
       },
       {

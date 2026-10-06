@@ -45,6 +45,7 @@ import {
 } from "@/lib/reports/report-excel-template";
 import { formatDateTime } from "@/lib/format/date";
 import type {
+  ReportBuilderDefinition,
   ReportColumn,
   ReportExcelTemplate,
   ReportExcelTemplateValidationResult,
@@ -70,9 +71,16 @@ export function ReportExcelTemplateCard({
   onTemplateChange,
   refreshToken = 0,
   hasUnsavedMappings = false,
+  builder,
 }: {
   code: string;
   parameters: ReportParameter[];
+  /**
+   * The saved builder, when a parent already owns it (the wizard's
+   * `useReportBuilderDraft`, #41A): `null` while it loads. Omitted, the card
+   * reads the builder itself (standalone template page).
+   */
+  builder?: ReportBuilderDefinition | null;
   /** Fires once the initial load resolves, and again on every upload/delete/restore — the wizard (#33) uses it to gate advancing past this step. */
   onTemplateChange?: (template: ReportExcelTemplate | null) => void;
   refreshToken?: number;
@@ -99,10 +107,16 @@ export function ReportExcelTemplateCard({
   const [fieldsOpen, setFieldsOpen] = useState(false);
   const uploadingRef = useRef(false);
 
-  const placeholders = useMemo(
-    () => excelTemplatePlaceholders(parameters, columns, summaries),
-    [columns, parameters, summaries],
-  );
+  const standalone = builder === undefined;
+  const placeholders = useMemo(() => {
+    if (standalone) return excelTemplatePlaceholders(parameters, columns, summaries);
+    const builderColumns = builder?.columns ?? [];
+    return excelTemplatePlaceholders(
+      parameters,
+      builderColumns,
+      normalizeSummaries(builder?.excel_layout?.totals ?? [], builderColumns),
+    );
+  }, [builder, columns, parameters, standalone, summaries]);
   const status = excelTemplateStatus(template);
 
   /** A 404 is the "no template yet" state; anything else is a real failure. */
@@ -141,6 +155,7 @@ export function ReportExcelTemplateCard({
   }, [loading, template, onTemplateChange]);
 
   useEffect(() => {
+    if (!standalone) return;
     const controller = new AbortController();
     void getReportBuilder(code, { signal: controller.signal })
       .then((builder) => {
@@ -152,7 +167,7 @@ export function ReportExcelTemplateCard({
       // uploads, so a missing builder must not block this section.
       .catch(() => undefined);
     return () => controller.abort();
-  }, [code, refreshToken]);
+  }, [code, refreshToken, standalone]);
 
   async function upload(file: File) {
     if (uploadingRef.current) return;

@@ -71,8 +71,11 @@ export function ReportExcelTemplateInspector({
   onDirtyChange,
   onTemplateSaved,
   refreshToken = "",
+  builder,
 }: {
   code: string;
+  /** The saved builder when the wizard already owns it (#41A); `null` while it loads; omitted, the mapper reads it itself. */
+  builder?: ReportBuilderDefinition | null;
   /** Controls the Diseño/Vista previa tab from outside (the wizard, #33); uncontrolled (internal tab state) when omitted. */
   mode?: "design" | "preview";
   onModeChange?: (mode: "design" | "preview") => void;
@@ -83,7 +86,7 @@ export function ReportExcelTemplateInspector({
   onTemplateSaved?: () => void;
   refreshToken?: string;
 }) {
-  return <TemplateMapper key={code} code={code} mode={mode} onModeChange={onModeChange} onPreviewReady={onPreviewReady} onPreviewInvalidated={onPreviewInvalidated} onDirtyChange={onDirtyChange} onTemplateSaved={onTemplateSaved} refreshToken={refreshToken} />;
+  return <TemplateMapper key={code} code={code} mode={mode} onModeChange={onModeChange} onPreviewReady={onPreviewReady} onPreviewInvalidated={onPreviewInvalidated} onDirtyChange={onDirtyChange} onTemplateSaved={onTemplateSaved} refreshToken={refreshToken} builder={builder} />;
 }
 
 function TemplateMapper({
@@ -95,8 +98,10 @@ function TemplateMapper({
   onDirtyChange,
   onTemplateSaved,
   refreshToken = "",
+  builder: ownedBuilder,
 }: {
   code: string;
+  builder?: ReportBuilderDefinition | null;
   mode?: "design" | "preview";
   onModeChange?: (mode: "design" | "preview") => void;
   onPreviewReady?: () => void;
@@ -128,7 +133,7 @@ function TemplateMapper({
     (signal?: AbortSignal) =>
       Promise.all([
         inspectReportExcelTemplate(code, { signal }),
-        getReportBuilder(code, { signal }),
+        ownedBuilder ?? getReportBuilder(code, { signal }),
       ])
         .then(([inspection, builder]) => {
           if (signal?.aborted) return;
@@ -148,14 +153,16 @@ function TemplateMapper({
           }
           setState({ status: "error", message: getUserErrorMessage(error, "No se pudo abrir el editor visual.") });
         }),
-    [code],
+    [code, ownedBuilder],
   );
 
   useEffect(() => {
+    // The wizard is still loading the builder it will hand over: wait for it.
+    if (ownedBuilder === null) return;
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load, refreshToken]);
+  }, [load, ownedBuilder, refreshToken]);
 
   useEffect(() => {
     onDirtyChange?.(pendingMappings.size > 0);
