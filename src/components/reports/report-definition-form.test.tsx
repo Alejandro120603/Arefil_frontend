@@ -7,12 +7,20 @@ import { ReportDefinitionForm } from "./report-definition-form";
 import { ApiError } from "@/lib/api/errors";
 import type { ReportAdminDefinition, ReportDataSource, ReportDefinition } from "@/types/api";
 
-const { push, refresh, createReport, updateReport, listReportDataSources } = vi.hoisted(() => ({
+const {
+  push,
+  refresh,
+  createReport,
+  updateReport,
+  listReportDataSources,
+  listAllReportParameterOptions,
+} = vi.hoisted(() => ({
   push: vi.fn(),
   refresh: vi.fn(),
   createReport: vi.fn(),
   updateReport: vi.fn(),
   listReportDataSources: vi.fn(),
+  listAllReportParameterOptions: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
@@ -20,6 +28,7 @@ vi.mock("@/lib/api/reports", () => ({
   createReport,
   updateReport,
   listReportDataSources,
+  listAllReportParameterOptions,
 }));
 
 const PRODUCT_SOURCE: ReportDataSource = {
@@ -112,6 +121,9 @@ afterEach(() => {
 
 beforeEach(() => {
   listReportDataSources.mockResolvedValue([PRODUCT_SOURCE, HISTORY_SOURCE, QUOTATION_SOURCE]);
+  listAllReportParameterOptions.mockResolvedValue([
+    { value: 17, label: "Donaldson · 2026-01-01 · MXN" },
+  ]);
 });
 
 describe("ReportDefinitionForm", () => {
@@ -151,7 +163,7 @@ describe("ReportDefinitionForm", () => {
     expect(push).toHaveBeenCalledWith("/administracion/reportes/PRODUCT_REPORT");
   });
 
-  it("loads source parameters from backend metadata and locks their contract", async () => {
+  it("shows source parameters as friendly required data without editable technical metadata", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "confirm").mockReturnValue(true);
     render(<ReportDefinitionForm />);
@@ -159,11 +171,33 @@ describe("ReportDefinitionForm", () => {
 
     await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(HISTORY_SOURCE.id));
 
-    const sourceSection = screen.getByRole("region", { name: "Parámetros de fuente" });
-    expect(within(sourceSection).getByDisplayValue("product_id")).toBeTruthy();
+    const sourceSection = screen.getByRole("region", { name: "Datos necesarios" });
+    const productField = within(sourceSection).getByRole("group", { name: "Producto" });
+    expect(within(productField).getByText("Obligatorio")).toBeTruthy();
+    expect(within(productField).getByText(/seleccionará un producto/)).toBeTruthy();
+    expect(within(productField).queryByDisplayValue("product_id")).toBeNull();
+    expect(within(productField).queryByLabelText("Tipo")).toBeNull();
+    expect(within(productField).queryByLabelText("Control")).toBeNull();
+    expect(within(productField).queryByLabelText("Fuente de opciones")).toBeNull();
+    expect(within(productField).queryByRole("checkbox")).toBeNull();
+    const technicalSummary = within(productField).getByText("Ver configuración técnica");
+    const technicalDetails = technicalSummary.closest("details") as HTMLDetailsElement;
+    expect(technicalDetails.open).toBe(false);
+    await user.click(technicalSummary);
+    expect(technicalDetails.open).toBe(true);
+    expect(within(technicalDetails).getByText("product_id")).toBeTruthy();
+    expect(within(technicalDetails).getByText("integer")).toBeTruthy();
+    expect(within(technicalDetails).getByText("select")).toBeTruthy();
+    expect(within(technicalDetails).getByText("products")).toBeTruthy();
+    expect((within(productField).getByLabelText(/Valor predeterminado/) as HTMLSelectElement).disabled)
+      .toBe(true);
+    expect(within(productField).getByText(
+      "Podrás elegir un valor predeterminado después de crear el reporte.",
+    )).toBeTruthy();
+    expect(listAllReportParameterOptions).not.toHaveBeenCalled();
     expect(screen.getByText("Cambio absoluto")).toBeTruthy();
-    expect((screen.getByDisplayValue("product_id") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByLabelText("Etiqueta") as HTMLInputElement).disabled).toBe(false);
+    expect((within(productField).getByLabelText("Etiqueta para el usuario") as HTMLInputElement).value)
+      .toBe("Producto");
     expect(within(screen.getByRole("region", { name: "Parámetros del reporte" }))
       .getByText(/no declara parámetros propios/)).toBeTruthy();
   });
@@ -175,8 +209,20 @@ describe("ReportDefinitionForm", () => {
     render(<ReportDefinitionForm report={QUOTATION_REPORT} />);
     await screen.findByRole("option", { name: "Renglones de cotización" });
 
-    const sourceSection = screen.getByRole("region", { name: "Parámetros de fuente" });
-    expect((within(sourceSection).getByDisplayValue("price_list_id") as HTMLInputElement).disabled).toBe(true);
+    const sourceSection = screen.getByRole("region", { name: "Datos necesarios" });
+    const priceListField = within(sourceSection).getByRole("group", { name: "Lista de precios" });
+    expect(within(priceListField).queryByDisplayValue("price_list_id")).toBeNull();
+    expect(within(priceListField).getByText("Obligatorio")).toBeTruthy();
+    expect(await within(priceListField).findByRole("option", {
+      name: "Donaldson · 2026-01-01 · MXN",
+    })).toBeTruthy();
+    await user.selectOptions(
+      within(priceListField).getByLabelText(/Valor predeterminado/),
+      "17",
+    );
+    const sourceLabel = within(priceListField).getByLabelText("Etiqueta para el usuario");
+    await user.clear(sourceLabel);
+    await user.type(sourceLabel, "Lista base");
 
     const reportSection = screen.getByRole("region", { name: "Parámetros del reporte" });
     await user.selectOptions(within(reportSection).getByLabelText("Agregar parámetro común"), "customer_name");
@@ -188,10 +234,25 @@ describe("ReportDefinitionForm", () => {
 
     await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
     expect(updateReport.mock.calls[0]?.[1].parameters).toEqual([
-      expect.objectContaining({ name: "price_list_id", data_type: "integer", required: true, display_order: 0 }),
+      expect.objectContaining({
+        name: "price_list_id",
+        label: "Lista base",
+        data_type: "integer",
+        input_type: "select",
+        required: true,
+        default_value: 17,
+        display_order: 0,
+        configuration_json: { options_source: "price_lists" },
+      }),
       expect.objectContaining({ name: "customer_name", label: "Cliente", data_type: "string", display_order: 1 }),
       expect.objectContaining({ name: "tax_rate", label: "IVA %", data_type: "decimal", display_order: 2 }),
     ]);
+    expect(listAllReportParameterOptions).toHaveBeenCalledWith(
+      "COTIZACION",
+      "price_list_id",
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("keeps the report's own parameters when the data source changes", async () => {
@@ -205,8 +266,9 @@ describe("ReportDefinitionForm", () => {
     await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(HISTORY_SOURCE.id));
 
     expect(screen.getByDisplayValue("customer_name")).toBeTruthy();
-    expect(screen.queryByDisplayValue("price_list_id")).toBeNull();
-    expect(screen.getByDisplayValue("product_id")).toBeTruthy();
+    const sourceSection = screen.getByRole("region", { name: "Datos necesarios" });
+    expect(within(sourceSection).queryByRole("group", { name: "Lista de precios" })).toBeNull();
+    expect(within(sourceSection).getByRole("group", { name: "Producto" })).toBeTruthy();
   });
 
   it("refuses to save a report that dropped a parameter its source requires", async () => {
