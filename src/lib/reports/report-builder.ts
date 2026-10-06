@@ -509,57 +509,7 @@ export function validateBuilderForm(
   if (columns.length === 0) errors.push("Agrega al menos una columna al reporte.");
   if (parameterGroups.length > 1) errors.push("Esta versión admite un solo grupo repetible por reporte.");
 
-  // Repeatable rows speak business language: internal names are hidden, so a
-  // message names what the admin sees (the visible names) whenever it can.
-  for (const group of parameterGroups) {
-    const groupName = group.label.trim() || "Productos por renglón";
-    if (!group.label.trim()) errors.push("Los productos por renglón requieren un nombre visible.");
-    else if (!COLUMN_KEY_PATTERN.test(group.name)) errors.push(`El grupo '${groupName}' tiene un identificador interno no válido.`);
-    if (parameters.some((parameter) => parameter.name.toLocaleLowerCase() === group.name.toLocaleLowerCase())) {
-      errors.push(`El grupo '${groupName}' usa el mismo identificador que un dato del reporte; cámbiale el nombre visible.`);
-    }
-    const context = parameters.find((parameter) => parameter.name === group.context_parameter);
-    if (!context) errors.push("Para usar productos por renglón, la fuente necesita una lista de precios.");
-    else if (context.data_type !== "integer") errors.push(`'${context.label || context.name}' no puede usarse como lista de precios para los productos.`);
-    if (!Number.isInteger(group.min_items) || group.min_items < 0) errors.push("El mínimo de renglones debe ser un entero mayor o igual que cero.");
-    if (group.max_items != null && (!Number.isInteger(group.max_items) || group.max_items < 1)) {
-      errors.push("El máximo de renglones debe ser un entero mayor o igual que uno.");
-    } else if (group.max_items != null && group.max_items < group.min_items) {
-      errors.push("El máximo de renglones debe ser mayor o igual que el mínimo.");
-    }
-    if (group.fields.length === 0) errors.push(`El grupo '${groupName}' requiere al menos un dato por renglón.`);
-    const fieldNames = new Set<string>();
-    let productSelects = 0;
-    for (const [index, field] of group.fields.entries()) {
-      const fieldName = field.label.trim() || `dato ${index + 1}`;
-      if (!field.label.trim()) errors.push(`El dato ${index + 1} de cada renglón requiere un nombre visible.`);
-      else if (!COLUMN_KEY_PATTERN.test(field.name)) errors.push(`El dato '${fieldName}' tiene un identificador interno no válido.`);
-      const folded = field.name.toLocaleLowerCase();
-      if (folded && fieldNames.has(folded)) errors.push(`El dato '${fieldName}' está duplicado.`);
-      fieldNames.add(folded);
-      const configuration = field.configuration_json ?? {};
-      if (field.input_type === "select") {
-        productSelects += 1;
-        if (
-          !("options_source" in configuration) || configuration.options_source !== "products_by_price_list"
-          || !("context_parameter" in configuration) || configuration.context_parameter !== group.context_parameter
-          || field.data_type !== "integer"
-        ) {
-          errors.push(`'${fieldName}' debe elegirse entre los productos de la lista de precios.`);
-        }
-      } else if ((field.data_type === "integer" || field.data_type === "decimal") && !("options_source" in configuration)) {
-        const minimum = configuration.minimum == null ? null : Number(configuration.minimum);
-        const maximum = configuration.maximum == null ? null : Number(configuration.maximum);
-        if (minimum != null && !Number.isFinite(minimum)) errors.push(`El valor mínimo de '${fieldName}' no es válido.`);
-        if (maximum != null && !Number.isFinite(maximum)) errors.push(`El valor máximo de '${fieldName}' no es válido.`);
-        if (field.data_type === "integer" && [minimum, maximum].some((bound) => bound != null && Number.isFinite(bound) && !Number.isInteger(bound))) {
-          errors.push(`Los límites de '${fieldName}' deben ser enteros, o permite decimales.`);
-        }
-        if (minimum != null && maximum != null && minimum > maximum) errors.push(`El valor mínimo de '${fieldName}' no puede superar su máximo.`);
-      }
-    }
-    if (productSelects !== 1) errors.push(`El grupo '${groupName}' requiere exactamente un dato de tipo Producto.`);
-  }
+  errors.push(...validateParameterGroups(parameterGroups, parameters));
 
   const fieldKeys = new Set(fields.map((field) => field.key));
   const fieldsByKey = new Map(fields.map((field) => [field.key, field]));
@@ -667,6 +617,70 @@ export function validateBuilderForm(
 
   errors.push(...validateSummaries(layout.totals, columnsByKey, parametersByName));
 
+  return errors;
+}
+
+/**
+ * The repeatable-row half of `validateBuilderForm`, also run on its own by
+ * "Fuente y entradas" (Frontend #41B), where the groups are saved without
+ * touching columns or layout.
+ */
+export function validateParameterGroups(
+  parameterGroups: ReportParameterGroup[],
+  parameters: ReportParameter[],
+): string[] {
+  const errors: string[] = [];
+  // Repeatable rows speak business language: internal names are hidden, so a
+  // message names what the admin sees (the visible names) whenever it can.
+  for (const group of parameterGroups) {
+    const groupName = group.label.trim() || "Productos por renglón";
+    if (!group.label.trim()) errors.push("Los productos por renglón requieren un nombre visible.");
+    else if (!COLUMN_KEY_PATTERN.test(group.name)) errors.push(`El grupo '${groupName}' tiene un identificador interno no válido.`);
+    if (parameters.some((parameter) => parameter.name.toLocaleLowerCase() === group.name.toLocaleLowerCase())) {
+      errors.push(`El grupo '${groupName}' usa el mismo identificador que un dato del reporte; cámbiale el nombre visible.`);
+    }
+    const context = parameters.find((parameter) => parameter.name === group.context_parameter);
+    if (!context) errors.push("Para usar productos por renglón, la fuente necesita una lista de precios.");
+    else if (context.data_type !== "integer") errors.push(`'${context.label || context.name}' no puede usarse como lista de precios para los productos.`);
+    if (!Number.isInteger(group.min_items) || group.min_items < 0) errors.push("El mínimo de renglones debe ser un entero mayor o igual que cero.");
+    if (group.max_items != null && (!Number.isInteger(group.max_items) || group.max_items < 1)) {
+      errors.push("El máximo de renglones debe ser un entero mayor o igual que uno.");
+    } else if (group.max_items != null && group.max_items < group.min_items) {
+      errors.push("El máximo de renglones debe ser mayor o igual que el mínimo.");
+    }
+    if (group.fields.length === 0) errors.push(`El grupo '${groupName}' requiere al menos un dato por renglón.`);
+    const fieldNames = new Set<string>();
+    let productSelects = 0;
+    for (const [index, field] of group.fields.entries()) {
+      const fieldName = field.label.trim() || `dato ${index + 1}`;
+      if (!field.label.trim()) errors.push(`El dato ${index + 1} de cada renglón requiere un nombre visible.`);
+      else if (!COLUMN_KEY_PATTERN.test(field.name)) errors.push(`El dato '${fieldName}' tiene un identificador interno no válido.`);
+      const folded = field.name.toLocaleLowerCase();
+      if (folded && fieldNames.has(folded)) errors.push(`El dato '${fieldName}' está duplicado.`);
+      fieldNames.add(folded);
+      const configuration = field.configuration_json ?? {};
+      if (field.input_type === "select") {
+        productSelects += 1;
+        if (
+          !("options_source" in configuration) || configuration.options_source !== "products_by_price_list"
+          || !("context_parameter" in configuration) || configuration.context_parameter !== group.context_parameter
+          || field.data_type !== "integer"
+        ) {
+          errors.push(`'${fieldName}' debe elegirse entre los productos de la lista de precios.`);
+        }
+      } else if ((field.data_type === "integer" || field.data_type === "decimal") && !("options_source" in configuration)) {
+        const minimum = configuration.minimum == null ? null : Number(configuration.minimum);
+        const maximum = configuration.maximum == null ? null : Number(configuration.maximum);
+        if (minimum != null && !Number.isFinite(minimum)) errors.push(`El valor mínimo de '${fieldName}' no es válido.`);
+        if (maximum != null && !Number.isFinite(maximum)) errors.push(`El valor máximo de '${fieldName}' no es válido.`);
+        if (field.data_type === "integer" && [minimum, maximum].some((bound) => bound != null && Number.isFinite(bound) && !Number.isInteger(bound))) {
+          errors.push(`Los límites de '${fieldName}' deben ser enteros, o permite decimales.`);
+        }
+        if (minimum != null && maximum != null && minimum > maximum) errors.push(`El valor mínimo de '${fieldName}' no puede superar su máximo.`);
+      }
+    }
+    if (productSelects !== 1) errors.push(`El grupo '${groupName}' requiere exactamente un dato de tipo Producto.`);
+  }
   return errors;
 }
 

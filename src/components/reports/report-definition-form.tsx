@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CircleCheck, Database, Loader2, Save } from "lucide-react";
+import { CircleCheck, Database, Loader2, RotateCcw, Save } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportParameterEditor } from "@/components/reports/report-parameter-editor";
+import { ReportParameterGroupEditor } from "@/components/reports/report-parameter-group-editor";
+import type { ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { createReport, listReportDataSources, updateReport } from "@/lib/api/reports";
+import { validateParameterGroups } from "@/lib/reports/report-builder";
+import { newParameterGroup, priceListParameters } from "@/lib/reports/report-group-fields";
+import {
+  blockedParameterChange,
+  groupFieldUsages,
+  parameterDependencyErrors,
+} from "@/lib/reports/report-input-dependencies";
 import {
   emptyReportForm,
   mergeSourceParameters,
@@ -23,7 +32,24 @@ import {
   validateReportForm,
   type ReportFormValue,
 } from "@/lib/reports/report-form";
-import type { ReportAdminDefinition, ReportDataSource } from "@/types/api";
+import type { ReportAdminDefinition, ReportDataSource, ReportParameter, ReportParameterGroup } from "@/types/api";
+
+const NO_GROUPS: ReportParameterGroup[] = [];
+
+const SOURCE_CHANGE_CONFIRMATION = "Cambiar la fuente reemplazará los parámetros exigidos por la fuente anterior. Los parámetros propios del reporte se conservan.";
+const DROP_GROUP_CONFIRMATION = "La nueva fuente no utiliza productos por renglón. Esta configuración se descartará.";
+const SOURCE_CHANGE_BLOCKED = "Este reporte utiliza Productos por renglón. Actualmente no puede cambiarse a una fuente que no admita renglones.";
+
+/**
+ * Set when the definition was saved but its repeatable groups were not
+ * (Frontend #41B): retrying only repeats the builder PUT — never the POST
+ * (it would answer 409) nor the PATCH (already applied).
+ */
+interface PendingGroups {
+  report: ReportAdminDefinition;
+  created: boolean;
+  error: string;
+}
 
 const CONTROL_CLASS =
   "h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
@@ -33,6 +59,8 @@ export function ReportDefinitionForm({
   section = "all",
   createRedirectPath,
   onSaved,
+  builder,
+  onDefinitionSaved,
 }: {
   report?: ReportAdminDefinition | null;
   /**
@@ -47,6 +75,19 @@ export function ReportDefinitionForm({
   createRedirectPath?: (code: string) => string;
   /** Fires after a successful create/update, in addition to the router navigation this already does. */
   onSaved?: (saved: ReportAdminDefinition) => void;
+  /**
+   * The wizard-owned builder (Frontend #41B). When given, "Fuente y entradas"
+   * also configures the repeatable rows (`builder.draft.parameterGroups`),
+   * saves them right after the definition and protects every parameter the
+   * saved builder already uses. Without it, the form behaves as before.
+   */
+  builder?: ReportBuilderDraft;
+  /**
+   * Fires as soon as the definition itself is persisted — before the groups
+   * are, and even if saving them then fails — so the caller never keeps a
+   * stale report. `onSaved` still fires only once everything is saved.
+   */
+  onDefinitionSaved?: (saved: ReportAdminDefinition) => void;
 }) {
   const creating = report == null;
   const router = useRouter();
@@ -60,6 +101,9 @@ export function ReportDefinitionForm({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const [dependencyError, setDependencyError] = useState<string | null>(null);
+  const [sourceBlock, setSourceBlock] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingGroups | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -84,6 +128,35 @@ export function ReportDefinitionForm({
    */
   const contractNames = sourceParameterNames(selectedSource);
 
+  const capabilities = selectedSource?.capabilities ?? unavailableCurrentSource?.capabilities ?? [];
+  /** Repeatable rows are configured here only inside the wizard, for a source that has them. */
+  const supportsRows = builder != null && capabilities.includes("REPEATABLE_ROWS");
+  const persisted = builder?.persisted ?? null;
+  const groups = builder?.draft?.parameterGroups ?? NO_GROUPS;
+  const activeGroups = supportsRows ? groups : NO_GROUPS;
+  const updateDraft = builder?.updateDraft;
+
+  // A source with repeatable rows demands exactly one group: start it from the
+  // canonical shape (#40) as soon as there is a price list to filter by.
+  const needsGroup = supportsRows && builder?.draft != null && groups.length === 0
+    && priceListParameters(value.parameters).length > 0;
+  useEffect(() => {
+    if (!needsGroup || updateDraft == null) return;
+    updateDraft((draft) => draft.parameterGroups.length > 0 ? draft : { ...draft, parameterGroups: [newParameterGroup(value.parameters)] });
+  }, [needsGroup, updateDraft, value.parameters]);
+
+  function changeGroups(next: ReportParameterGroup[]) {
+    updateDraft?.((draft) => ({ ...draft, parameterGroups: next }));
+  }
+
+  /** Refuses a parameter edit that would break a saved column, formula or the groups. */
+  function changeParameters(next: ReportParameter[]) {
+    const blocked = builder ? blockedParameterChange(value.parameters, next, persisted, activeGroups) : null;
+    setDependencyError(blocked);
+    if (blocked) return;
+    change({ parameters: next });
+  }
+
   function change(patch: Partial<ReportFormValue>) {
     setValue((current) => ({ ...current, ...patch }));
     setSuccessMessage(null);
@@ -92,21 +165,81 @@ export function ReportDefinitionForm({
   function changeSource(rawId: string) {
     const next = sources?.find((source) => source.id === Number(rawId));
     if (!next || next.id === value.data_source_id) return;
-    // Only the source half is replaced; the report's own parameters survive.
-    const previous = contractNames;
-    if (previous.length > 0 && !globalThis.confirm("Cambiar la fuente reemplazará los parámetros exigidos por la fuente anterior. Los parámetros propios del reporte se conservan. ¿Continuar?")) {
+    const dropsGroups = builder != null && groups.length > 0 && !next.capabilities.includes("REPEATABLE_ROWS");
+    // The backend re-validates saved groups on PATCH and demands exactly one
+    // on a repeatable source, so a saved group cannot leave either way.
+    if (dropsGroups && (persisted?.parameter_groups.length ?? 0) > 0) {
+      setSourceBlock(SOURCE_CHANGE_BLOCKED);
       return;
     }
-    change({
-      data_source_id: next.id,
-      parameters: mergeSourceParameters(value.parameters, next, previous),
-    });
+    // Only the source half is replaced; the report's own parameters survive.
+    const previous = contractNames;
+    const parameters = mergeSourceParameters(value.parameters, next, previous);
+    const blocked = builder ? blockedParameterChange(value.parameters, parameters, persisted, dropsGroups ? NO_GROUPS : activeGroups) : null;
+    if (blocked) {
+      setSourceBlock(blocked);
+      return;
+    }
+    const warnings = [
+      ...(previous.length > 0 ? [SOURCE_CHANGE_CONFIRMATION] : []),
+      ...(dropsGroups ? [DROP_GROUP_CONFIRMATION] : []),
+    ];
+    if (warnings.length > 0 && !globalThis.confirm(`${warnings.join(" ")} ¿Continuar?`)) {
+      return;
+    }
+    setSourceBlock(null);
+    if (dropsGroups) changeGroups([]);
+    change({ data_source_id: next.id, parameters });
+  }
+
+  function finishCreate(created: ReportAdminDefinition) {
+    onSaved?.(created);
+    router.push(createRedirectPath ? createRedirectPath(created.code) : `/administracion/reportes/${encodeURIComponent(created.code)}/configurar`);
+  }
+
+  function finishUpdate(updated: ReportAdminDefinition) {
+    setSuccessMessage("La configuración se guardó con la confirmación del backend.");
+    onSaved?.(updated);
+    router.refresh();
+  }
+
+  async function retryGroups() {
+    if (pending == null || builder == null || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await builder.saveGroups(pending.created ? pending.report.code : undefined);
+      const { report: saved, created } = pending;
+      setPending(null);
+      if (created) finishCreate(saved);
+      else finishUpdate(saved);
+    } catch (error) {
+      setPending({ ...pending, error: getUserErrorMessage(error, "No se pudieron guardar los productos por renglón.") });
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (savingRef.current) return;
+    if (pending) {
+      await retryGroups();
+      return;
+    }
     const validationErrors = validateReportForm(value, creating, selectedSource);
+    if (supportsRows) {
+      if (groups.length === 0) validationErrors.push("Para usar productos por renglón, la fuente necesita una lista de precios.");
+      validationErrors.push(...validateParameterGroups(groups, value.parameters));
+    }
+    if (builder) {
+      // Only what this edit would newly break: a saved builder that is already
+      // inconsistent must not lock the admin out of the definition.
+      const before = new Set(parameterDependencyErrors(savedParameters, { persisted, groups: activeGroups, labelsFrom: savedParameters }));
+      validationErrors.push(...parameterDependencyErrors(value.parameters, { persisted, groups: activeGroups, labelsFrom: savedParameters })
+        .filter((message) => !before.has(message)));
+    }
     setErrors(validationErrors);
     if (validationErrors.length > 0) return;
     savingRef.current = true;
@@ -116,16 +249,35 @@ export function ReportDefinitionForm({
     try {
       if (creating) {
         const created = await createReport(toReportRequest(value));
-        onSaved?.(created);
-        router.push(createRedirectPath ? createRedirectPath(created.code) : `/administracion/reportes/${encodeURIComponent(created.code)}/configurar`);
+        if (supportsRows) {
+          // The report exists from here on: a failure below must never lead to
+          // a second POST, only to retrying the builder PUT on this code.
+          try {
+            await builder!.saveGroups(created.code);
+          } catch (error) {
+            setPending({ report: created, created: true, error: getUserErrorMessage(error, "No se pudieron guardar los productos por renglón.") });
+            return;
+          }
+        }
+        finishCreate(created);
         return;
       }
       const updated = await updateReport(value.code, toReportUpdate(value));
       setValue(reportFormFromDefinition(updated));
       setSavedParameters(updated.parameters);
-      setSuccessMessage("La configuración se guardó con la confirmación del backend.");
-      onSaved?.(updated);
-      router.refresh();
+      onDefinitionSaved?.(updated);
+      // PATCH first: the builder PUT validates the groups against the
+      // parameters the backend has *persisted*.
+      if (supportsRows && builder!.groupsDirty) {
+        try {
+          await builder!.saveGroups();
+        } catch (error) {
+          setPending({ report: updated, created: false, error: getUserErrorMessage(error, "No se pudieron guardar los productos por renglón.") });
+          router.refresh();
+          return;
+        }
+      }
+      finishUpdate(updated);
     } catch (error) {
       setSubmitError(getUserErrorMessage(error, "No se pudo guardar el reporte. Tus cambios siguen en el formulario."));
     } finally {
@@ -143,6 +295,21 @@ export function ReportDefinitionForm({
         </Alert>
       )}
       {submitError && <ErrorAlert title="No se guardó el reporte" message={submitError} />}
+      {pending && (
+        <Alert variant="destructive">
+          <AlertTitle>
+            {pending.created
+              ? "El reporte se creó, pero no se pudieron guardar los productos por renglón."
+              : "Los datos del reporte se guardaron, pero los productos por renglón quedaron pendientes."}
+          </AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-2">
+            <span>{pending.error}</span>
+            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => { void retryGroups(); }}>
+              {saving ? <Loader2 className="animate-spin" /> : <RotateCcw />} Reintentar
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
       {successMessage && (
         <Alert><CircleCheck /><AlertTitle>Reporte actualizado</AlertTitle><AlertDescription>{successMessage}</AlertDescription></Alert>
       )}
@@ -190,6 +357,9 @@ export function ReportDefinitionForm({
             <CardHeader><CardTitle className="flex items-center gap-2"><Database /> Fuente de datos</CardTitle></CardHeader>
             <CardContent className="flex flex-col gap-4">
               {sourceError && <ErrorAlert title="No se cargaron las fuentes" message={sourceError} />}
+              {sourceBlock && (
+                <Alert variant="destructive"><AlertDescription>{sourceBlock}</AlertDescription></Alert>
+              )}
               <div className="grid max-w-xl gap-1.5">
                 <Label htmlFor="report-data-source">Fuente de datos</Label>
                 <select
@@ -240,16 +410,43 @@ export function ReportDefinitionForm({
                 sourceParameterNames={contractNames}
                 savedParameters={savedParameters}
                 reportCode={report?.code}
-                onChange={(parameters) => change({ parameters })}
+                onChange={changeParameters}
               />
+              {dependencyError && (
+                <Alert variant="destructive" className="mt-4"><AlertDescription>{dependencyError}</AlertDescription></Alert>
+              )}
             </CardContent>
           </Card>
+
+          {supportsRows && builder?.draft != null && (
+            <Card>
+              <CardHeader><CardTitle>Productos por renglón</CardTitle></CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <p className="text-sm text-muted-foreground">
+                  Define los datos que el usuario capturará una vez por producto. El precio y la descripción se toman de
+                  la lista seleccionada.
+                </p>
+                <ReportParameterGroupEditor
+                  groups={groups}
+                  parameters={value.parameters}
+                  savedGroups={persisted?.parameter_groups ?? NO_GROUPS}
+                  referencedSources={[...(persisted?.columns ?? []), ...(builder.draft.columns)]
+                    .flatMap((column) => column.source_parameter?.includes(".") ? [column.source_parameter] : [])}
+                  fieldUsages={groupFieldUsages(persisted)}
+                  required
+                  disabled={saving || pending?.created === true}
+                  onChange={changeGroups}
+                />
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
 
       {section !== "information" && <div className="flex justify-end">
-        <Button type="submit" disabled={saving || sources == null}>
-          {saving ? <Loader2 className="animate-spin" /> : <Save />}{saving ? "Guardando..." : creating ? "Crear reporte" : "Guardar cambios"}
+        <Button type="submit" disabled={saving || sources == null || pending != null || builder?.loading === true}>
+          {saving ? <Loader2 className="animate-spin" /> : <Save />}
+          {saving ? "Guardando..." : builder ? "Guardar y continuar" : creating ? "Crear reporte" : "Guardar cambios"}
         </Button>
       </div>}
     </form>

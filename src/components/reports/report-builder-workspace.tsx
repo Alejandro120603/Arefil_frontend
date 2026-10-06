@@ -6,7 +6,6 @@ import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportBuilderPreviewTable } from "@/components/reports/report-builder-preview-table";
 import { ReportColumnEditor } from "@/components/reports/report-column-editor";
 import { ReportExcelLayoutEditor } from "@/components/reports/report-excel-layout-editor";
-import { ReportParameterGroupEditor } from "@/components/reports/report-parameter-group-editor";
 import { ReportRepeatableParameters } from "@/components/reports/report-repeatable-parameters";
 import { ReportSummaryEditor } from "@/components/reports/report-summary-editor";
 import { ReportRuntimeParameters } from "@/components/reports/report-runtime-parameters";
@@ -48,7 +47,6 @@ export function ReportBuilderWorkspace({
   code,
   builder,
   parameters,
-  dataSourceCapabilities,
   onSaved,
 }: {
   code: string;
@@ -59,12 +57,14 @@ export function ReportBuilderWorkspace({
    */
   builder: ReportBuilderDraft;
   parameters: ReportParameter[];
-  dataSourceCapabilities: string[];
   onSaved?: () => void;
 }) {
-  const { draft: value, fields, persisted, loadError, catalogError, dirty, saving, updateDraft } = builder;
-  /** The repeatable groups as last persisted: their internal names are frozen. */
-  const savedGroups = persisted?.parameter_groups ?? EMPTY_GROUPS;
+  const { draft: value, fields, loadError, catalogError, dirty, saving, updateDraft } = builder;
+  /**
+   * The repeatable groups are edited in "Fuente y entradas" (Frontend #41B);
+   * here they only feed the columns ("Dato capturado") and the preview rows.
+   */
+  const groups = value?.parameterGroups ?? EMPTY_GROUPS;
 
   const [errors, setErrors] = useState<string[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -74,15 +74,14 @@ export function ReportBuilderWorkspace({
     () => initialRuntimeValues(parameters),
   );
   const [runtimeGroupValues, setRuntimeGroupValues] = useState<RuntimeGroupValues>(
-    () => initialRuntimeGroupValues(savedGroups),
+    () => initialRuntimeGroupValues(groups),
   );
-  // Every time the backend confirms a builder (load or save), the runtime rows
-  // restart from its groups — exactly what the workspace did when it loaded
-  // the builder itself.
-  const [runtimeSeed, setRuntimeSeed] = useState(persisted);
-  if (runtimeSeed !== persisted) {
-    setRuntimeSeed(persisted);
-    setRuntimeGroupValues(initialRuntimeGroupValues(savedGroups));
+  // Whenever the groups change (loaded, saved, or edited in "Fuente y
+  // entradas"), the preview rows restart from them, as they always did.
+  const [runtimeSeed, setRuntimeSeed] = useState(groups);
+  if (runtimeSeed !== groups) {
+    setRuntimeSeed(groups);
+    setRuntimeGroupValues(initialRuntimeGroupValues(groups));
   }
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({});
   const [runtimeGroupErrors, setRuntimeGroupErrors] = useState<Record<string, string>>({});
@@ -115,12 +114,6 @@ export function ReportBuilderWorkspace({
 
   function changeColumns(columns: ReportColumn[]) {
     updateDraft((current) => ({ ...current, columns, layout: pruneTotals(current.layout, columns) }));
-    edited();
-  }
-
-  function changeParameterGroups(parameterGroups: ReportParameterGroup[]) {
-    updateDraft((current) => ({ ...current, parameterGroups }));
-    setRuntimeGroupValues(initialRuntimeGroupValues(parameterGroups));
     edited();
   }
 
@@ -205,23 +198,6 @@ export function ReportBuilderWorkspace({
         </Alert>
       )}
 
-
-      {dataSourceCapabilities.includes("REPEATABLE_ROWS") && (
-        <Card>
-          <CardHeader><CardTitle>Productos por renglón</CardTitle></CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <p className="text-sm text-muted-foreground">Define los datos que el usuario capturará una vez por producto. El precio y la descripción se toman de la lista seleccionada.</p>
-            <ReportParameterGroupEditor
-              groups={value.parameterGroups}
-              parameters={parameters}
-              savedGroups={savedGroups}
-              referencedSources={value.columns.flatMap((column) => column.source_parameter?.includes(".") ? [column.source_parameter] : [])}
-              disabled={saving}
-              onChange={changeParameterGroups}
-            />
-          </CardContent>
-        </Card>
-      )}
 
       <Card>
         <CardHeader><CardTitle>Columnas del reporte</CardTitle></CardHeader>

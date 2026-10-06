@@ -115,6 +115,40 @@ describe("useReportBuilderDraft", () => {
     expect(result.current.saving).toBe(false);
   });
 
+  it("saves only the groups, over the persisted columns and layout, keeping unsaved column edits in the draft", async () => {
+    const { result } = await loaded();
+    act(() => result.current.updateDraft((draft) => ({
+      columns: draft.columns.map((column) => ({ ...column, label: "Sin guardar" })),
+      layout: { ...draft.layout, sheet_name: "Hoja sin guardar" },
+      parameterGroups: draft.parameterGroups.map((group) => ({ ...group, label: "Artículos" })),
+    })));
+    expect(result.current.groupsDirty).toBe(true);
+    const persistedForm = builderFormFromDefinition(BUILDER);
+    saveReportBuilder.mockImplementation(async (_code, request) => ({ ...BUILDER, parameter_groups: request.parameter_groups }));
+
+    await act(async () => { await result.current.saveGroups(); });
+
+    expect(saveReportBuilder).toHaveBeenCalledWith("COTIZACION", toBuilderRequest({
+      ...persistedForm, parameterGroups: persistedForm.parameterGroups.map((group) => ({ ...group, label: "Artículos" })),
+    }));
+    expect(result.current.persisted!.parameter_groups[0].label).toBe("Artículos");
+    expect(result.current.draft!.columns[0].label).toBe("Sin guardar");
+    expect(result.current.draft!.layout.sheet_name).toBe("Hoja sin guardar");
+    expect(result.current.groupsDirty).toBe(false);
+    expect(result.current.dirty).toBe(true);
+  });
+
+  it("saves a new report's groups on the code just created, from no columns and the default layout", async () => {
+    const { result } = renderHook(() => useReportBuilderDraft(null));
+    act(() => result.current.updateDraft((draft) => ({ ...draft, parameterGroups: BUILDER.parameter_groups })));
+    saveReportBuilder.mockResolvedValue(BUILDER);
+
+    await act(async () => { await result.current.saveGroups("NUEVO"); });
+
+    expect(saveReportBuilder).toHaveBeenCalledWith("NUEVO", toBuilderRequest({ ...emptyBuilderForm(), parameterGroups: BUILDER.parameter_groups }));
+    expect(getReportBuilder).not.toHaveBeenCalled();
+  });
+
   it("keeps the draft and the last persisted builder when saving fails", async () => {
     saveReportBuilder.mockRejectedValue(new ApiError(422, "La columna 'x' está duplicada."));
     const { result } = await loaded();
