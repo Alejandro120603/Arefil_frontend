@@ -16,6 +16,7 @@ import type {
   ReportExcelTemplateInspection,
   ReportExcelTemplateUpload,
   ReportUpdateRequest,
+  ReportInputsUpdateRequest,
   ExcelMappingsRequest,
   ExcelMappingsResponse,
   ExcelTemplateRestoreRequest,
@@ -54,6 +55,15 @@ export function updateReport(
   options?: RequestOptions,
 ): Promise<ReportDefinition> {
   return browserApiClient.apiPatchJson<ReportDefinition>(reportPath(code), request, options);
+}
+
+/** Atomically replaces source, scalar parameters, and repeatable groups. */
+export function updateReportInputs(
+  code: string,
+  request: ReportInputsUpdateRequest,
+  options?: RequestOptions,
+): Promise<ReportBuilderDefinition> {
+  return browserApiClient.apiPutJson<ReportBuilderDefinition>(reportPath(code, "/inputs"), request, options);
 }
 
 export function getAdminReport(code: string, options?: RequestOptions): Promise<ReportAdminDefinition> {

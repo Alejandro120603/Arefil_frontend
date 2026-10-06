@@ -1,6 +1,7 @@
 import { formulaReferences, isNumericDataType, normalizeSummaries } from "@/lib/reports/report-builder";
 import type {
   ReportBuilderDefinition,
+  ReportDataSource,
   ReportParameter,
   ReportParameterGroup,
 } from "@/types/api";
@@ -11,9 +12,10 @@ import type {
  * columns or formulas, so removing or retyping a parameter they use would be
  * accepted and only fail later. These rules catch it first, in business terms.
  *
- * Only the *persisted* builder counts: that is what a definition save can
- * break. Excel mappings (`{{parameters.<name>}}`) are not inspected — that
- * would need the template — and remain the backend's to report.
+ * Only the *persisted* builder counts: that is what an inputs save can break.
+ * Excel mappings (`{{parameters.<name>}}` / `{{rows.<name>}}`) are not
+ * inspected by this screen or Backend #36; mapping protection remains a
+ * separate follow-up.
  */
 interface ParameterRequirement {
   name: string;
@@ -139,4 +141,131 @@ export function groupFieldUsages(persisted: ReportBuilderDefinition | null): Map
     if (!usages.has(column.source_parameter)) usages.set(column.source_parameter, column.label || column.key);
   }
   return usages;
+}
+
+function sourceChangeMessage(kind: "Columna" | "Cálculo" | "Total", label: string, reason: string): string {
+  return `${kind} ${quoted(label)} — ${reason}`;
+}
+
+/**
+ * Human-facing reasons why the persisted builder cannot survive an inputs
+ * change. FIELD compatibility comes from the target source metadata; formulas
+ * reuse the builder parser and follow invalid persisted columns transitively.
+ * XLSX mappings are deliberately outside this check.
+ */
+export function sourceChangeDependencyErrors({
+  persisted,
+  targetSource,
+  parameters,
+  groups,
+}: {
+  persisted: ReportBuilderDefinition | null;
+  targetSource: ReportDataSource;
+  parameters: ReportParameter[];
+  groups: ReportParameterGroup[];
+}): string[] {
+  if (persisted == null) return [];
+  const messages: string[] = [];
+  const add = (message: string) => { if (!messages.includes(message)) messages.push(message); };
+  const parametersByName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+  const groupedByName = new Map<string, { field: ReportParameterGroup["fields"][number]; group: ReportParameterGroup }>(groups.flatMap((group) => group.fields.map((field) => [
+    `${group.name}.${field.name}`,
+    { field, group },
+  ] as const)));
+  const fieldsByKey = new Map(targetSource.fields.map((field) => [field.key, field]));
+  const columnsByKey = new Map(persisted.columns.map((column) => [column.key, column]));
+  const invalidColumns = new Set<string>();
+
+  for (const column of persisted.columns) {
+    const label = column.label || column.key;
+    if (column.column_type === "FIELD") {
+      const field = fieldsByKey.get(column.source_field ?? "");
+      if (field == null) {
+        invalidColumns.add(column.key);
+        add(sourceChangeMessage("Columna", label, "ese dato no existe en la nueva fuente."));
+      } else if (field.data_type !== column.data_type) {
+        invalidColumns.add(column.key);
+        add(sourceChangeMessage("Columna", label, "ese dato cambia a un tipo incompatible en la nueva fuente."));
+      }
+      continue;
+    }
+    if (column.column_type !== "PARAMETER") continue;
+    const source = column.source_parameter ?? "";
+    if (source.includes(".")) {
+      const grouped = groupedByName.get(source);
+      if (grouped == null) {
+        invalidColumns.add(column.key);
+        add(sourceChangeMessage("Columna", label, "usa Productos por renglón, que se quitarán."));
+      } else if (grouped.field.data_type !== column.data_type) {
+        invalidColumns.add(column.key);
+        add(sourceChangeMessage("Columna", label, `usa ${quoted(grouped.field.label || grouped.field.name)} con un tipo incompatible.`));
+      }
+      continue;
+    }
+    const parameter = parametersByName.get(source);
+    if (parameter == null) {
+      invalidColumns.add(column.key);
+      const previous = persisted.report.parameters.find((item) => item.name === source);
+      add(sourceChangeMessage("Columna", label, `usa el dato ${quoted(previous?.label || source)}, que se quitará.`));
+    } else if (parameter.data_type !== column.data_type) {
+      invalidColumns.add(column.key);
+      add(sourceChangeMessage("Columna", label, `usa el dato ${quoted(parameter.label || parameter.name)} con un tipo incompatible.`));
+    }
+  }
+
+  for (const column of persisted.columns) {
+    if (column.column_type !== "FORMULA") continue;
+    const label = column.label || column.key;
+    for (const reference of formulaReferences(column.formula_definition ?? "")) {
+      const referencedColumn = columnsByKey.get(reference);
+      if (referencedColumn != null) {
+        if (invalidColumns.has(reference)) {
+          add(sourceChangeMessage("Cálculo", label, `depende de la columna ${quoted(referencedColumn.label || referencedColumn.key)}, que deja de ser válida.`));
+        } else if (!isNumericDataType(referencedColumn.data_type)) {
+          add(sourceChangeMessage("Cálculo", label, `depende de la columna no numérica ${quoted(referencedColumn.label || referencedColumn.key)}.`));
+        }
+        continue;
+      }
+      const parameter = parametersByName.get(reference);
+      if (parameter == null) {
+        const previous = persisted.report.parameters.find((item) => item.name === reference);
+        add(sourceChangeMessage("Cálculo", label, `usa el dato ${quoted(previous?.label || reference)}, que se quitará.`));
+      } else if (!isNumericDataType(parameter.data_type)) {
+        add(sourceChangeMessage("Cálculo", label, `usa el dato no numérico ${quoted(parameter.label || parameter.name)}.`));
+      }
+    }
+  }
+
+  const summaries = normalizeSummaries(persisted.excel_layout?.totals ?? [], persisted.columns);
+  const summaryKeys = new Set(summaries.map((summary) => summary.key));
+  for (const summary of summaries) {
+    const label = summary.label || summary.key;
+    if (summary.operation === "SUM") {
+      const column = columnsByKey.get(summary.column_key ?? "");
+      if (column == null || invalidColumns.has(column.key)) {
+        add(sourceChangeMessage("Total", label, `depende de la columna ${quoted(column?.label || summary.column_key || "desconocida")}, que deja de ser válida.`));
+      }
+      continue;
+    }
+    for (const reference of formulaReferences(summary.formula_definition ?? "")) {
+      if (summaryKeys.has(reference)) continue;
+      const column = columnsByKey.get(reference);
+      if (column != null) {
+        if (invalidColumns.has(reference)) {
+          add(sourceChangeMessage("Total", label, `depende de la columna ${quoted(column.label || column.key)}, que deja de ser válida.`));
+        } else if (!isNumericDataType(column.data_type)) {
+          add(sourceChangeMessage("Total", label, `depende de la columna no numérica ${quoted(column.label || column.key)}.`));
+        }
+        continue;
+      }
+      const parameter = parametersByName.get(reference);
+      if (parameter == null) {
+        const previous = persisted.report.parameters.find((item) => item.name === reference);
+        add(sourceChangeMessage("Total", label, `usa el dato ${quoted(previous?.label || reference)}, que se quitará.`));
+      } else if (!isNumericDataType(parameter.data_type)) {
+        add(sourceChangeMessage("Total", label, `usa el dato no numérico ${quoted(parameter.label || parameter.name)}.`));
+      }
+    }
+  }
+  return messages;
 }

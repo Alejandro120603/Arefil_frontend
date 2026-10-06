@@ -4,11 +4,14 @@ import {
   withParameterShape,
   type ReportParameterKind,
 } from "@/lib/reports/report-parameter-kinds";
+import { toParameterGroupsRequest } from "@/lib/reports/report-builder";
 import type {
   ReportAdminDefinition,
   ReportCreateRequest,
   ReportDataSource,
+  ReportInputsUpdateRequest,
   ReportParameter,
+  ReportParameterGroup,
   ReportParameterDataType,
   ReportParameterInputType,
   ReportUpdateRequest,
@@ -267,6 +270,13 @@ export function toReportUpdate(value: ReportFormValue): ReportUpdateRequest {
     enabled: value.enabled,
     parameters: request.parameters,
   };
+}
+
+export function toReportInputsUpdate(
+  value: ReportFormValue,
+  parameterGroups: ReportParameterGroup[],
+): ReportInputsUpdateRequest {
+  return { ...toReportUpdate(value), parameter_groups: toParameterGroupsRequest(parameterGroups) };
 }
 
 export function coerceRuntimeValue(parameter: ReportParameter, raw: string | boolean): unknown {

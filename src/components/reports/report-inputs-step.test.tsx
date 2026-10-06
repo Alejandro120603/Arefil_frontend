@@ -22,13 +22,14 @@ import type {
  * the definition, with the real `useReportBuilderDraft` behind the form.
  */
 const {
-  push, refresh, createReport, updateReport, listReportDataSources, listAllReportParameterOptions,
+  push, refresh, createReport, updateReport, updateReportInputs, listReportDataSources, listAllReportParameterOptions,
   getReportBuilder, getReportFieldCatalog, saveReportBuilder,
 } = vi.hoisted(() => ({
   push: vi.fn(),
   refresh: vi.fn(),
   createReport: vi.fn(),
   updateReport: vi.fn(),
+  updateReportInputs: vi.fn(),
   listReportDataSources: vi.fn(),
   listAllReportParameterOptions: vi.fn(),
   getReportBuilder: vi.fn(),
@@ -37,7 +38,7 @@ const {
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
 vi.mock("@/lib/api/reports", () => ({
-  createReport, updateReport, listReportDataSources, listAllReportParameterOptions,
+  createReport, updateReport, updateReportInputs, listReportDataSources, listAllReportParameterOptions,
   getReportBuilder, getReportFieldCatalog, saveReportBuilder,
 }));
 
@@ -57,11 +58,25 @@ const TAX: ReportParameter = {
 
 const PRODUCT_SOURCE: ReportDataSource = {
   id: 1, code: "PRODUCT_CATALOG", name: "Catálogo de productos", description: null, enabled: true,
-  capabilities: [], parameters: [], fields: [],
+  capabilities: [], parameters: [], fields: [
+    { key: "product.part_number", label: "Número de parte", data_type: "string", group: "Producto", required_context: "product" },
+  ],
+};
+const SIMPLE_SOURCE: ReportDataSource = {
+  id: 2, code: "SIMPLE_TWO", name: "Fuente simple compatible", description: null, enabled: true,
+  capabilities: [], parameters: [], fields: PRODUCT_SOURCE.fields,
 };
 const QUOTATION_SOURCE: ReportDataSource = {
   id: 3, code: "QUOTATION_ROWS", name: "Renglones de cotización", description: null, enabled: true,
-  capabilities: ["REPEATABLE_ROWS"], parameters: [PRICE_LIST], fields: [],
+  capabilities: ["REPEATABLE_ROWS"], parameters: [PRICE_LIST], fields: PRODUCT_SOURCE.fields,
+};
+const INCOMPATIBLE_SOURCE: ReportDataSource = {
+  id: 4, code: "INCOMPATIBLE", name: "Fuente sin número de parte", description: null, enabled: true,
+  capabilities: [], parameters: [], fields: [],
+};
+const REPEATABLE_SOURCE: ReportDataSource = {
+  id: 5, code: "OTHER_ROWS", name: "Otros renglones", description: null, enabled: true,
+  capabilities: ["REPEATABLE_ROWS"], parameters: [REFERENCE_LIST], fields: PRODUCT_SOURCE.fields,
 };
 
 const ITEMS: ReportParameterGroup = {
@@ -104,7 +119,42 @@ const SAVED_BUILDER: ReportBuilderDefinition = {
   },
 };
 
-function Step({ report = null, onSaved = vi.fn() }: { report?: ReportAdminDefinition | null; onSaved?: (saved: ReportAdminDefinition) => void }) {
+function reportFor(
+  source: ReportDataSource,
+  parameters: ReportParameter[] = source.parameters,
+  groups: ReportParameterGroup[] = [],
+): ReportAdminDefinition {
+  return {
+    ...REPORT,
+    data_source_id: source.id,
+    data_source: source,
+    parameters,
+    parameter_groups: groups,
+  };
+}
+
+function builderFor(
+  report: ReportAdminDefinition,
+  columns: ReportColumn[] = [column({})],
+  groups: ReportParameterGroup[] = report.parameter_groups,
+): ReportBuilderDefinition {
+  return {
+    report,
+    columns,
+    parameter_groups: groups,
+    excel_layout: { ...emptyExcelLayout(), totals: [] },
+  };
+}
+
+function Step({
+  report = null,
+  onSaved = vi.fn(),
+  onGoToData,
+}: {
+  report?: ReportAdminDefinition | null;
+  onSaved?: (saved: ReportAdminDefinition) => void;
+  onGoToData?: () => void;
+}) {
   const builder = useReportBuilderDraft(report?.code ?? null);
   return (
     <>
@@ -113,6 +163,7 @@ function Step({ report = null, onSaved = vi.fn() }: { report?: ReportAdminDefini
         builder={builder}
         createRedirectPath={(code) => `/administracion/reportes/${code}/configurar?step=3`}
         onSaved={onSaved}
+        onGoToData={onGoToData}
       />
       {/* What "Datos del reporte" would see, and a way to leave unsaved edits there. */}
       <p data-testid="draft-columns">{builder.draft?.columns.map((item) => item.label).join("|")}</p>
@@ -144,11 +195,31 @@ function created(sourceId: number): ReportAdminDefinition {
 }
 
 beforeEach(() => {
-  listReportDataSources.mockResolvedValue([PRODUCT_SOURCE, QUOTATION_SOURCE]);
+  listReportDataSources.mockResolvedValue([PRODUCT_SOURCE, SIMPLE_SOURCE, QUOTATION_SOURCE, INCOMPATIBLE_SOURCE, REPEATABLE_SOURCE]);
   listAllReportParameterOptions.mockResolvedValue([{ value: 17, label: "Donaldson · 2026" }]);
   getReportBuilder.mockResolvedValue(SAVED_BUILDER);
   getReportFieldCatalog.mockResolvedValue([]);
   updateReport.mockImplementation(async (_code: string, request: { parameters: ReportParameter[] }) => ({ ...REPORT, parameters: request.parameters }));
+  updateReportInputs.mockImplementation(async (code: string, request: {
+    name: string; description: string | null; category: string | null; enabled: boolean;
+    data_source_id: number; parameters: ReportParameter[]; parameter_groups: ReportParameterGroup[];
+  }) => {
+    const source = [PRODUCT_SOURCE, SIMPLE_SOURCE, QUOTATION_SOURCE, INCOMPATIBLE_SOURCE, REPEATABLE_SOURCE]
+      .find((candidate) => candidate.id === request.data_source_id)!;
+    const savedReport = {
+      ...REPORT,
+      code,
+      name: request.name,
+      description: request.description,
+      category: request.category,
+      enabled: request.enabled,
+      data_source_id: source.id,
+      data_source: source,
+      parameters: request.parameters,
+      parameter_groups: request.parameter_groups,
+    };
+    return { ...SAVED_BUILDER, report: savedReport, parameter_groups: request.parameter_groups };
+  });
   saveReportBuilder.mockImplementation(async (code: string, request: { columns: ReportColumn[]; parameter_groups: ReportParameterGroup[] }) => ({
     ...SAVED_BUILDER, report: { ...REPORT, code }, columns: request.columns, parameter_groups: request.parameter_groups,
   }));
@@ -261,27 +332,38 @@ describe("Fuente y entradas — creating a report", () => {
 });
 
 describe("Fuente y entradas — editing a report", () => {
-  async function editing(report = REPORT) {
+  async function editing(report = REPORT, onGoToData?: () => void) {
     const onSaved = vi.fn();
-    render(<Step report={report} onSaved={onSaved} />);
+    render(<Step report={report} onSaved={onSaved} onGoToData={onGoToData} />);
     await screen.findByText("Productos por renglón");
     await waitFor(() => expect(screen.getByRole("option", { name: QUOTATION_SOURCE.name })).toBeTruthy());
     return onSaved;
   }
 
-  it("only PATCHes when the groups did not change", async () => {
+  it("uses one inputs PUT for EDIT even when the datasource and groups do not change", async () => {
     const user = userEvent.setup();
     const onSaved = await editing();
     await user.type(screen.getByLabelText("Nombre"), " 2026");
     await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    expect(updateReport).toHaveBeenCalledTimes(1);
+    expect(updateReportInputs).toHaveBeenCalledTimes(1);
+    expect(updateReportInputs).toHaveBeenCalledWith("COTIZACION", expect.objectContaining({
+      name: "Cotización 2026",
+      description: null,
+      category: null,
+      enabled: true,
+      data_source_id: QUOTATION_SOURCE.id,
+      parameters: [PRICE_LIST, CUSTOMER, TAX],
+      parameter_groups: [ITEMS],
+    }));
+    expect(updateReport).not.toHaveBeenCalled();
     expect(saveReportBuilder).not.toHaveBeenCalled();
     expect(getReportBuilder).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("PATCHes, then PUTs only the groups over the persisted columns and layout — never unsaved step-3 edits", async () => {
+  it("applies the inputs response and preserves unsaved step-3 columns and layout", async () => {
     const user = userEvent.setup();
     const onSaved = await editing();
     await user.click(screen.getByRole("button", { name: "editar-paso-3" }));
@@ -294,38 +376,48 @@ describe("Fuente y entradas — editing a report", () => {
     await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    expect(updateReport).toHaveBeenCalledTimes(1);
-    expect(saveReportBuilder).toHaveBeenCalledTimes(1);
-    expect(updateReport.mock.invocationCallOrder[0]).toBeLessThan(saveReportBuilder.mock.invocationCallOrder[0]);
-    const [code, request] = saveReportBuilder.mock.calls[0];
+    expect(updateReportInputs).toHaveBeenCalledTimes(1);
+    const [code, request] = updateReportInputs.mock.calls[0];
     expect(code).toBe("COTIZACION");
-    expect(request.columns).toEqual(COLUMNS);
-    expect(request.excel_layout).toEqual({ ...SAVED_BUILDER.excel_layout, title: null });
     expect(request.parameter_groups).toEqual([{
       ...ITEMS, label: "Artículos",
       fields: [ITEMS.fields[0], { ...ITEMS.fields[1], configuration_json: { minimum: 0, exclusive_minimum: true, maximum: "50" } }],
     }]);
+    expect(request).not.toHaveProperty("columns");
+    expect(request).not.toHaveProperty("excel_layout");
+    expect(updateReport).not.toHaveBeenCalled();
+    expect(saveReportBuilder).not.toHaveBeenCalled();
     // The unsaved edits of "Datos del reporte" are still a draft, not lost and not saved.
     expect(screen.getByTestId("draft-columns").textContent).toContain("(sin guardar)");
     expect(screen.getByTestId("draft-sheet").textContent).toBe("Hoja sin guardar");
     expect(screen.getByTestId("persisted-group").textContent).toBe("Artículos");
   });
 
-  it("reports pending groups after a saved definition and retries only the PUT", async () => {
-    saveReportBuilder.mockRejectedValueOnce(new ApiError(422, "El contexto no es válido."));
+  it("keeps every draft on 422 without pending state, navigation, reload, or special retry", async () => {
+    updateReportInputs.mockRejectedValueOnce(new ApiError(422, "El contexto no es válido."));
     const user = userEvent.setup();
     const onSaved = await editing();
+    await user.click(screen.getByRole("button", { name: "editar-paso-3" }));
     await user.type(screen.getByLabelText("Nombre visible del grupo"), " y servicios");
     await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
 
-    expect(await screen.findByText("Los datos del reporte se guardaron, pero los productos por renglón quedaron pendientes.")).toBeTruthy();
+    expect(await screen.findByText("El contexto no es válido.")).toBeTruthy();
+    expect(screen.queryByText(/quedaron pendientes/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reintentar/ })).toBeNull();
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByTestId("persisted-group").textContent).toBe("Productos");
+    expect((screen.getByLabelText("Nombre visible del grupo") as HTMLInputElement).value).toBe("Productos y servicios");
+    expect(screen.getByTestId("draft-columns").textContent).toContain("(sin guardar)");
+    expect(screen.getByTestId("draft-sheet").textContent).toBe("Hoja sin guardar");
+    expect(refresh).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    expect(getReportBuilder).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: /Reintentar/ }));
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    expect(updateReport).toHaveBeenCalledTimes(1);
-    expect(saveReportBuilder).toHaveBeenCalledTimes(2);
+    expect(updateReportInputs).toHaveBeenCalledTimes(2);
+    expect(updateReport).not.toHaveBeenCalled();
+    expect(saveReportBuilder).not.toHaveBeenCalled();
     expect(screen.getByTestId("persisted-group").textContent).toBe("Productos y servicios");
   });
 
@@ -345,19 +437,137 @@ describe("Fuente y entradas — editing a report", () => {
     await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    expect(saveReportBuilder.mock.calls[0][1].parameter_groups).toEqual([{ ...legacy, label: "Productos!" }]);
+    expect(updateReportInputs.mock.calls[0][1].parameter_groups).toEqual([{ ...legacy, label: "Productos!" }]);
+    expect(screen.getByText("Personalizado (anterior)")).toBeTruthy();
   });
 
-  it("refuses to change to a source without rows while a saved group exists", async () => {
-    const confirm = vi.spyOn(globalThis, "confirm");
+  it("blocks repeatable to simple when a saved group field is used", async () => {
+    const onGoToData = vi.fn();
     const user = userEvent.setup();
-    await editing();
+    await editing(REPORT, onGoToData);
     await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(PRODUCT_SOURCE.id));
 
-    expect(screen.getByText("Este reporte utiliza Productos por renglón. Actualmente no puede cambiarse a una fuente que no admita renglones.")).toBeTruthy();
+    expect(screen.getByText("Columna \"Cantidad\" — usa Productos por renglón, que se quitarán.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Ir a Datos del reporte" }));
+    expect(onGoToData).toHaveBeenCalledTimes(1);
     expect((screen.getByLabelText("Fuente de datos") as HTMLSelectElement).value).toBe(String(QUOTATION_SOURCE.id));
-    expect(confirm).not.toHaveBeenCalled();
     expect(updateReport).not.toHaveBeenCalled();
+    expect(updateReportInputs).not.toHaveBeenCalled();
+    expect(saveReportBuilder).not.toHaveBeenCalled();
+  });
+});
+
+describe("Fuente y entradas — datasource transitions in EDIT", () => {
+  async function renderExisting(
+    report: ReportAdminDefinition,
+    persisted: ReportBuilderDefinition,
+  ) {
+    const onSaved = vi.fn();
+    getReportBuilder.mockResolvedValue(persisted);
+    render(<Step report={report} onSaved={onSaved} />);
+    await waitFor(() => expect(screen.getByRole("option", { name: persisted.report.data_source.name })).toBeTruthy());
+    await waitFor(() => expect(getReportBuilder).toHaveBeenCalledTimes(1));
+    return { onSaved, user: userEvent.setup() };
+  }
+
+  it("allows simple to simple and saves it through inputs", async () => {
+    const report = reportFor(PRODUCT_SOURCE, [CUSTOMER]);
+    const { onSaved, user } = await renderExisting(report, builderFor(report));
+
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(SIMPLE_SOURCE.id));
+    expect(screen.getByText(`Confirmar cambio a "${SIMPLE_SOURCE.name}"`)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Cambiar fuente" }));
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    const request = updateReportInputs.mock.calls[0][1];
+    expect(request).toEqual(expect.objectContaining({ data_source_id: SIMPLE_SOURCE.id, parameter_groups: [] }));
+    expect(request.parameters).toEqual([expect.objectContaining({ name: "customer_name", label: "Cliente", display_order: 0 })]);
+    expect(updateReport).not.toHaveBeenCalled();
+    expect(saveReportBuilder).not.toHaveBeenCalled();
+  });
+
+  it("blocks simple to simple when a FIELD is absent from the target metadata", async () => {
+    const report = reportFor(PRODUCT_SOURCE);
+    const { user } = await renderExisting(report, builderFor(report));
+
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(INCOMPATIBLE_SOURCE.id));
+
+    expect(screen.getByText("Columna \"Número de parte\" — ese dato no existe en la nueva fuente.")).toBeTruthy();
+    expect((screen.getByLabelText("Fuente de datos") as HTMLSelectElement).value).toBe(String(PRODUCT_SOURCE.id));
+    expect(updateReportInputs).not.toHaveBeenCalled();
+  });
+
+  it("cancels repeatable to simple without changing source, parameters, or groups", async () => {
+    const report = reportFor(QUOTATION_SOURCE, [PRICE_LIST, CUSTOMER, TAX], [ITEMS]);
+    const { user } = await renderExisting(report, builderFor(report, [column({})], [ITEMS]));
+
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(PRODUCT_SOURCE.id));
+    expect(screen.getByText("Productos por renglón", { selector: '[data-slot="card-title"]' })).toBeTruthy();
+    expect(screen.getByText("Lista de precios", { selector: "li" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect((screen.getByLabelText("Fuente de datos") as HTMLSelectElement).value).toBe(String(QUOTATION_SOURCE.id));
+    expect(screen.getByText("Productos por renglón")).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Lista de precios" })).toBeTruthy();
+    expect((screen.getByLabelText("Nombre visible del grupo") as HTMLInputElement).value).toBe("Productos");
+    expect(updateReportInputs).not.toHaveBeenCalled();
+  });
+
+  it("allows repeatable to simple without dependencies, then sends empty groups", async () => {
+    const report = reportFor(QUOTATION_SOURCE, [PRICE_LIST, CUSTOMER, TAX], [ITEMS]);
+    const { onSaved, user } = await renderExisting(report, builderFor(report, [column({})], [ITEMS]));
+
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(PRODUCT_SOURCE.id));
+    expect(screen.getByText("Productos por renglón", { selector: "li" })).toBeTruthy();
+    expect(screen.getByText("Lista de precios", { selector: "li" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Cambiar fuente" }));
+    expect(screen.queryByText("Productos por renglón")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    const request = updateReportInputs.mock.calls[0][1];
+    expect(request).toEqual(expect.objectContaining({ data_source_id: PRODUCT_SOURCE.id, parameter_groups: [] }));
+    expect(request.parameters).toEqual([
+      expect.objectContaining({ name: "customer_name", display_order: 0 }),
+      expect.objectContaining({ name: "tax_rate", display_order: 1 }),
+    ]);
+  });
+
+  it("creates the canonical group for simple to repeatable and saves it atomically", async () => {
+    const report = reportFor(PRODUCT_SOURCE, [CUSTOMER]);
+    const { onSaved, user } = await renderExisting(report, builderFor(report));
+
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(QUOTATION_SOURCE.id));
+    await user.click(screen.getByRole("button", { name: "Cambiar fuente" }));
+    expect(await screen.findByText("Productos por renglón")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    const request = updateReportInputs.mock.calls[0][1];
+    expect(request.data_source_id).toBe(QUOTATION_SOURCE.id);
+    expect(request.parameter_groups).toHaveLength(1);
+    expect(request.parameter_groups[0]).toMatchObject({ context_parameter: "price_list_id" });
+    expect(saveReportBuilder).not.toHaveBeenCalled();
+  });
+
+  it("keeps repeatable identifiers while adapting the context for another repeatable source", async () => {
+    const report = reportFor(QUOTATION_SOURCE, [PRICE_LIST, CUSTOMER, TAX], [ITEMS]);
+    const { onSaved, user } = await renderExisting(report, builderFor(report, COLUMNS, [ITEMS]));
+
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(REPEATABLE_SOURCE.id));
+    await user.click(screen.getByRole("button", { name: "Cambiar fuente" }));
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    const group = updateReportInputs.mock.calls[0][1].parameter_groups[0];
+    expect(group.name).toBe("items");
+    expect(group.context_parameter).toBe("lista_de_referencia");
+    expect(group.fields.map((field: ReportParameterGroup["fields"][number]) => field.name)).toEqual(["product_id", "quantity"]);
+    expect(group.fields[0].configuration_json).toEqual({
+      options_source: "products_by_price_list",
+      context_parameter: "lista_de_referencia",
+    });
   });
 });
 

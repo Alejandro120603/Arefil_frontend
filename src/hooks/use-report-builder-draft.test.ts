@@ -138,6 +138,28 @@ describe("useReportBuilderDraft", () => {
     expect(result.current.dirty).toBe(true);
   });
 
+  it("applies an inputs response while preserving unsaved columns and layout", async () => {
+    const { result } = await loaded();
+    act(() => result.current.updateDraft((draft) => ({
+      columns: draft.columns.map((column) => ({ ...column, label: "Columna local" })),
+      layout: { ...draft.layout, sheet_name: "Layout local" },
+      parameterGroups: draft.parameterGroups,
+    })));
+    const saved = {
+      ...BUILDER,
+      report: { ...BUILDER.report, name: "Nombre confirmado" },
+      parameter_groups: BUILDER.parameter_groups.map((group) => ({ ...group, label: "Grupos confirmados" })),
+    };
+
+    act(() => result.current.applyInputsResponse(saved));
+
+    expect(result.current.persisted).toBe(saved);
+    expect(result.current.draft!.parameterGroups[0].label).toBe("Grupos confirmados");
+    expect(result.current.draft!.columns[0].label).toBe("Columna local");
+    expect(result.current.draft!.layout.sheet_name).toBe("Layout local");
+    expect(getReportBuilder).toHaveBeenCalledTimes(1);
+  });
+
   it("saves a new report's groups on the code just created, from no columns and the default layout", async () => {
     const { result } = renderHook(() => useReportBuilderDraft(null));
     act(() => result.current.updateDraft((draft) => ({ ...draft, parameterGroups: BUILDER.parameter_groups })));

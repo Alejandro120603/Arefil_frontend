@@ -57,6 +57,11 @@ export interface ReportBuilderDraft {
    * default layout. Rejects with the API error, changing nothing.
    */
   saveGroups: (targetCode?: string) => Promise<ReportBuilderDefinition>;
+  /**
+   * Applies the atomic inputs response without discarding unsaved Step 3 work:
+   * persisted follows the backend, groups follow persisted, columns/layout stay local.
+   */
+  applyInputsResponse: (saved: ReportBuilderDefinition) => void;
   /** Re-reads the builder and the field catalog, discarding the draft. */
   reload: () => void;
 }
@@ -198,6 +203,20 @@ export function useReportBuilderDraft(code: string | null): ReportBuilderDraft {
     return saved;
   }, []);
 
+  const applyInputsResponse = useCallback((saved: ReportBuilderDefinition) => {
+    setState((previous) => {
+      if (previous.code !== saved.report.code || previous.draft == null) return previous;
+      return {
+        ...previous,
+        persisted: saved,
+        draft: {
+          ...previous.draft,
+          parameterGroups: builderFormFromDefinition(saved).parameterGroups,
+        },
+      };
+    });
+  }, []);
+
   const reload = useCallback(() => {
     setState((previous) => previous.code == null ? previous : initialState(previous.code, previous.revision + 1));
   }, []);
@@ -221,6 +240,7 @@ export function useReportBuilderDraft(code: string | null): ReportBuilderDraft {
     updateDraft,
     save,
     saveGroups,
+    applyInputsResponse,
     reload,
   };
 }

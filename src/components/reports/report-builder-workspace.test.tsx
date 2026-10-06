@@ -132,7 +132,7 @@ describe("ReportBuilderWorkspace", () => {
     const builder: ReportBuilderDraft = {
       code: "COTIZACION", loading: false, loadError: null, catalogError: null, fields: FIELDS,
       draft: builderFormFromDefinition(SAVED_BUILDER), persisted: SAVED_BUILDER, dirty: false, saving: false,
-      groupsDirty: false, updateDraft, save, saveGroups: vi.fn(), reload: vi.fn(),
+      groupsDirty: false, updateDraft, save, saveGroups: vi.fn(), applyInputsResponse: vi.fn(), reload: vi.fn(),
     };
     const onSaved = vi.fn();
     const user = userEvent.setup();

@@ -4,20 +4,20 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportDefinitionForm } from "./report-definition-form";
-import type { ReportAdminDefinition, ReportDataSource, ReportDefinition } from "@/types/api";
+import type { ReportAdminDefinition, ReportBuilderDefinition, ReportDataSource, ReportDefinition } from "@/types/api";
 
 const {
   push,
   refresh,
   createReport,
-  updateReport,
+  updateReportInputs,
   listReportDataSources,
   listAllReportParameterOptions,
 } = vi.hoisted(() => ({
   push: vi.fn(),
   refresh: vi.fn(),
   createReport: vi.fn(),
-  updateReport: vi.fn(),
+  updateReportInputs: vi.fn(),
   listReportDataSources: vi.fn(),
   listAllReportParameterOptions: vi.fn(),
 }));
@@ -25,7 +25,7 @@ const {
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
 vi.mock("@/lib/api/reports", () => ({
   createReport,
-  updateReport,
+  updateReportInputs,
   listReportDataSources,
   listAllReportParameterOptions,
 }));
@@ -112,6 +112,10 @@ const QUOTATION_REPORT: ReportAdminDefinition = {
   data_source: QUOTATION_SOURCE,
   parameters: [PRICE_LIST_PARAMETER],
 };
+
+function inputsResponse(report: ReportAdminDefinition): ReportBuilderDefinition {
+  return { report, columns: [], parameter_groups: report.parameter_groups, excel_layout: null };
+}
 
 function extraSection(): HTMLElement {
   return screen.getByRole("region", { name: "Datos adicionales que capturará el usuario" });
@@ -212,7 +216,7 @@ describe("ReportDefinitionForm", () => {
   it("separates the source contract from the report's own parameters and saves both", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, "confirm").mockReturnValue(true);
-    updateReport.mockResolvedValue({ ...QUOTATION_REPORT });
+    updateReportInputs.mockResolvedValue(inputsResponse({ ...QUOTATION_REPORT }));
     render(<ReportDefinitionForm report={QUOTATION_REPORT} />);
     await screen.findByRole("option", { name: "Renglones de cotización" });
 
@@ -244,8 +248,8 @@ describe("ReportDefinitionForm", () => {
 
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
-    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
-    expect(updateReport.mock.calls[0]?.[1].parameters).toEqual([
+    await waitFor(() => expect(updateReportInputs).toHaveBeenCalledTimes(1));
+    expect(updateReportInputs.mock.calls[0]?.[1].parameters).toEqual([
       expect.objectContaining({
         name: "price_list_id",
         label: "Lista base",
@@ -271,12 +275,12 @@ describe("ReportDefinitionForm", () => {
 
   it("keeps the report's own parameters when the data source changes", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "confirm").mockReturnValue(true);
     render(<ReportDefinitionForm report={QUOTATION_REPORT} />);
     await screen.findByRole("option", { name: "Historial de precios" });
 
     await addPreset(user, "Cliente");
     await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(HISTORY_SOURCE.id));
+    await user.click(screen.getByRole("button", { name: "Cambiar fuente" }));
 
     expect(within(extraSection()).getByRole("group", { name: "Cliente" })).toBeTruthy();
     const sourceSection = screen.getByRole("region", { name: "Datos que pide la fuente" });
@@ -292,7 +296,7 @@ describe("ReportDefinitionForm", () => {
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(await screen.findByText("La fuente requiere el parámetro 'price_list_id'.")).toBeTruthy();
-    expect(updateReport).not.toHaveBeenCalled();
+    expect(updateReportInputs).not.toHaveBeenCalled();
   });
 
   it("preserves form data and surfaces catalog and create errors", async () => {
@@ -353,7 +357,7 @@ describe("ReportDefinitionForm", () => {
   it("preserves a legacy filename_template when another field is saved", async () => {
     const user = userEvent.setup();
     const legacy = { ...QUOTATION_REPORT, filename_template: "legacy_{{report.code}}" };
-    updateReport.mockResolvedValue({ ...legacy, name: "Cotización final" });
+    updateReportInputs.mockResolvedValue(inputsResponse({ ...legacy, name: "Cotización final" }));
     render(<ReportDefinitionForm report={legacy} />);
     await screen.findByRole("option", { name: "Renglones de cotización" });
 
@@ -361,30 +365,30 @@ describe("ReportDefinitionForm", () => {
     await user.clear(name);
     await user.type(name, "Cotización final");
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
-    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(updateReportInputs).toHaveBeenCalledTimes(1));
     // Omitting the key is what makes the backend's partial PATCH keep the stored
     // pattern; sending null or a new default would overwrite it.
-    expect(updateReport.mock.calls[0]?.[1]).not.toHaveProperty("filename_template");
-    expect(updateReport.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ name: "Cotización final" }));
+    expect(updateReportInputs.mock.calls[0]?.[1]).not.toHaveProperty("filename_template");
+    expect(updateReportInputs.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ name: "Cotización final" }));
 
     // A second save after the backend echoes the legacy value still leaves it alone.
     await screen.findByText("Reporte actualizado");
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
-    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(2));
-    expect(updateReport.mock.calls[1]?.[1]).not.toHaveProperty("filename_template");
+    await waitFor(() => expect(updateReportInputs).toHaveBeenCalledTimes(2));
+    expect(updateReportInputs.mock.calls[1]?.[1]).not.toHaveProperty("filename_template");
   });
 
   it("does not block saving on a legacy pattern the admin can no longer edit", async () => {
     const user = userEvent.setup();
-    updateReport.mockResolvedValue({ ...QUOTATION_REPORT, filename_template: "{{execution.id}}" });
+    updateReportInputs.mockResolvedValue(inputsResponse({ ...QUOTATION_REPORT, filename_template: "{{execution.id}}" }));
     render(<ReportDefinitionForm report={{ ...QUOTATION_REPORT, filename_template: "{{execution.id}}" }} />);
     await screen.findByRole("option", { name: "Renglones de cotización" });
 
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
-    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(updateReportInputs).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/Placeholder no permitido/)).toBeNull();
-    expect(updateReport.mock.calls[0]?.[1]).not.toHaveProperty("filename_template");
+    expect(updateReportInputs.mock.calls[0]?.[1]).not.toHaveProperty("filename_template");
   });
 
   it("shows a migrated report whose source is now disabled", async () => {
@@ -554,7 +558,7 @@ describe("ReportDefinitionForm — datos adicionales en lenguaje de negocio", ()
       required: false, default_value: null, display_order: 1, configuration_json: null,
     };
     const report = { ...QUOTATION_REPORT, parameters: [PRICE_LIST_PARAMETER, customer] };
-    updateReport.mockResolvedValue(report);
+    updateReportInputs.mockResolvedValue(inputsResponse(report));
     render(<ReportDefinitionForm report={report} />);
     await screen.findByRole("option", { name: "Renglones de cotización" });
 
@@ -564,8 +568,8 @@ describe("ReportDefinitionForm — datos adicionales en lenguaje de negocio", ()
     await user.type(label, "Razón social");
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
-    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
-    expect(updateReport.mock.calls[0]?.[1].parameters[1]).toEqual({
+    await waitFor(() => expect(updateReportInputs).toHaveBeenCalledTimes(1));
+    expect(updateReportInputs.mock.calls[0]?.[1].parameters[1]).toEqual({
       ...customer, label: "Razón social",
     });
   });
@@ -591,7 +595,7 @@ describe("ReportDefinitionForm — datos adicionales en lenguaje de negocio", ()
       configuration_json: { options_source: "products" as const },
     };
     const report = { ...QUOTATION_REPORT, parameters: [PRICE_LIST_PARAMETER, legacy] };
-    updateReport.mockResolvedValue(report);
+    updateReportInputs.mockResolvedValue(inputsResponse(report));
     render(<ReportDefinitionForm report={report} />);
     await screen.findByRole("option", { name: "Renglones de cotización" });
 
@@ -612,8 +616,8 @@ describe("ReportDefinitionForm — datos adicionales en lenguaje de negocio", ()
     await user.click(within(card).getByLabelText("Obligatorio"));
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
-    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
-    expect(updateReport.mock.calls[0]?.[1].parameters[1]).toEqual({
+    await waitFor(() => expect(updateReportInputs).toHaveBeenCalledTimes(1));
+    expect(updateReportInputs.mock.calls[0]?.[1].parameters[1]).toEqual({
       ...legacy, label: "Número de parte", required: true,
     });
     expect(listAllReportParameterOptions).not.toHaveBeenCalledWith(
@@ -661,7 +665,7 @@ describe("ReportDefinitionForm — datos adicionales en lenguaje de negocio", ()
       configuration_json: { options_source: "suppliers" as const },
     };
     const report = { ...QUOTATION_REPORT, parameters: [PRICE_LIST_PARAMETER, supplier] };
-    updateReport.mockResolvedValue(report);
+    updateReportInputs.mockResolvedValue(inputsResponse(report));
     listAllReportParameterOptions.mockImplementation(async (_code: string, name: string) => (
       name === "supplier_id"
         ? [{ value: 7, label: "DON · Donaldson" }]
@@ -683,7 +687,7 @@ describe("ReportDefinitionForm — datos adicionales en lenguaje de negocio", ()
     );
 
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
-    await waitFor(() => expect(updateReport).toHaveBeenCalledTimes(1));
-    expect(updateReport.mock.calls[0]?.[1].parameters[1]).toEqual({ ...supplier, default_value: 7 });
+    await waitFor(() => expect(updateReportInputs).toHaveBeenCalledTimes(1));
+    expect(updateReportInputs.mock.calls[0]?.[1].parameters[1]).toEqual({ ...supplier, default_value: 7 });
   });
 });

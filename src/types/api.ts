@@ -337,6 +337,12 @@ export interface ReportCreateRequest {
 
 export type ReportUpdateRequest = Omit<ReportCreateRequest, "code">;
 
+/** Atomic body of `PUT /reports/{code}/inputs` for an existing report. */
+export type ReportInputsUpdateRequest =
+  Pick<ReportUpdateRequest, "data_source_id" | "parameters">
+  & Partial<Omit<ReportUpdateRequest, "data_source_id" | "parameters">>
+  & { parameter_groups: ReportParameterGroup[] };
+
 export interface ReportPreviewResponse {
   columns: string[];
   rows: Record<string, unknown>[];

@@ -160,6 +160,7 @@ export function ReportConfigurationWizard({
           section={step === "information" ? "information" : "source"}
           createRedirectPath={(code) => `/administracion/reportes/${encodeURIComponent(code)}/configurar?step=3`}
           builder={builder}
+          onGoToData={() => goTo("data")}
           onDefinitionSaved={(saved) => { if (report != null) setReport(saved); }}
           onSaved={(saved) => {
             if (report != null) {
