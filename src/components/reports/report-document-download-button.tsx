@@ -6,27 +6,27 @@ import { Button } from "@/components/ui/button";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { downloadReportDocumentXlsx } from "@/lib/api/reports";
 import { triggerBrowserDownload } from "@/lib/download";
+import {
+  executionExportFailure,
+  STALE_EXECUTION_MESSAGE,
+  TRUNCATED_EXECUTION_MESSAGE,
+} from "@/lib/reports/report-execution-errors";
 
 /** A report with no active template is a configuration state, not a failure. */
 const MISSING_TEMPLATE_MESSAGE =
   "Este reporte todavía no tiene una plantilla Excel configurada. Puedes descargar los datos con los botones de abajo.";
 
-/**
- * The snapshot behind this execution is gone (expired, cleaned up, or bound to
- * another report). Nothing the user can do here fixes it: only a new execution
- * produces a new id.
- */
-export const STALE_EXECUTION_MESSAGE =
-  "La ejecución de este reporte ya no está disponible. Regenera el reporte para continuar.";
+export { STALE_EXECUTION_MESSAGE };
 
-/** Backend #25 answers 404 for a missing snapshot and 409 for one of another report. */
-function isStaleExecution(error: unknown): boolean {
-  if (!(error instanceof ApiError) || (error.status !== 404 && error.status !== 409)) return false;
-  return /ejecuci[oó]n|expir/i.test(error.message);
+/** A snapshot that can never produce this file: gone, foreign, or a truncated preview. */
+function isUnusableExecution(error: unknown): boolean {
+  return executionExportFailure(error) !== "other";
 }
 
 function documentErrorMessage(error: unknown): string {
-  if (isStaleExecution(error)) return STALE_EXECUTION_MESSAGE;
+  const failure = executionExportFailure(error);
+  if (failure === "truncated") return TRUNCATED_EXECUTION_MESSAGE;
+  if (failure === "stale") return STALE_EXECUTION_MESSAGE;
   if (error instanceof ApiError && (error.status === 404 || error.status === 409)) return MISSING_TEMPLATE_MESSAGE;
   return getUserErrorMessage(error, "No se pudo generar la cotización Excel.");
 }
@@ -47,11 +47,14 @@ export function ReportDocumentDownloadButton({
   code,
   executionId,
   disabled = false,
+  truncated = false,
 }: {
   code: string;
   /** `null` while the report has no persisted snapshot to render from. */
   executionId: string | null;
   disabled?: boolean;
+  /** The snapshot is a preview cut at its row limit: the backend will not export it. */
+  truncated?: boolean;
 }) {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +64,7 @@ export function ReportDocumentDownloadButton({
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
-  const stale = executionId == null || executionId === staleExecutionId;
+  const stale = executionId == null || executionId === staleExecutionId || truncated;
 
   async function download() {
     if (downloading || executionId == null || stale) return;
@@ -82,7 +85,7 @@ export function ReportDocumentDownloadButton({
       triggerBrowserDownload(result, `${code}.xlsx`);
     } catch (downloadError) {
       if (controller.signal.aborted) return;
-      if (isStaleExecution(downloadError)) setStaleExecutionId(executionId);
+      if (isUnusableExecution(downloadError)) setStaleExecutionId(executionId);
       setError(documentErrorMessage(downloadError));
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null;
@@ -101,6 +104,9 @@ export function ReportDocumentDownloadButton({
       {error && <p className="text-sm text-destructive">{error}</p>}
       {!error && executionId == null && (
         <p className="text-sm text-muted-foreground">{STALE_EXECUTION_MESSAGE}</p>
+      )}
+      {!error && executionId != null && truncated && (
+        <p className="text-sm text-muted-foreground">{TRUNCATED_EXECUTION_MESSAGE}</p>
       )}
     </div>
   );

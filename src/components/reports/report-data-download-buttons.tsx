@@ -6,6 +6,11 @@ import { Button } from "@/components/ui/button";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { downloadReportData } from "@/lib/api/reports";
 import { triggerBrowserDownload } from "@/lib/download";
+import {
+  executionExportFailure,
+  STALE_EXECUTION_MESSAGE,
+  TRUNCATED_EXECUTION_MESSAGE,
+} from "@/lib/reports/report-execution-errors";
 
 /**
  * These are the *data* exports, which sit beside the final document downloads:
@@ -13,12 +18,19 @@ import { triggerBrowserDownload } from "@/lib/download";
  */
 const DOWNLOAD_LABELS = { xlsx: "Excel de datos", csv: "CSV de datos" } as const;
 
+/**
+ * With an `executionId` both files export exactly the snapshot on screen (the
+ * backend never re-runs it). Without one — a report whose result carries no
+ * snapshot — they fall back to re-running `parameters`, the legacy path.
+ */
 export function ReportDataDownloadButtons({
   code,
+  executionId = null,
   parameters,
   disabled = false,
 }: {
   code: string;
+  executionId?: string | null;
   parameters: Record<string, unknown>;
   disabled?: boolean;
 }) {
@@ -37,7 +49,8 @@ export function ReportDataDownloadButtons({
     setActive(format);
     setError(null);
     try {
-      const result = await downloadReportData(code, format, parameters, { signal: controller.signal });
+      const source = executionId != null ? { executionId } : { parameters };
+      const result = await downloadReportData(code, format, source, { signal: controller.signal });
       if (result.blob.size === 0) {
         setError("El backend devolvió un archivo vacío. Verifica los parámetros e intenta de nuevo.");
         return;
@@ -48,7 +61,12 @@ export function ReportDataDownloadButtons({
       triggerBrowserDownload(result, fallbackFilename);
     } catch (downloadError) {
       if (!controller.signal.aborted) {
-        setError(getUserErrorMessage(downloadError, "No se pudieron descargar los datos del reporte."));
+        const failure = executionExportFailure(downloadError);
+        setError(
+          failure === "truncated" ? TRUNCATED_EXECUTION_MESSAGE
+            : failure === "stale" ? STALE_EXECUTION_MESSAGE
+              : getUserErrorMessage(downloadError, "No se pudieron descargar los datos del reporte."),
+        );
       }
     } finally {
       downloadingRef.current = false;
