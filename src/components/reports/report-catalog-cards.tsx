@@ -3,9 +3,11 @@ import { FileText, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ReportDefinition } from "@/types/api";
+import type { ReportRuntimeCatalogItem } from "@/types/api";
 
-export function ReportCatalogCards({ reports }: { reports: ReportDefinition[] }) {
+type ReportCard = Omit<ReportRuntimeCatalogItem, "ready">;
+
+export function ReportCatalogCards({ reports }: { reports: ReportCard[] }) {
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       {reports.map((report) => {
