@@ -17,7 +17,7 @@ COMPOSE_PROJECT_NAME ?= arefil
 BACKEND_VENV ?= $(BACKEND_DIR)/../.venv
 BACKEND_PY ?= $(BACKEND_VENV)/bin/python
 
-.PHONY: compose_up compose_down test_lifecycle setup_panel check_backend check_frontend docker_preflight docker_up docker_down docker_logs docker_ps docker_rebuild
+.PHONY: compose_up compose_down test_lifecycle setup_panel check_backend check_frontend docker_preflight docker_up docker_down docker_logs docker_ps docker_rebuild test_deploy_config
 
 ## Validate the sibling backend + its venv, or fail with an actionable message.
 check_backend:
@@ -81,38 +81,37 @@ compose_down:
 test_lifecycle:
 	@./tests/compose_lifecycle_test.sh
 
+## Check the rendered deployment: only Caddy publishes ports, HTTPS-only settings.
+test_deploy_config:
+	@./tests/deploy_config_test.sh
+
 ## Validate Docker, Compose, the sibling backend, and the persistent data path.
 docker_preflight:
 	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" ./scripts/docker_preflight.sh
 
-## Start the complete production stack and wait for both healthchecks.
+## Start the HTTPS deployment (Caddy + frontend + backend) and wait for healthchecks.
 docker_up: docker_preflight
 	@AREFIL_UID="$$(id -u)" AREFIL_GID="$$(id -g)" \
-		FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
 		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
 		docker compose up --detach --build --wait
 
 ## Stop and remove containers/network. Persistent backend data is never removed.
 docker_down: docker_preflight
-	@FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
-		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
 		docker compose down
 
 ## Follow logs for both application services.
 docker_logs: docker_preflight
-	@FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
-		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
-		docker compose logs --follow --tail=100 frontend backend
+	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+		docker compose logs --follow --tail=100 caddy frontend backend
 
 ## Show Compose service and health status.
 docker_ps: docker_preflight
-	@FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
-		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
 		docker compose ps
 
 ## Rebuild/recreate both services without deleting persistent data.
 docker_rebuild: docker_preflight
 	@AREFIL_UID="$$(id -u)" AREFIL_GID="$$(id -g)" \
-		FRONTEND_PORT="$(FRONTEND_PORT)" BACKEND_PORT="$(BACKEND_PORT)" \
 		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
 		docker compose up --detach --build --force-recreate --wait

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { isCrossOriginWrite } from "@/lib/api/proxy-security";
+import { isCrossOriginWrite, trustedClientAddress } from "@/lib/api/proxy-security";
 import { getServerApiBaseUrl } from "@/lib/api/server-client";
 
 type ProxyContext = { params: Promise<{ path: string[] }> };
@@ -36,9 +36,7 @@ function createUpstreamHeaders(request: Request): Headers {
     if (value !== null) headers.set(name, value);
   }
   headers.set("accept-encoding", "identity");
-  // The browser's address, for the backend's per-client login throttle. Next.js
-  // sets it from the socket unless the request already carried one.
-  const client = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const client = trustedClientAddress(request);
   if (client) headers.set("x-forwarded-for", client);
   return headers;
 }

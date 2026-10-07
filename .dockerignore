@@ -23,3 +23,6 @@ yarn-error.log*
 .pnpm-debug.log*
 
 *.tsbuildinfo
+
+# TLS material provisioned per installation
+deploy

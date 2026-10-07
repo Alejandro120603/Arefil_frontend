@@ -33,3 +33,19 @@ export function isCrossOriginWrite(request: Request): boolean {
   const host = (request.headers.get("host") ?? new URL(request.url).host).toLowerCase();
   return originHost !== host;
 }
+
+/**
+ * The browser's address for the backend's per-client login throttle, or null.
+ *
+ * Next.js only fills `X-Forwarded-For` from the socket when the request did
+ * not already carry one, so on its own the header is whatever the client sent.
+ * It is trusted only with `TRUST_PROXY_FORWARDED_FOR=true`, i.e. when the only
+ * way in is a reverse proxy (Caddy in `compose.yaml`) that overwrites it with
+ * the address it actually saw. Otherwise nothing is forwarded and the backend
+ * falls back to its per-username budget plus this proxy's own address.
+ */
+export function trustedClientAddress(request: Request): string | null {
+  if (process.env.TRUST_PROXY_FORWARDED_FOR?.trim().toLowerCase() !== "true") return null;
+  const first = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return first || null;
+}

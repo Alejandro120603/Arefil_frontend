@@ -122,7 +122,8 @@ describe("backend API proxy", () => {
 
     const upstream = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
     expect(upstream.get("cookie")).toBe("arefil_session=old-token");
-    expect(upstream.get("x-forwarded-for")).toBe("192.168.1.20");
+    // Without a trusted reverse proxy in front, a client-supplied address is not passed on.
+    expect(upstream.has("x-forwarded-for")).toBe(false);
     expect(upstream.has("origin")).toBe(false);
     expect(response.status).toBe(200);
     expect(response.headers.getSetCookie()).toEqual([
@@ -162,5 +163,20 @@ describe("backend API proxy", () => {
     });
     const response = await GET(request, { params: Promise.resolve({ path: ["reports", "runtime"] }) });
     expect(response.status).toBe(200);
+  });
+
+  it("forwards the client address only behind the trusted reverse proxy", async () => {
+    vi.stubEnv("API_INTERNAL_URL", "http://backend:8000/api");
+    vi.stubEnv("TRUST_PROXY_FORWARDED_FOR", "true");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new NextRequest("https://arefil.test/backend-api/auth/me", {
+      headers: { "x-forwarded-for": "192.168.1.20, 10.0.0.1" },
+    });
+
+    await GET(request, { params: Promise.resolve({ path: ["auth", "me"] }) });
+
+    const upstream = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(upstream.get("x-forwarded-for")).toBe("192.168.1.20");
   });
 });
