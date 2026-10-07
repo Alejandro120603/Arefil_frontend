@@ -13,9 +13,9 @@ import type {
  * accepted and only fail later. These rules catch it first, in business terms.
  *
  * Only the *persisted* builder counts: that is what an inputs save can break.
- * Excel mappings (`{{parameters.<name>}}` / `{{rows.<name>}}`) are not
- * inspected by this screen or Backend #36; mapping protection remains a
- * separate follow-up.
+ * Excel template placeholders (`{{parameters.<name>}}`, …) are protected
+ * separately by `report-template-dependencies` (Frontend #43) and, on save,
+ * by Backend #37.
  */
 interface ParameterRequirement {
   name: string;
@@ -151,7 +151,8 @@ function sourceChangeMessage(kind: "Columna" | "Cálculo" | "Total", label: stri
  * Human-facing reasons why the persisted builder cannot survive an inputs
  * change. FIELD compatibility comes from the target source metadata; formulas
  * reuse the builder parser and follow invalid persisted columns transitively.
- * XLSX mappings are deliberately outside this check.
+ * XLSX placeholders are added to the same block by "Fuente y entradas" from
+ * `report-template-dependencies` (Frontend #43).
  */
 export function sourceChangeDependencyErrors({
   persisted,

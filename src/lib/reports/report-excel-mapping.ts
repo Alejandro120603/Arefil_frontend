@@ -131,6 +131,18 @@ interface ExcelCellTargetLike {
 const WRAPPED_PLACEHOLDER = /^\{\{\s*([a-z]+\.[A-Za-z][A-Za-z0-9_]*)\s*\}\}$/;
 
 /**
+ * Splits one token the inspection already recognized (`"{{rows.unit_price}}"`)
+ * into its namespace and key. This only unwraps what the backend extracted —
+ * it never scans cell text for tokens of its own.
+ */
+export function placeholderIdentity(token: string): { namespace: string; key: string } | null {
+  const bare = WRAPPED_PLACEHOLDER.exec(token)?.[1];
+  if (bare == null) return null;
+  const [namespace, key] = bare.split(".");
+  return { namespace, key };
+}
+
+/**
  * A cell only counts as "carrying a placeholder" when its whole value is
  * exactly one recognized token — matches what the backend's `clear` accepts
  * and what the panel offers to remove. A token embedded in a longer string is

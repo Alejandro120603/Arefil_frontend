@@ -7,6 +7,8 @@ import { ReportBuilderWorkspace } from "./report-builder-workspace";
 import { useReportBuilderDraft, type ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
 import { ApiError } from "@/lib/api/errors";
 import { builderFormFromDefinition, toBuilderRequest } from "@/lib/reports/report-builder";
+import { templatePlaceholderDependencies, type TemplateDependencies } from "@/lib/reports/report-template-dependencies";
+import { inspectionWithPlaceholders } from "@/test/template-inspection";
 import type {
   ReportBuilderDefinition,
   ReportBuilderPreviewResponse,
@@ -648,5 +650,161 @@ describe("ReportBuilderWorkspace", () => {
     await user.type(await screen.findByLabelText("Título de columna"), "!");
     expect(await screen.findByText(/Guarda el constructor antes de previsualizar/)).toBeTruthy();
     expect((screen.getByRole("button", { name: /Generar vista previa/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("ReportBuilderWorkspace — protecting what the active Excel template uses (#43)", () => {
+  const TEMPLATE_BUILDER: ReportBuilderDefinition = {
+    ...SAVED_BUILDER,
+    columns: [
+      { ...SAVED_BUILDER.columns[0], key: "unit_price", label: "Precio unitario", source_field: "price_list_item.unit_price", data_type: "decimal", format_type: "currency", display_order: 0 },
+      { ...SAVED_BUILDER.columns[0], key: "part_number", label: "Número de parte", display_order: 1 },
+    ],
+    excel_layout: {
+      ...SAVED_BUILDER.excel_layout!,
+      totals: [
+        { key: "subtotal", label: "Subtotal", column_key: "unit_price", operation: "SUM", formula_definition: null, format_type: "currency" },
+        { key: "tax", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "subtotal * 0.16", format_type: "currency" },
+      ],
+    },
+  };
+  const USED = templatePlaceholderDependencies(inspectionWithPlaceholders(["rows.unit_price", "summary.subtotal"]));
+
+  function Harness({ dependencies, onGoToMapping, onTemplateMayHaveChanged }: {
+    dependencies?: TemplateDependencies;
+    onGoToMapping?: () => void;
+    onTemplateMayHaveChanged?: () => void;
+  }) {
+    const builder = useReportBuilderDraft("COTIZACION");
+    return (
+      <ReportBuilderWorkspace
+        code="COTIZACION"
+        builder={builder}
+        parameters={[QUANTITY]}
+        templateDependencies={dependencies}
+        onGoToMapping={onGoToMapping}
+        onTemplateMayHaveChanged={onTemplateMayHaveChanged}
+      />
+    );
+  }
+
+  async function renderUsed(props: Parameters<typeof Harness>[0] = { dependencies: USED }) {
+    getReportBuilderMock.mockResolvedValue(TEMPLATE_BUILDER);
+    render(<Harness {...props} />);
+    await screen.findAllByLabelText("Título de columna");
+    return userEvent.setup();
+  }
+
+  const titles = () => screen.getAllByLabelText("Título de columna").map((input) => (input as HTMLInputElement).value);
+
+  it("marks the column and summary the template uses", async () => {
+    await renderUsed();
+    const columnsCard = screen.getByText("Columnas del reporte").closest("[data-slot='card']") as HTMLElement;
+    const summaryCard = screen.getByText("Resumen y totales").closest("[data-slot='card']") as HTMLElement;
+    expect(within(columnsCard).getAllByText("Plantilla Excel")).toHaveLength(1);
+    expect(within(summaryCard).getAllByText("Plantilla Excel")).toHaveLength(1);
+  });
+
+  it("F: removes a column the template does not use", async () => {
+    const user = await renderUsed();
+    await user.click(screen.getByRole("button", { name: "Eliminar Número de parte" }));
+    expect(titles()).toEqual(["Precio unitario"]);
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+  });
+
+  it("G: refuses to remove a used column, naming where the template reads it", async () => {
+    const onGoToMapping = vi.fn();
+    const user = await renderUsed({ dependencies: USED, onGoToMapping });
+    await user.click(screen.getByRole("button", { name: "Eliminar Precio unitario" }));
+
+    expect(screen.getByText('No puedes quitar "Precio unitario".')).toBeTruthy();
+    expect(screen.getByText("La plantilla Excel utiliza esta columna. Primero quítala o reemplázala en la plantilla.")).toBeTruthy();
+    expect(screen.getByText(/Cotización!B2/)).toBeTruthy();
+    expect(titles()).toEqual(["Precio unitario", "Número de parte"]);
+    await user.click(screen.getByRole("button", { name: "Ir a Mapear campos" }));
+    expect(onGoToMapping).toHaveBeenCalledTimes(1);
+    expect(saveReportBuilderMock).not.toHaveBeenCalled();
+  });
+
+  it("H: refuses to hide a used column", async () => {
+    const user = await renderUsed();
+    await user.click(screen.getAllByLabelText("Visible")[0]);
+    expect(screen.getByText('No puedes ocultar "Precio unitario" porque la plantilla Excel la utiliza.')).toBeTruthy();
+    expect((screen.getAllByLabelText("Visible")[0] as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByText("Oculta")).toBeNull();
+  });
+
+  it("I/J: allows relabeling a used column and re-pointing its source while the key stays", async () => {
+    const user = await renderUsed();
+    const title = screen.getAllByLabelText("Título de columna")[0];
+    await user.clear(title);
+    await user.type(title, "Precio");
+    await user.selectOptions(screen.getAllByLabelText("Dato que muestra")[0], "product.part_number");
+    await user.selectOptions(screen.getAllByLabelText("Dato que muestra")[0], "price_list_item.unit_price");
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1].columns[0]).toMatchObject({ key: "unit_price", label: "Precio", source_field: "price_list_item.unit_price" });
+  });
+
+  it("K: removes a summary the template does not use", async () => {
+    const user = await renderUsed();
+    await user.click(screen.getByRole("button", { name: "Eliminar IVA" }));
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+    expect(screen.queryByLabelText("Título", { selector: "#summary-label-1" })).toBeNull();
+  });
+
+  it("L: refuses to remove a used summary", async () => {
+    const user = await renderUsed();
+    await user.click(screen.getByRole("button", { name: "Eliminar Subtotal" }));
+    expect(screen.getByText('No puedes quitar "Subtotal" porque la plantilla Excel lo utiliza.')).toBeTruthy();
+    expect((screen.getByLabelText("Título", { selector: "#summary-label-0" }) as HTMLInputElement).value).toBe("Subtotal");
+  });
+
+  it("M: allows relabeling a used summary", async () => {
+    const user = await renderUsed();
+    const title = screen.getByLabelText("Título", { selector: "#summary-label-0" });
+    await user.clear(title);
+    await user.type(title, "Suma");
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+    expect((title as HTMLInputElement).value).toBe("Suma");
+  });
+
+  it("without a template nothing is marked or blocked", async () => {
+    const user = await renderUsed({});
+    expect(screen.queryByText("Plantilla Excel")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Eliminar Subtotal" }));
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+  });
+
+  it("shows the backend's ACTIVE_TEMPLATE_INCOMPATIBLE as cells and labels, keeping the draft", async () => {
+    saveReportBuilderMock.mockRejectedValueOnce(new ApiError(422, {
+      code: "ACTIVE_TEMPLATE_INCOMPATIBLE",
+      message: "La plantilla Excel activa utiliza datos que ya no existirían.",
+      template_version: 4,
+      issues: [{ placeholder: "rows.part_number", sheet: "Cotización", cell: "C14", range: null, reason: "unknown_placeholder" }],
+    }));
+    const onTemplateMayHaveChanged = vi.fn();
+    // Stale inspection: it does not list rows.part_number.
+    const user = await renderUsed({ dependencies: USED, onTemplateMayHaveChanged });
+    await user.click(screen.getByRole("button", { name: "Eliminar Número de parte" }));
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    expect(await screen.findByText("La plantilla Excel utiliza datos que este cambio eliminaría.")).toBeTruthy();
+    expect(screen.getByText("Número de parte — Cotización!C14 (ya no existiría)")).toBeTruthy();
+    expect(onTemplateMayHaveChanged).toHaveBeenCalledTimes(1);
+    expect(titles()).toEqual(["Precio unitario"]);
+  });
+
+  it("shows a 409 as a temporary conflict, not as an incompatible template", async () => {
+    saveReportBuilderMock.mockRejectedValueOnce(new ApiError(409, "La plantilla Excel activa cambió."));
+    const user = await renderUsed();
+    const title = screen.getAllByLabelText("Título de columna")[1];
+    await user.type(title, " (SKU)");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    expect(await screen.findByText("La configuración o la plantilla cambió mientras guardabas. Intenta guardar nuevamente.")).toBeTruthy();
+    expect(screen.queryByText(/utiliza datos que este cambio eliminaría/)).toBeNull();
+    expect(titles()).toEqual(["Precio unitario", "Número de parte (SKU)"]);
   });
 });

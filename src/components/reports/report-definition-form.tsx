@@ -6,6 +6,7 @@ import { CircleCheck, Database, Loader2, RotateCcw, Save } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportParameterEditor } from "@/components/reports/report-parameter-editor";
 import { ReportParameterGroupEditor } from "@/components/reports/report-parameter-group-editor";
+import { ReportSaveFailureAlert, TemplateDependencyAlert } from "@/components/reports/report-template-dependency-alert";
 import type { ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { createReport, listReportDataSources, updateReportInputs } from "@/lib/api/reports";
-import { validateParameterGroups } from "@/lib/reports/report-builder";
+import { normalizeSummaries, validateParameterGroups } from "@/lib/reports/report-builder";
 import { newParameterGroup, priceListParameters } from "@/lib/reports/report-group-fields";
 import {
   blockedParameterChange,
@@ -33,6 +34,14 @@ import {
   validateReportForm,
   type ReportFormValue,
 } from "@/lib/reports/report-form";
+import { placeholderLabelResolver, reportSaveFailure, type ReportSaveFailure } from "@/lib/reports/report-save-errors";
+import {
+  NO_TEMPLATE_DEPENDENCIES,
+  templateDependencyBlocks,
+  templateDependencyMessage,
+  type TemplateDependencies,
+  type TemplateDependencyBlock,
+} from "@/lib/reports/report-template-dependencies";
 import type { ReportAdminDefinition, ReportDataSource, ReportParameter, ReportParameterGroup } from "@/types/api";
 
 const NO_GROUPS: ReportParameterGroup[] = [];
@@ -63,7 +72,15 @@ interface SourceChangeProposal {
 
 interface SourceChangeBlock {
   sourceName: string;
+  /** What breaks in "Datos del reporte". */
   dependencies: string[];
+  /** What the active Excel template still uses (#43) — the same list, fixed elsewhere. */
+  templateDependencies: string[];
+}
+
+function sourceBlockTarget(block: SourceChangeBlock): string {
+  if (block.dependencies.length === 0) return "la plantilla Excel";
+  return block.templateDependencies.length > 0 ? "Datos del reporte y la plantilla Excel" : "Datos del reporte";
 }
 
 function groupsForSource(
@@ -103,6 +120,9 @@ export function ReportDefinitionForm({
   builder,
   onDefinitionSaved,
   onGoToData,
+  templateDependencies = NO_TEMPLATE_DEPENDENCIES,
+  onGoToMapping,
+  onTemplateMayHaveChanged,
 }: {
   report?: ReportAdminDefinition | null;
   /**
@@ -131,6 +151,16 @@ export function ReportDefinitionForm({
   onDefinitionSaved?: (saved: ReportAdminDefinition) => void;
   /** Opens Paso 3 from a blocked datasource change. */
   onGoToData?: () => void;
+  /**
+   * What the active Excel template uses (Frontend #43, from the wizard's
+   * shared inspection). Removing a parameter it uses is refused locally;
+   * Backend #37 still has the final word on save.
+   */
+  templateDependencies?: TemplateDependencies;
+  /** Opens "Mapear campos" from a template dependency block. */
+  onGoToMapping?: () => void;
+  /** A save was refused for template reasons or a conflict: the shared inspection may be stale. */
+  onTemplateMayHaveChanged?: () => void;
 }) {
   const creating = report == null;
   const router = useRouter();
@@ -140,12 +170,13 @@ export function ReportDefinitionForm({
   const [sources, setSources] = useState<ReportDataSource[] | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<ReportSaveFailure | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [dependencyError, setDependencyError] = useState<string | null>(null);
   const [sourceBlock, setSourceBlock] = useState<SourceChangeBlock | null>(null);
+  const [templateBlock, setTemplateBlock] = useState<TemplateDependencyBlock[] | null>(null);
   const [sourceProposal, setSourceProposal] = useState<SourceChangeProposal | null>(null);
   const [pending, setPending] = useState<PendingGroups | null>(null);
 
@@ -195,6 +226,15 @@ export function ReportDefinitionForm({
 
   /** Refuses a parameter edit that would break a saved column, formula or the groups. */
   function changeParameters(next: ReportParameter[]) {
+    // A rename keeps nothing in common with what the template reads, so only
+    // names that disappear count — labels, types and defaults never block.
+    const templateBlocks = templateDependencyBlocks(templateDependencies, { parameters: value.parameters }, { parameters: next });
+    if (templateBlocks.length > 0) {
+      setDependencyError(null);
+      setTemplateBlock(templateBlocks);
+      return;
+    }
+    setTemplateBlock(null);
     const blocked = builder ? blockedParameterChange(value.parameters, next, persisted, activeGroups) : null;
     setDependencyError(blocked);
     if (blocked) return;
@@ -214,12 +254,16 @@ export function ReportDefinitionForm({
     const previous = contractNames;
     const parameters = mergeSourceParameters(value.parameters, next, previous);
     const nextGroups = builder ? groupsForSource(groups, next, parameters) : NO_GROUPS;
-    const dependencies = !creating && builder
+    const builderDependencies = !creating && builder
       ? sourceChangeDependencyErrors({ persisted, targetSource: next, parameters, groups: nextGroups })
       : [];
-    if (dependencies.length > 0) {
+    const templateDependencyMessages = creating
+      ? []
+      : templateDependencyBlocks(templateDependencies, { parameters: value.parameters }, { parameters })
+        .map(templateDependencyMessage);
+    if (builderDependencies.length > 0 || templateDependencyMessages.length > 0) {
       setSourceProposal(null);
-      setSourceBlock({ sourceName: next.name, dependencies });
+      setSourceBlock({ sourceName: next.name, dependencies: builderDependencies, templateDependencies: templateDependencyMessages });
       return;
     }
     const nextNames = new Set(next.parameters.map((parameter) => parameter.name));
@@ -296,6 +340,10 @@ export function ReportDefinitionForm({
       validationErrors.push(...parameterDependencyErrors(value.parameters, { persisted, groups: activeGroups, labelsFrom: savedParameters })
         .filter((message) => !before.has(message)));
     }
+    if (!creating) {
+      validationErrors.push(...templateDependencyBlocks(templateDependencies, { parameters: savedParameters }, { parameters: value.parameters })
+        .map(templateDependencyMessage));
+    }
     setErrors(validationErrors);
     if (validationErrors.length > 0) return;
     savingRef.current = true;
@@ -328,7 +376,13 @@ export function ReportDefinitionForm({
       onDefinitionSaved?.(saved.report);
       finishUpdate(saved.report);
     } catch (error) {
-      setSubmitError(getUserErrorMessage(error, "No se pudo guardar el reporte. Tus cambios siguen en el formulario."));
+      const fallback = "No se pudo guardar el reporte. Tus cambios siguen en el formulario.";
+      // Only an edit can collide with the active template; a create's 409 is a duplicated code.
+      const failure: ReportSaveFailure = creating
+        ? { kind: "message", message: getUserErrorMessage(error, fallback) }
+        : reportSaveFailure(error, fallback);
+      setSubmitError(failure);
+      if (failure.kind !== "message") onTemplateMayHaveChanged?.();
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -343,7 +397,14 @@ export function ReportDefinitionForm({
           <AlertDescription><ul className="list-disc pl-5">{errors.map((error) => <li key={error}>{error}</li>)}</ul></AlertDescription>
         </Alert>
       )}
-      {submitError && <ErrorAlert title="No se guardó el reporte" message={submitError} />}
+      {submitError && (
+        <ReportSaveFailureAlert
+          title="No se guardó el reporte"
+          failure={submitError}
+          resolveLabel={placeholderLabelResolver({ parameters: [...savedParameters, ...value.parameters], columns: persisted?.columns, summaries: persisted ? normalizeSummaries(persisted.excel_layout?.totals ?? [], persisted.columns) : [] })}
+          onGoToMapping={onGoToMapping}
+        />
+      )}
       {pending && (
         <Alert variant="destructive">
           <AlertTitle>El reporte se creó, pero no se pudieron guardar los productos por renglón.</AlertTitle>
@@ -404,11 +465,18 @@ export function ReportDefinitionForm({
               {sourceError && <ErrorAlert title="No se cargaron las fuentes" message={sourceError} />}
               {sourceBlock && (
                 <Alert variant="destructive">
-                  <AlertTitle>Antes de cambiar a {quotedSource(sourceBlock.sourceName)}, ajusta estos elementos en Datos del reporte:</AlertTitle>
+                  <AlertTitle>Antes de cambiar a {quotedSource(sourceBlock.sourceName)}, ajusta estos elementos en {sourceBlockTarget(sourceBlock)}:</AlertTitle>
                   <AlertDescription className="flex flex-col items-start gap-3">
-                    <ul className="list-disc pl-5">{sourceBlock.dependencies.map((dependency) => <li key={dependency}>{dependency}</li>)}</ul>
+                    <ul className="list-disc pl-5">
+                      {[...sourceBlock.dependencies, ...sourceBlock.templateDependencies].map((dependency) => <li key={dependency}>{dependency}</li>)}
+                    </ul>
                     <div className="flex flex-wrap gap-2">
-                      {onGoToData && <Button type="button" size="sm" onClick={onGoToData}>Ir a Datos del reporte</Button>}
+                      {onGoToData && sourceBlock.dependencies.length > 0 && (
+                        <Button type="button" size="sm" onClick={onGoToData}>Ir a Datos del reporte</Button>
+                      )}
+                      {onGoToMapping && sourceBlock.templateDependencies.length > 0 && (
+                        <Button type="button" size="sm" onClick={onGoToMapping}>Ir a Mapear campos</Button>
+                      )}
                       <Button type="button" size="sm" variant="outline" onClick={() => setSourceBlock(null)}>Cancelar</Button>
                     </div>
                   </AlertDescription>
@@ -479,8 +547,14 @@ export function ReportDefinitionForm({
                 sourceParameterNames={contractNames}
                 savedParameters={savedParameters}
                 reportCode={report?.code}
+                templateUsage={templateDependencies.parameters}
                 onChange={changeParameters}
               />
+              {templateBlock && (
+                <div className="mt-4">
+                  <TemplateDependencyAlert blocks={templateBlock} onGoToMapping={onGoToMapping} onCancel={() => setTemplateBlock(null)} />
+                </div>
+              )}
               {dependencyError && (
                 <Alert variant="destructive" className="mt-4"><AlertDescription>{dependencyError}</AlertDescription></Alert>
               )}

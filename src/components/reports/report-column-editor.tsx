@@ -2,6 +2,7 @@
 
 import { ArrowDown, ArrowUp, Calculator, Database, Sigma, SlidersHorizontal, Trash2 } from "lucide-react";
 import { ReportFormulaInput } from "@/components/reports/report-formula-input";
+import { TemplateUsageBadge } from "@/components/reports/report-template-dependency-alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ import {
   withDisplayOrder,
   type GroupParameterReference,
 } from "@/lib/reports/report-builder";
+import type { TemplatePlaceholderLocation } from "@/lib/reports/report-template-dependencies";
 import type {
   ReportColumn,
   ReportColumnType,
@@ -90,6 +92,7 @@ export function ReportColumnEditor({
   parameters,
   parameterGroups,
   disabled = false,
+  templateUsage,
   onChange,
 }: {
   columns: ReportColumn[];
@@ -97,6 +100,8 @@ export function ReportColumnEditor({
   parameters: ReportParameter[];
   parameterGroups: ReportParameterGroup[];
   disabled?: boolean;
+  /** `column.key` → where the active Excel template reads it as `{{rows.<key>}}` (#43). */
+  templateUsage?: ReadonlyMap<string, TemplatePlaceholderLocation[]>;
   onChange: (columns: ReportColumn[]) => void;
 }) {
   const groups = groupFieldCatalog(fields);
@@ -211,6 +216,7 @@ export function ReportColumnEditor({
                       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
                       <span className="truncate">{title}</span>
                       {!column.visible && <Badge variant="secondary">Oculta</Badge>}
+                      <TemplateUsageBadge locations={templateUsage?.get(column.key)} />
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {COLUMN_TYPE_LABELS[column.column_type]} · {sourceSummary(column, fields, parameters, groupedParameters)}
