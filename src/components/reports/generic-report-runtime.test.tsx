@@ -221,4 +221,92 @@ describe("GenericReportRuntime", () => {
     expect(await screen.findByText("valor rechazado")).toBeTruthy();
     expect(screen.getByText("items.0.notes: valor rechazado")).toBeTruthy();
   });
+
+  it("#45: shows the list's name, the line total from the report's formula, and keeps the payload raw", async () => {
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "SMOKE_COT",
+      data_source_id: 5,
+      data_source: { ...REPORT.data_source, id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización", capabilities: ["REPEATABLE_ROWS"] },
+      parameters: [
+        { name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "price_lists" } },
+        { name: "customer_name", label: "Cliente", input_type: "text", data_type: "string", required: false, default_value: null, display_order: 1, configuration_json: null },
+      ],
+      parameter_groups: [{
+        name: "productos", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id", min_items: 1, max_items: null, display_order: 0,
+        fields: [
+          { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" } },
+          { name: "cantidad", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: "0", exclusive_minimum: true } },
+          { name: "descuento", label: "Descuento", data_type: "decimal", input_type: "number", required: false, default_value: null, display_order: 2, configuration_json: { minimum: "0" } },
+        ],
+      }],
+    };
+    const columns = [
+      { key: "part_number", label: "Número de parte", column_type: "FIELD", source_field: "product.part_number", source_parameter: null, formula_definition: null, data_type: "string", format_type: "text", display_order: 0, visible: true, width: null },
+      { key: "unit_price", label: "Precio unitario", column_type: "FIELD", source_field: "price_list_item.unit_price", source_parameter: null, formula_definition: null, data_type: "decimal", format_type: "number", display_order: 1, visible: true, width: null },
+      { key: "cantidad", label: "Cantidad", column_type: "PARAMETER", source_field: null, source_parameter: "productos.cantidad", formula_definition: null, data_type: "integer", format_type: "number", display_order: 2, visible: true, width: null },
+      { key: "calculo", label: "Importe", column_type: "FORMULA", source_field: null, source_parameter: null, formula_definition: "unit_price * cantidad", data_type: "decimal", format_type: "number", display_order: 3, visible: true, width: null },
+    ] as const;
+    const summaries = [{ key: "calculo", label: "Subtotal", column_key: "calculo", operation: "SUM", formula_definition: null, format_type: "number" }] as const;
+    const smk = { value: 1, label: "SMK-001 · Filtro sintético A", product_id: 1, part_number: "SMK-001", item_number: "I-1", description: "Filtro sintético A", unit_price: "125.00", currency: "USD", classification: null };
+    listAllReportParameterOptions.mockResolvedValue([
+      { value: 1, label: "DONALDSON · 2026-10-01 · USD" },
+      { value: 2, label: "DONALDSON · 2026-11-01 · USD" },
+    ]);
+    searchReportProductOptions.mockResolvedValue([smk]);
+    resolveReportProductOption.mockResolvedValue(smk);
+    executeReport.mockImplementation(async (_code, parameters: { price_list_id: number; customer_name?: string }) => ({
+      execution_id: EXECUTION_ID,
+      columns: [{ key: "calculo", label: "Importe", data_type: "decimal", format_type: "number" }],
+      parameters: { price_list_id: parameters.price_list_id, customer_name: parameters.customer_name },
+      rows: [{ calculo: "250.00" }], summary: { calculo: "250.00" }, totals: {}, row_count: 1, truncated: false,
+    }));
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={report} summaries={[...summaries]} columns={[...columns]} />);
+
+    await user.selectOptions(await screen.findByLabelText("Lista de precios *"), "1");
+    await user.type(screen.getByLabelText("Cliente"), "ACME");
+    await user.click(screen.getByRole("combobox", { name: "Producto 1" }));
+    await user.click(await screen.findByRole("option", { name: /SMK-001/ }));
+    await user.clear(screen.getByLabelText("Cantidad * 1"));
+    await user.type(screen.getByLabelText("Cantidad * 1"), "2");
+    // Line total: the report's own `unit_price * cantidad`, in the list's currency.
+    expect(screen.getByText("USD 250.00")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await waitFor(() => expect(executeReport).toHaveBeenCalledWith("SMOKE_COT", {
+      price_list_id: 1,
+      customer_name: "ACME",
+      productos: [{ product_id: 1, cantidad: 2 }],
+    }, expect.anything()));
+    expect(await screen.findByText("DONALDSON · 2026-10-01 · USD", { selector: "dd" })).toBeTruthy();
+    expect(screen.getByText("ACME", { selector: "dd" })).toBeTruthy();
+    expect(screen.queryByText("1", { selector: "dd" })).toBeNull();
+
+    // Another list: the label follows the value actually sent.
+    await user.selectOptions(screen.getByLabelText("Lista de precios *"), "2");
+    await user.click(await screen.findByRole("button", { name: /Generar reporte|Regenerar reporte/ }));
+    await waitFor(() => expect(executeReport).toHaveBeenLastCalledWith("SMOKE_COT", expect.objectContaining({ price_list_id: 2 }), expect.anything()));
+    expect(await screen.findByText("DONALDSON · 2026-11-01 · USD", { selector: "dd" })).toBeTruthy();
+    expect(screen.queryByText("DONALDSON · 2026-10-01 · USD", { selector: "dd" })).toBeNull();
+    expect(listAllReportParameterOptions).toHaveBeenCalledTimes(1);
+  });
+
+  it("#45 G: a preselected default list is labelled without being picked by hand", async () => {
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "LISTA",
+      parameters: [{ name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: 7, display_order: 0, configuration_json: { options_source: "price_lists" } }],
+    };
+    listAllReportParameterOptions.mockResolvedValue([{ value: 7, label: "Donaldson · 2025-10-20" }]);
+    executeReport.mockResolvedValue({
+      execution_id: EXECUTION_ID, columns: [], parameters: { price_list_id: 7 }, rows: [], summary: {}, totals: {}, row_count: 0, truncated: false,
+    });
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={report} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    expect(await screen.findByText("Donaldson · 2025-10-20", { selector: "dd" })).toBeTruthy();
+    await waitFor(() => expect(executeReport).toHaveBeenCalledWith("LISTA", { price_list_id: 7 }, expect.anything()));
+  });
 });

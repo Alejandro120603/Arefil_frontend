@@ -20,6 +20,7 @@ import {
 import { ReportExcelTemplatePreview } from "@/components/reports/report-excel-template-preview";
 import { ReportExcelTemplateVersionHistory } from "@/components/reports/report-excel-template-version-history";
 import { WorkbookGrid } from "@/components/reports/workbook-grid";
+import { normalizeSummaries } from "@/lib/reports/report-builder";
 import {
   MAX_RENDERABLE_CELLS,
   VALUE_TYPE_LABELS,
@@ -553,6 +554,10 @@ function TemplateMapper({
             hasUnsavedChanges={isDirty}
             onPreviewReady={onPreviewReady}
             onPreviewInvalidated={onPreviewInvalidated}
+            lineAmount={{
+              columns: builder.columns,
+              summaries: normalizeSummaries(builder.excel_layout?.totals ?? [], builder.columns),
+            }}
           />
         </div>
       </CardContent>

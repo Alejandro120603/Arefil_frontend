@@ -9,22 +9,22 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { resolveReportProductOption } from "@/lib/api/reports";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { formatCurrency } from "@/lib/format/decimal";
+import { estimateLineAmount } from "@/lib/reports/report-line-estimate";
 import {
   createRuntimeGroupRow,
-  estimateLineTotal,
   orderedGroupFields,
   orderedParameterGroups,
   productSearchField,
-  QUOTATION_DISCOUNT_FIELD,
-  QUOTATION_QUANTITY_FIELD,
   type RuntimeGroupValues,
   type RuntimeParameterValues,
 } from "@/lib/reports/report-runtime";
 import type {
+  ReportColumn,
   ReportNumericConfiguration,
   ReportParameterGroup,
   ReportParameterGroupField,
   ReportProductOption,
+  ReportSummaryConfiguration,
 } from "@/types/api";
 
 /** Selected product per row, keyed by `${group.name}:${row.id}`. */
@@ -63,6 +63,7 @@ export function ReportRepeatableParameters({
   groupErrors = {},
   onOptionsStateChange,
   onChange,
+  lineAmount,
 }: {
   code: string;
   groups: ReportParameterGroup[];
@@ -73,6 +74,11 @@ export function ReportRepeatableParameters({
   groupErrors?: Record<string, string>;
   onOptionsStateChange?: (state: { loading: boolean; ready: boolean }) => void;
   onChange: (values: RuntimeGroupValues) => void;
+  /**
+   * The report's saved columns and summaries: the line "Total" evaluates the
+   * report's own amount formula (Frontend #45). Without them it stays "—".
+   */
+  lineAmount?: { columns: ReportColumn[]; summaries: ReportSummaryConfiguration[] };
 }) {
   const [products, setProducts] = useState<SelectedProducts>({});
   const [revalidating, setRevalidating] = useState(false);
@@ -234,12 +240,15 @@ export function ReportRepeatableParameters({
                   ) : rows.map((row, rowIndex) => {
                     const selected = product ? products[productKey(group.name, row.id)] ?? null : null;
                     const productError = product ? errors[group.name]?.[rowIndex]?.[product.name] : undefined;
-                    const lineTotal = product
-                      ? estimateLineTotal(
-                        selected?.unit_price,
-                        row.values[QUOTATION_QUANTITY_FIELD],
-                        row.values[QUOTATION_DISCOUNT_FIELD],
-                      )
+                    const lineTotal = product && lineAmount
+                      ? estimateLineAmount({
+                        columns: lineAmount.columns,
+                        summaries: lineAmount.summaries,
+                        groupName: group.name,
+                        row: row.values,
+                        scalars: scalarValues,
+                        product: selected,
+                      })
                       : null;
                     return (
                       <TableRow key={row.id}>
@@ -317,7 +326,7 @@ export function ReportRepeatableParameters({
                         })}
                         {product && (
                           <TableCell className="text-right tabular-nums">
-                            {lineTotal == null ? "—" : formatCurrency(lineTotal, selected?.currency)}
+                            {lineTotal == null ? "—" : formatCurrency(String(lineTotal), selected?.currency)}
                           </TableCell>
                         )}
                         <TableCell>

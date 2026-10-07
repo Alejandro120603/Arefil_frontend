@@ -24,6 +24,7 @@ export function ReportRuntimeParameters({
   disabled = false,
   errors = {},
   onOptionsStateChange,
+  onOptionsLoaded,
   onChange,
 }: {
   code: string;
@@ -32,6 +33,8 @@ export function ReportRuntimeParameters({
   disabled?: boolean;
   errors?: Record<string, string>;
   onOptionsStateChange?: (state: { loading: boolean; ready: boolean }) => void;
+  /** The options already loaded for the select parameters, so callers can label values without another request. */
+  onOptionsLoaded?: (options: Record<string, ReportOption[]>) => void;
   onChange: (name: string, value: string | boolean) => void;
 }) {
   const [options, setOptions] = useState<Record<string, ReportOption[]>>({});
@@ -61,6 +64,10 @@ export function ReportRuntimeParameters({
     });
     return () => controller.abort();
   }, [code, parameters]);
+
+  useEffect(() => {
+    onOptionsLoaded?.(options);
+  }, [onOptionsLoaded, options]);
 
   useEffect(() => {
     onOptionsStateChange?.({ loading: loadingOptions, ready: optionsReady });

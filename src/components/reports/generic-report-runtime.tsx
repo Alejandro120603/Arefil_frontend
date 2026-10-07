@@ -18,11 +18,12 @@ import {
   reportExecutionId,
   initialRuntimeGroupValues,
   initialRuntimeValues,
+  parameterDisplayValues,
   validateRuntimeForm,
   type RuntimeGroupValues,
   type RuntimeParameterValue,
 } from "@/lib/reports/report-runtime";
-import type { ReportDefinition, ReportSummaryConfiguration } from "@/types/api";
+import type { ReportColumn, ReportDefinition, ReportOption, ReportSummaryConfiguration } from "@/types/api";
 
 interface SuccessfulExecution {
   id: number;
@@ -34,22 +35,28 @@ interface SuccessfulExecution {
    * clears the execution and with it the id.
    */
   executionId: string | null;
+  /** Labels of the option-backed values sent (`price_list_id` → its name), fixed at generation. */
+  parameterLabels: Record<string, string>;
 }
 
 export function GenericReportRuntime({
   report,
   summaries = [],
+  columns = [],
   initialParameters = {},
 }: {
   report: ReportDefinition;
   /** Saved summary configuration; the dataset only carries their keys. */
   summaries?: ReportSummaryConfiguration[];
+  /** Saved builder columns: the line "Total" estimate evaluates their formula (#45). */
+  columns?: ReportColumn[];
   initialParameters?: Record<string, unknown>;
 }) {
   const groups = useMemo(() => report.parameter_groups ?? [], [report.parameter_groups]);
   const [values, setValues] = useState(() => initialRuntimeValues(report.parameters, initialParameters));
   const [groupValues, setGroupValues] = useState<RuntimeGroupValues>(() => initialRuntimeGroupValues(groups));
   const [execution, setExecution] = useState<SuccessfulExecution | null>(null);
+  const [parameterOptions, setParameterOptions] = useState<Record<string, ReportOption[]>>({});
   const executionIdRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const [generatedOnce, setGeneratedOnce] = useState(false);
@@ -72,6 +79,7 @@ export function GenericReportRuntime({
     [groupValues, groups, report.code, report.parameters, values],
   );
   const optionsReady = scalarOptionsState.ready && groupOptionsState.ready;
+  const lineAmount = useMemo(() => ({ columns, summaries }), [columns, summaries]);
   const loadingOptions = scalarOptionsState.loading || groupOptionsState.loading;
 
   useEffect(() => () => controllerRef.current?.abort(), []);
@@ -114,6 +122,7 @@ export function GenericReportRuntime({
         parameters,
         payload,
         executionId: reportExecutionId(payload),
+        parameterLabels: parameterDisplayValues(report.parameters, parameters, parameterOptions),
       });
       setGeneratedOnce(true);
     } catch (error) {
@@ -140,12 +149,14 @@ export function GenericReportRuntime({
             disabled={generating}
             errors={validation.fieldErrors}
             onOptionsStateChange={setScalarOptionsState}
+            onOptionsLoaded={setParameterOptions}
             onChange={handleChange}
           />
           <ReportRepeatableParameters
             code={report.code}
             groups={groups}
             scalarValues={values}
+            lineAmount={lineAmount}
             values={groupValues}
             disabled={generating}
             errors={rowErrors}
@@ -174,6 +185,7 @@ export function GenericReportRuntime({
               payload={execution.payload}
               summaries={summaries}
               parameters={report.parameters}
+              parameterLabels={execution.parameterLabels}
             />
           </section>
           <Card id="descargas" className="scroll-mt-6">

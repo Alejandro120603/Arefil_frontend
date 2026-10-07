@@ -54,6 +54,7 @@ export function ReportBuilderPreviewTable({
   summaries = [],
   parameters = [],
   title = "Vista previa del reporte",
+  parameterLabels = {},
 }: {
   preview: ReportBuilderPreviewResponse;
   /** Saved summary configuration, the only place their labels exist. */
@@ -61,6 +62,8 @@ export function ReportBuilderPreviewTable({
   /** Report parameters, used to label the values the backend ran with. */
   parameters?: ReportParameter[];
   title?: string;
+  /** Human labels for option-backed parameters (`price_list_id` → its list's name). */
+  parameterLabels?: Record<string, string>;
 }) {
   const values = preview.summary ?? preview.totals;
   // A pre-#20 layout keys its totals by column, and renders under that column.
@@ -78,7 +81,7 @@ export function ReportBuilderPreviewTable({
     .map(([name, value]) => ({
       name,
       label: parameters.find((parameter) => parameter.name === name)?.label || name,
-      value: typeof value === "boolean" ? (value ? "Sí" : "No") : String(value),
+      value: parameterLabels[name] ?? (typeof value === "boolean" ? (value ? "Sí" : "No") : String(value)),
     }));
 
   return (

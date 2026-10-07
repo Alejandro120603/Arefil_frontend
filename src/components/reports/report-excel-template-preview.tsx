@@ -24,7 +24,7 @@ import {
   type RuntimeGroupValues,
   type RuntimeParameterValue,
 } from "@/lib/reports/report-runtime";
-import type { ReportDefinition, ReportExcelRenderPreview } from "@/types/api";
+import type { ReportColumn, ReportDefinition, ReportExcelRenderPreview, ReportSummaryConfiguration } from "@/types/api";
 
 type PreviewStage =
   | { status: "idle" }
@@ -53,6 +53,7 @@ export function ReportExcelTemplatePreview({
   hasUnsavedChanges,
   onPreviewReady,
   onPreviewInvalidated,
+  lineAmount,
 }: {
   report: ReportDefinition;
   /** Whether the builder has any summary/total configured — never recomputed here. */
@@ -62,6 +63,8 @@ export function ReportExcelTemplatePreview({
   /** Fires once a render actually succeeds — a session fact the wizard's checklist (#33) cannot re-derive from the backend. */
   onPreviewReady?: () => void;
   onPreviewInvalidated?: () => void;
+  /** Saved columns and summaries for the line "Total" estimate (#45). */
+  lineAmount?: { columns: ReportColumn[]; summaries: ReportSummaryConfiguration[] };
 }) {
   const groups = useMemo(() => report.parameter_groups ?? [], [report.parameter_groups]);
   const [values, setValues] = useState(() => initialRuntimeValues(report.parameters));
@@ -184,6 +187,7 @@ export function ReportExcelTemplatePreview({
             groupErrors={validation.groupErrors}
             onOptionsStateChange={setGroupOptionsState}
             onChange={handleGroupChange}
+            lineAmount={lineAmount}
           />
         </div>
       )}

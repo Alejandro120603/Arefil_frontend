@@ -3,6 +3,7 @@ import type {
   PriceListComparisonResponse,
   ReportBuilderPreviewResponse,
   ReportNumericConfiguration,
+  ReportOption,
   ReportParameter,
   ReportParameterGroup,
   ReportParameterGroupField,
@@ -270,9 +271,6 @@ export function validateRuntimeForm(
  * Line-item conventions of the quotation data source (Backend #20). The field
  * *names* are part of that contract, so the table can price a line locally.
  */
-export const QUOTATION_QUANTITY_FIELD = "quantity";
-export const QUOTATION_DISCOUNT_FIELD = "discount";
-
 /** The field a group resolves through the product search, if it has one. */
 export function productSearchField(group: ReportParameterGroup): ReportParameterGroupField | null {
   return orderedGroupFields(group.fields).find((field) => {
@@ -284,24 +282,25 @@ export function productSearchField(group: ReportParameterGroup): ReportParameter
 }
 
 /**
- * A *local estimate* of one line's total, shown while the user types. It is
- * never sent anywhere: the authoritative amount is the backend's Decimal
- * formula engine, whose result replaces this as soon as the report is
- * generated. Answers null when the line is not priced yet.
+ * Human labels for the option-backed parameters of one execution (Frontend
+ * #45): `price_list_id = 1` reads "DONALDSON · 2026-10-01 · USD". Built from
+ * the options the runtime already loaded and the exact values sent, so a
+ * regenerated report never shows a stale label; the payload keeps raw values.
  */
-export function estimateLineTotal(
-  unitPrice: string | null | undefined,
-  quantity: RuntimeParameterValue | undefined,
-  discount: RuntimeParameterValue | undefined,
-): string | null {
-  const price = Number(unitPrice);
-  const amount = Number(quantity ?? "");
-  if (unitPrice == null || unitPrice === "" || !Number.isFinite(price)) return null;
-  if (quantity == null || quantity === "" || typeof quantity === "boolean" || !Number.isFinite(amount)) return null;
-  const rawDiscount = discount == null || discount === "" || typeof discount === "boolean" ? 0 : Number(discount);
-  if (!Number.isFinite(rawDiscount) || rawDiscount < 0 || rawDiscount > 100) return null;
-  const cents = Math.round(price * 100) * amount * (1 - rawDiscount / 100);
-  return (Math.round(cents) / 100).toFixed(2);
+export function parameterDisplayValues(
+  parameters: ReportParameter[],
+  sent: Record<string, unknown>,
+  options: Record<string, ReportOption[]>,
+): Record<string, string> {
+  const labels: Record<string, string> = {};
+  for (const parameter of parameters) {
+    if (parameter.input_type !== "select") continue;
+    const value = sent[parameter.name];
+    if (value == null || value === "") continue;
+    const option = (options[parameter.name] ?? []).find((candidate) => String(candidate.value) === String(value));
+    if (option) labels[parameter.name] = option.label;
+  }
+  return labels;
 }
 
 export function backendRowErrors(

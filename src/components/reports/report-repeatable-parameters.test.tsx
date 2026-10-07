@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportRepeatableParameters } from "./report-repeatable-parameters";
 import { initialRuntimeGroupValues, type RuntimeGroupValues } from "@/lib/reports/report-runtime";
-import type { ReportParameterGroup, ReportProductOption } from "@/types/api";
+import type { ReportColumn, ReportParameterGroup, ReportProductOption, ReportSummaryConfiguration } from "@/types/api";
 
 const { resolveReportProductOption, searchReportProductOptions } = vi.hoisted(() => ({
   resolveReportProductOption: vi.fn(), searchReportProductOptions: vi.fn(),
@@ -37,13 +37,45 @@ const GROUP: ReportParameterGroup = {
   ],
 };
 
-function Harness() {
+function column(key: string, overrides: Partial<ReportColumn>): ReportColumn {
+  return {
+    key, label: key, column_type: "FIELD", source_field: null, source_parameter: null, formula_definition: null,
+    data_type: "decimal", format_type: "currency", display_order: 0, visible: true, width: null, ...overrides,
+  };
+}
+
+/** A builder whose line amount applies the captured discount as a percentage. */
+const DISCOUNTED_LINE = {
+  columns: [
+    column("price", { source_field: "price_list_item.unit_price" }),
+    column("qty", { column_type: "PARAMETER", source_parameter: "items.quantity", data_type: "integer" }),
+    column("disc", { column_type: "PARAMETER", source_parameter: "items.discount" }),
+    column("line_total", { column_type: "FORMULA", formula_definition: "ROUND(price * qty * (1 - disc / 100), 2)" }),
+  ],
+  summaries: [{ key: "subtotal", label: "Subtotal", column_key: "line_total", operation: "SUM", formula_definition: null, format_type: "currency" }] as ReportSummaryConfiguration[],
+};
+
+/** The seed's formula: the discount field exists but the amount ignores it. */
+const PLAIN_LINE = {
+  ...DISCOUNTED_LINE,
+  columns: DISCOUNTED_LINE.columns.map((item) => item.key === "line_total"
+    ? { ...item, formula_definition: "ROUND(qty * price, 2)" }
+    : item),
+};
+
+function Harness({ lineAmount = DISCOUNTED_LINE }: { lineAmount?: typeof DISCOUNTED_LINE }) {
   const [context, setContext] = useState("7");
   const [values, setValues] = useState<RuntimeGroupValues>(() => initialRuntimeGroupValues([GROUP]));
   return <>
     <button onClick={() => setContext("8")}>Cambiar lista</button>
-    <ReportRepeatableParameters code="COTIZACION" groups={[GROUP]} scalarValues={{ price_list_id: context }} values={values} onChange={setValues} />
+    <ReportRepeatableParameters code="COTIZACION" groups={[GROUP]} scalarValues={{ price_list_id: context }} values={values} onChange={setValues} lineAmount={lineAmount} />
   </>;
+}
+
+async function pickFilter(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("combobox", { name: "Producto 1" }));
+  await user.type(screen.getByRole("combobox", { name: "Producto 1" }), "P5502");
+  await user.click(await screen.findByRole("option", { name: /P550202/ }));
 }
 
 beforeEach(() => {
@@ -85,14 +117,62 @@ describe("ReportRepeatableParameters", () => {
     await user.click(await screen.findByRole("option", { name: /P550202/ }));
 
     expect(await screen.findByText("Filtro Donaldson")).toBeTruthy();
-    // Unit price cell plus the 1-unit line total.
+    // Unit price cell plus the 1-unit line total (discount defaults to 0).
     expect(screen.getAllByText("$574.13")).toHaveLength(2);
-    // 4 × 574.13 − 5% = 2181.69
+    // The report's own formula: ROUND(574.13 × 4 × (1 − 5/100), 2) = 2181.69
     await user.clear(screen.getByLabelText("Cantidad * 1"));
     await user.type(screen.getByLabelText("Cantidad * 1"), "4");
     await user.clear(screen.getByLabelText("Descuento (%) 1"));
     await user.type(screen.getByLabelText("Descuento (%) 1"), "5");
     expect(screen.getByText("$2,181.69")).toBeTruthy();
+  });
+
+  it("K: a discount the report's formula ignores never changes the line total", async () => {
+    const user = userEvent.setup();
+    render(<Harness lineAmount={PLAIN_LINE} />);
+    await pickFilter(user);
+    await user.clear(screen.getByLabelText("Cantidad * 1"));
+    await user.type(screen.getByLabelText("Cantidad * 1"), "2");
+    expect(screen.getByText("$1,148.26")).toBeTruthy();
+    await user.clear(screen.getByLabelText("Descuento (%) 1"));
+    await user.type(screen.getByLabelText("Descuento (%) 1"), "50");
+    expect(screen.getByText("$1,148.26")).toBeTruthy();
+  });
+
+  it("L: without a product, a quantity, or the report's columns the total stays —", async () => {
+    const user = userEvent.setup();
+    const view = render(<Harness />);
+    const totalCell = () => screen.getAllByRole("row")[1].querySelectorAll("td")[7];
+    expect(totalCell().textContent).toBe("—");
+    await pickFilter(user);
+    await user.clear(screen.getByLabelText("Cantidad * 1"));
+    expect(totalCell().textContent).toBe("—");
+    view.unmount();
+    render(<Harness lineAmount={{ columns: [], summaries: [] }} />);
+    await pickFilter(user);
+    expect(screen.getAllByText("$574.13")).toHaveLength(1);
+  });
+
+  it("A: the suggestions render in a portal outside the scrolling table", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Harness />);
+    await user.click(screen.getByRole("combobox", { name: "Producto 1" }));
+    const listbox = await screen.findByRole("listbox");
+    // Not inside the table's overflow container: rendered at document level.
+    expect(container.contains(listbox)).toBe(false);
+    expect(listbox.closest("[data-slot='product-suggestions']")).toBeTruthy();
+    expect(await screen.findByRole("option", { name: /P550202/ })).toBeTruthy();
+  });
+
+  it("D: shows loading and empty states inside the floating list", async () => {
+    let resolve: (value: ReportProductOption[]) => void = () => undefined;
+    searchReportProductOptions.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("combobox", { name: "Producto 1" }));
+    expect(await screen.findByText("Buscando...")).toBeTruthy();
+    resolve([]);
+    expect(await screen.findByText("Sin coincidencias.")).toBeTruthy();
   });
 
   it("drops a product missing from the new price list and keeps one that still belongs to it", async () => {

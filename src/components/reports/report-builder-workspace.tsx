@@ -361,6 +361,7 @@ export function ReportBuilderWorkspace({
             code={code}
             groups={value.parameterGroups}
             scalarValues={runtimeValues}
+            lineAmount={{ columns: value.columns, summaries: value.layout.totals }}
             values={runtimeGroupValues}
             disabled={previewing}
             errors={runtimeRowErrors}
