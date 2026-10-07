@@ -350,6 +350,12 @@ export function reportExecutionId(payload: unknown): string | null {
   return typeof executionId === "string" && executionId.trim() !== "" ? executionId : null;
 }
 
+/** Document availability belongs to the immutable execution, never the live report. */
+export function reportDocumentAvailable(payload: unknown): boolean {
+  return isReportBuilderPreviewResponse(payload)
+    && payload.document_available === true;
+}
+
 export function isSQLReportExecutionResponse(value: unknown): value is SQLReportExecutionResponse {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<SQLReportExecutionResponse>;

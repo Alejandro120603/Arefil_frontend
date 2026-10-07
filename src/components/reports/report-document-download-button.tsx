@@ -28,11 +28,11 @@ function documentErrorMessage(error: unknown): string {
   if (failure === "truncated") return TRUNCATED_EXECUTION_MESSAGE;
   if (failure === "stale") return STALE_EXECUTION_MESSAGE;
   if (error instanceof ApiError && (error.status === 404 || error.status === 409)) return MISSING_TEMPLATE_MESSAGE;
-  return getUserErrorMessage(error, "No se pudo generar la cotización Excel.");
+  return getUserErrorMessage(error, "No se pudo generar el documento Excel.");
 }
 
 /**
- * Final quotation download for one execution (Frontend #25).
+ * Final document download for one execution (Frontend #25).
  *
  * `executionId` is the immutable snapshot the backend persisted for the
  * preview the user approved, and it is the only thing this request sends: the
@@ -82,7 +82,7 @@ export function ReportDocumentDownloadButton({
        * The backend's Content-Disposition is authoritative. The code-based
        * name is only a defensive fallback for a missing or unusable header.
        */
-      triggerBrowserDownload(result, `${code}.xlsx`);
+      triggerBrowserDownload(result, `${code}-documento.xlsx`);
     } catch (downloadError) {
       if (controller.signal.aborted) return;
       if (isUnusableExecution(downloadError)) setStaleExecutionId(executionId);
@@ -98,7 +98,7 @@ export function ReportDocumentDownloadButton({
       <div className="flex flex-wrap gap-2">
         <Button type="button" disabled={disabled || downloading || stale} onClick={download}>
           {downloading ? <Loader2 className="animate-spin" /> : <FileSpreadsheet />}
-          {downloading ? "Generando..." : "Descargar cotización Excel"}
+          {downloading ? "Generando..." : "Descargar documento Excel"}
         </Button>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}

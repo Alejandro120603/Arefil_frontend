@@ -194,7 +194,7 @@ describe("ReportExcelTemplatePreview", () => {
 
     await fillRequiredAndGenerate(user);
     await screen.findByText("Vista previa basada en plantilla v4");
-    await user.click(screen.getByRole("button", { name: /Descargar cotización Excel/ }));
+    await user.click(screen.getByRole("button", { name: /Descargar documento Excel/ }));
 
     await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledWith("COTIZACION", "exec-1", expect.anything()));
   });
@@ -207,7 +207,7 @@ describe("ReportExcelTemplatePreview", () => {
 
     await fillRequiredAndGenerate(user);
     await screen.findByText("Vista previa basada en plantilla v4");
-    expect((screen.getByRole("button", { name: /Descargar cotización Excel/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Descargar documento Excel/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/solo las primeras filas/)).toBeTruthy();
     expect(screen.queryByText(/corresponde exactamente a esta vista previa/)).toBeNull();
     expect(downloadReportDocumentXlsx).not.toHaveBeenCalled();
