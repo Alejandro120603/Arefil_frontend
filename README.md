@@ -231,14 +231,15 @@ make docker_down
 
 El preflight valida Docker, el daemon, Compose, ambos Dockerfiles, el repo
 hermano y que el directorio persistente sea escribible. Después construye ambas
-imágenes, arranca FastAPI, espera su healthcheck y finalmente arranca Next.js.
+imágenes, arranca FastAPI, espera su healthcheck, arranca Next.js y finalmente
+Caddy (HTTPS). Ver "Despliegue HTTPS".
 No usa `node_modules`, `.next` ni `.venv` del host.
 
 Comandos operativos:
 
 ```bash
 make docker_ps       # estado y health
-make docker_logs     # logs de ambos servicios; Ctrl+C solo deja de seguirlos
+make docker_logs     # logs de caddy, frontend y backend; Ctrl+C solo deja de seguirlos
 make docker_rebuild  # reconstruye/recrea sin borrar datos
 make docker_down     # detiene el stack sin borrar datos
 ```
@@ -258,56 +259,82 @@ No borres ese directorio, no uses `docker compose down -v` como hábito y no
 copies una base SQLite/WAL activa. Para un respaldo consistente usa
 `Administración > Respaldos` o `GET /api/admin/database/backup`.
 
-### Configuración y puertos
+### Despliegue HTTPS
 
-Los defaults son:
+Dos modos, nunca mezclados:
 
-- Frontend: <http://localhost:3001>
-- Backend: <http://localhost:8000>
-- Swagger: <http://localhost:8000/docs>
+| Modo | Comando | URL | Sesión |
+|---|---|---|---|
+| Desarrollo | `make compose_up` (procesos del host) | `http://localhost:3001` | `APP_ENV=development`; `SESSION_COOKIE_SECURE=false` permitido |
+| Despliegue interno | `make docker_up` (`compose.yaml`) | `https://<AREFIL_HOSTNAME>` | `APP_ENV=production`, `SESSION_COOKIE_SECURE=true` obligatorio |
 
-Se pueden cambiar los puertos publicados sin alterar los puertos internos:
-
-```bash
-make docker_up FRONTEND_PORT=3100 BACKEND_PORT=8100
-```
-
-Los Make targets construyen el backend con el UID/GID del usuario actual para
-que el proceso no-root pueda escribir el bind mount. Para usar Compose
-directamente:
-
-```bash
-AREFIL_UID="$(id -u)" AREFIL_GID="$(id -g)" \
-  docker compose up --detach --build --wait
-```
-
-`.env.docker.example` documenta overrides opcionales. Puede copiarse a `.env`
-y ajustarse sin versionar secretos:
-
-```bash
-cp .env.docker.example .env
-```
-
-`BACKEND_DATA_DIR` permite apuntar a otro directorio persistente explícito; el
-default siempre es el `backend/data/` real del repo hermano.
-
-### Browser, red interna y LAN
-
-Next.js usa `API_INTERNAL_URL=http://backend:8000/api` dentro de la red Compose.
-El navegador usa `/backend-api` sobre el mismo origen del frontend, por lo que
-nunca intenta resolver `backend` ni requiere una IP pública horneada en la
-imagen.
-
-Desde otra laptop en la misma LAN abre:
+Topología de `compose.yaml`:
 
 ```text
-http://IP-DE-LAPTOP-SERVIDOR:3001
+navegador ──HTTPS:443──▶ caddy ──edge──▶ frontend:3000 ──internal──▶ backend:8000
+           (HTTP:80 → 308 a HTTPS)        (Next.js, /backend-api)      (FastAPI, sin puerto en el host)
 ```
 
-No uses `localhost` en la laptop cliente: apuntaría a esa laptop, no al servidor.
-Compose publica 3001 y 8000 en las interfaces del host; permitir tráfico en el
-firewall/red local es responsabilidad del operador. Los scripts no modifican
-reglas de firewall.
+- Sólo Caddy publica puertos (`HTTPS_PORT`/`HTTP_PORT`, 443/80 por defecto).
+  Frontend y backend sólo hacen `expose`; el backend vive únicamente en la red
+  `internal` (sin salida a internet) y el navegador sólo lo alcanza por
+  `/backend-api`. `make test_deploy_config` verifica esto sobre
+  `docker compose config`.
+- Caddy termina TLS (`deploy/Caddyfile`) y añade
+  `Strict-Transport-Security`. `AREFIL_TLS` elige el certificado:
+  - `internal` (default): CA local de Caddy. Para que los navegadores
+    confíen, exporta su raíz y distribúyela:
+    `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./arefil-root.crt`.
+  - CA corporativa/interna: coloca `arefil.crt` (con la cadena) y `arefil.key`
+    en `deploy/certs/` (ignorado por Git) y usa
+    `AREFIL_TLS="/certs/arefil.crt /certs/arefil.key"`.
+  - Let's Encrypt: `AREFIL_TLS=<correo>` si `AREFIL_HOSTNAME` resuelve
+    públicamente y los puertos 80/443 son alcanzables.
+- Nunca se versionan certificados, llaves ni contraseñas.
+- Cookie de sesión: `arefil_session`, `HttpOnly`, `Secure`, `SameSite=Lax`,
+  `Path=/`, sin `Domain`. Por HTTP plano el navegador no la guarda ni la envía;
+  por eso el puerto 80 sólo redirige a HTTPS.
+- Dirección del cliente (límite de login): Caddy sobrescribe
+  `X-Forwarded-For` con la dirección que vio e ignora la que mande el cliente;
+  el frontend la reenvía (`TRUST_PROXY_FORWARDED_FOR=true`) y el backend sólo
+  la acepta desde la IP fija del frontend (`AREFIL_FRONTEND_INTERNAL_IP`, en
+  `TRUSTED_PROXIES`).
+- `Origin`: el proxy `/backend-api` rechaza escrituras de otro origen y no
+  reenvía `Origin`; el backend además rechaza cualquier `Origin` fuera de
+  `TRUSTED_ORIGINS` (= `AREFIL_PUBLIC_ORIGIN`).
+- El backend en producción se niega a arrancar con `SESSION_COOKIE_SECURE=false`
+  u orígenes no HTTPS, y no publica `/docs`, `/redoc` ni `/openapi.json`.
+
+Configuración (`cp .env.docker.example .env` y ajusta):
+
+```bash
+AREFIL_HOSTNAME=arefil.example.internal
+AREFIL_PUBLIC_ORIGIN=https://arefil.example.internal   # incluye :puerto si HTTPS_PORT != 443
+AREFIL_TLS=internal
+SESSION_TTL_HOURS=12
+```
+
+Primer administrador (contraseña pedida de forma interactiva, nunca como
+argumento):
+
+```bash
+make docker_up
+docker compose exec backend python -m app.cli.users create --username <usuario> --role ADMIN
+docker compose exec backend python -m app.cli.users create --username <usuario> --role USER
+```
+
+Límite de confianza: quien tenga shell en el servidor Docker puede alcanzar el
+backend por la IP de su contenedor y administrar usuarios con la CLI; el acceso
+al servidor es parte del perímetro de administración. Desde la LAN sólo existen
+los puertos de Caddy. El reparto del límite de login por cliente depende de que
+Docker conserve la IP de origen (lo hace para clientes externos con la red
+bridge por defecto; las conexiones desde el propio host aparecen como la
+gateway de Docker).
+
+`BACKEND_DATA_DIR` permite apuntar a otro directorio persistente explícito; el
+default siempre es el `backend/data/` real del repo hermano. Desde otra máquina
+de la LAN abre `https://<AREFIL_HOSTNAME>` (no `localhost`); abrir 443/80 en el
+firewall es responsabilidad del operador.
 
 ### Mover Arefil a otra laptop
 
@@ -338,26 +365,19 @@ Variables de la imagen:
 | `NEXT_PUBLIC_API_URL` | build | `/backend-api` | Destino visible al navegador; queda horneado en el bundle. |
 | `API_INTERNAL_URL` | runtime | `http://127.0.0.1:8000/api` | Destino privado de Server Components y del proxy. |
 | `TRUSTED_ORIGINS` | runtime | vacío | Orígenes públicos adicionales aceptados para escrituras vía `/backend-api`. |
+| `TRUST_PROXY_FORWARDED_FOR` | runtime | vacío | `true` sólo detrás de un proxy que sobrescribe `X-Forwarded-For`. |
 | `HOSTNAME` | runtime | `0.0.0.0` | Bind del servidor standalone. |
 | `PORT` | runtime | `3000` | Puerto del servidor standalone. |
 
 El default `/backend-api` permite reutilizar la misma imagen al cambiar de IP o
-acceder desde otra laptop. Si se necesita que el navegador consulte FastAPI de
-forma directa fuera de Compose, la URL pública puede sobrescribirse durante
-el build:
+nombre: el navegador nunca conoce una URL directa del backend.
+`TRUST_PROXY_FORWARDED_FOR=true` sólo debe activarse cuando un proxy que
+sobrescribe `X-Forwarded-For` (Caddy) es la única entrada.
 
-```bash
-docker build \
-  --build-arg NEXT_PUBLIC_API_URL=http://192.168.1.20:8000/api \
-  -t arefil-frontend .
-```
-
-Ese modo exige reconstruir la imagen si cambia la dirección y configurar CORS
-en FastAPI. `NEXT_PUBLIC_*` nunca debe contener secretos.
-
-El healthcheck consulta `GET /api/health` en el propio frontend. Es liveness del
-proceso Next.js, no readiness del backend; la conectividad end-to-end puede
-comprobarse con `GET /backend-api/health`.
+El healthcheck consulta `GET /api/health` dentro del propio contenedor (no
+necesita puertos publicados). Es liveness del proceso Next.js, no readiness del
+backend; la conectividad end-to-end puede comprobarse con
+`GET https://<AREFIL_HOSTNAME>/backend-api/health`.
 
 ## Validación
 
@@ -367,6 +387,7 @@ npm test
 npm run typecheck
 npm run build
 make test_lifecycle
+make test_deploy_config
 make compose_up
 make compose_down
 ```

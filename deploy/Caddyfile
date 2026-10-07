@@ -1,0 +1,23 @@
+# TLS entry point for the AREFIL deployment (compose.yaml).
+#
+# AREFIL_TLS selects where the certificate comes from:
+#   internal                          Caddy's own local CA (default; trust its root on clients)
+#   /certs/arefil.crt /certs/arefil.key   files issued by a corporate/internal CA (deploy/certs/)
+#   admin@example.com                 Let's Encrypt, when the hostname is publicly resolvable
+{
+	admin off
+	skip_install_trust
+}
+
+{$AREFIL_HOSTNAME:localhost} {
+	tls {$AREFIL_TLS:internal}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Caddy sets X-Forwarded-For to the address it saw and ignores the value a
+	# client sends (no trusted_proxies configured here). The frontend relays it.
+	reverse_proxy frontend:3000
+}
