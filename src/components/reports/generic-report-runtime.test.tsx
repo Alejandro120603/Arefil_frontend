@@ -112,6 +112,7 @@ describe("GenericReportRuntime", () => {
       Promise.resolve(PRODUCTS.find((candidate) => candidate.product_id === productId) ?? null));
     executeReport.mockResolvedValue({
       execution_id: EXECUTION_ID,
+      document_available: true,
       columns: [
         { key: "sku", label: "SKU", data_type: "string", format_type: "text" },
         { key: "total", label: "Total", data_type: "decimal", format_type: "currency" },
@@ -119,7 +120,7 @@ describe("GenericReportRuntime", () => {
       rows: [{ sku: "P-001", total: "208.79" }, { sku: "P-002", total: "580.00" }],
       totals: { total: "788.79" }, row_count: 2, truncated: false,
     });
-    downloadReportData.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "cotizacion.xlsx" });
+    downloadReportData.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "COTIZACION-datos.xlsx" });
     const user = userEvent.setup();
     render(<GenericReportRuntime report={report} />);
     await user.click(await screen.findByRole("combobox", { name: "Producto 1" }));
@@ -155,38 +156,39 @@ describe("GenericReportRuntime", () => {
       "COTIZACION", "csv", { executionId: EXECUTION_ID }, expect.anything(),
     ));
     expect(executeReport).toHaveBeenCalledTimes(1);
-    expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "COTIZACION.xlsx");
+    expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "COTIZACION-datos.xlsx");
 
     // The document layer renders from the frozen execution snapshot, never
     // from the parameters the form still holds.
     downloadReportDocumentXlsx.mockResolvedValue({
       blob: new Blob(["xlsx"]),
-      filename: "COTIZACION.xlsx",
+      filename: "COTIZACION-documento.xlsx",
     });
-    await user.click(screen.getByRole("button", { name: "Descargar cotización Excel" }));
+    await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
     await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledWith(
       "COTIZACION", EXECUTION_ID, expect.anything(),
     ));
     expect(triggerBrowserDownload).toHaveBeenLastCalledWith(
-      expect.objectContaining({ filename: "COTIZACION.xlsx" }),
-      "COTIZACION.xlsx",
+      expect.objectContaining({ filename: "COTIZACION-documento.xlsx" }),
+      "COTIZACION-documento.xlsx",
     );
 
     await user.clear(screen.getByLabelText("Cantidad * 1"));
     await user.type(screen.getByLabelText("Cantidad * 1"), "3");
     expect(screen.queryByRole("columnheader", { name: "SKU" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Descargar Excel de datos" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Descargar cotización Excel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar documento Excel" })).toBeNull();
     expect(screen.getByRole("button", { name: "Regenerar reporte" })).toBeTruthy();
 
     // Regenerating replaces the id: the obsolete one is never sent again.
     executeReport.mockResolvedValue({
       execution_id: "b9f0a1c2-0000-4000-8000-000000000002",
+      document_available: true,
       columns: [{ key: "sku", label: "SKU", data_type: "string", format_type: "text" }],
       rows: [{ sku: "P-001" }], totals: {}, row_count: 1, truncated: false,
     });
     await user.click(screen.getByRole("button", { name: "Regenerar reporte" }));
-    await user.click(await screen.findByRole("button", { name: "Descargar cotización Excel" }));
+    await user.click(await screen.findByRole("button", { name: "Descargar documento Excel" }));
     await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenLastCalledWith(
       "COTIZACION", "b9f0a1c2-0000-4000-8000-000000000002", expect.anything(),
     ));
@@ -199,7 +201,34 @@ describe("GenericReportRuntime", () => {
     await user.click(screen.getByRole("button", { name: "Generar reporte" }));
     expect(await screen.findByText("Vista previa del reporte")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Descargar Excel de datos" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Descargar cotización Excel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar documento Excel" })).toBeNull();
+  });
+
+  it("uses document availability from each execution without another request", async () => {
+    const user = userEvent.setup();
+    executeReport
+      .mockResolvedValueOnce({
+        execution_id: "execution-without-template",
+        document_available: false,
+        columns: [], rows: [], summary: {}, totals: {}, row_count: 0, truncated: false,
+      })
+      .mockResolvedValueOnce({
+        execution_id: "execution-with-template",
+        document_available: true,
+        columns: [], rows: [], summary: {}, totals: {}, row_count: 0, truncated: false,
+      });
+    render(<GenericReportRuntime report={REPORT} />);
+
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await screen.findByText("Vista previa del reporte");
+    expect(screen.queryByRole("button", { name: "Descargar documento Excel" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Descargar Excel de datos" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Descargar CSV de datos" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Regenerar reporte" }));
+    expect(await screen.findByRole("button", { name: "Descargar documento Excel" })).toBeTruthy();
+    expect(executeReport).toHaveBeenCalledTimes(2);
+    expect(downloadReportDocumentXlsx).not.toHaveBeenCalled();
   });
 
   it("places structured backend errors on the affected repeatable field", async () => {

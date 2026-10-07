@@ -56,8 +56,8 @@ export function ReportDataDownloadButtons({
         return;
       }
       const fallbackFilename = format === "xlsx"
-        ? `${code}.xlsx`
-        : `${code.toLowerCase().replaceAll("_", "-")}.csv`;
+        ? `${code}-datos.xlsx`
+        : `${code}-datos.csv`;
       triggerBrowserDownload(result, fallbackFilename);
     } catch (downloadError) {
       if (!controller.signal.aborted) {

@@ -15,6 +15,7 @@ import { executeReport } from "@/lib/api/reports";
 import {
   backendRowErrors,
   isReportBuilderPreviewResponse,
+  reportDocumentAvailable,
   reportExecutionId,
   initialRuntimeGroupValues,
   initialRuntimeValues,
@@ -35,6 +36,8 @@ interface SuccessfulExecution {
    * clears the execution and with it the id.
    */
   executionId: string | null;
+  /** True only when this execution pinned a document template at generation. */
+  documentAvailable: boolean;
   /** Labels of the option-backed values sent (`price_list_id` → its name), fixed at generation. */
   parameterLabels: Record<string, string>;
 }
@@ -122,6 +125,7 @@ export function GenericReportRuntime({
         parameters,
         payload,
         executionId: reportExecutionId(payload),
+        documentAvailable: reportDocumentAvailable(payload),
         parameterLabels: parameterDisplayValues(report.parameters, parameters, parameterOptions),
       });
       setGeneratedOnce(true);
@@ -196,10 +200,10 @@ export function GenericReportRuntime({
                   Only a result without a snapshot (a report with no builder)
                   falls back to `execution.parameters`. Any edit clears the
                   execution, so a stale file can never be downloaded. */}
-              {isReportBuilderPreviewResponse(execution.payload) && (
+              {isReportBuilderPreviewResponse(execution.payload) && execution.documentAvailable && (
                 <div className="flex flex-col gap-2">
                   <h3 className="text-sm font-medium">Documento</h3>
-                  <p className="text-sm text-muted-foreground">La cotización final se arma con la plantilla Excel del reporte y exactamente las filas y totales de esta vista previa.</p>
+                  <p className="text-sm text-muted-foreground">El documento final se arma con la plantilla Excel fijada para esta ejecución y exactamente las filas y totales de esta vista previa.</p>
                   <ReportDocumentDownloadButton code={report.code} executionId={execution.executionId} />
                 </div>
               )}

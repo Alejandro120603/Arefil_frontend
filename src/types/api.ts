@@ -773,6 +773,8 @@ export interface ReportBuilderPreviewResponse {
    * parameters again; it is absent for datasets the backend cannot persist.
    */
   execution_id?: string | null;
+  /** Whether this execution pinned an Excel template when it was created. */
+  document_available?: boolean;
   columns: ReportBuilderPreviewColumn[];
   /** Normalized scalar parameters the backend actually ran with (no groups). */
   parameters?: Record<string, unknown>;

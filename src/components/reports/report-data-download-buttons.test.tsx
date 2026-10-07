@@ -56,15 +56,15 @@ describe("ReportDataDownloadButtons", () => {
     const user = userEvent.setup();
     downloadReportData.mockResolvedValue({
       blob: new Blob(["PK"]),
-      filename: "COTIZACION_PRODUCTOS.xlsx",
+      filename: "COTIZACION_PRODUCTOS-datos.xlsx",
     });
     render(<ReportDataDownloadButtons code="COTIZACION_PRODUCTOS" parameters={{}} />);
 
     await user.click(screen.getByRole("button", { name: "Descargar Excel de datos" }));
 
     await waitFor(() => expect(triggerBrowserDownload).toHaveBeenCalledWith(
-      expect.objectContaining({ filename: "COTIZACION_PRODUCTOS.xlsx" }),
-      "COTIZACION_PRODUCTOS.xlsx",
+      expect.objectContaining({ filename: "COTIZACION_PRODUCTOS-datos.xlsx" }),
+      "COTIZACION_PRODUCTOS-datos.xlsx",
     ));
   });
 
