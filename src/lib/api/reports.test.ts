@@ -20,6 +20,7 @@ import {
   downloadReportExcelTemplate,
   getReportExcelTemplate,
   uploadReportExcelTemplate,
+  getReportReadiness,
 } from "./reports";
 import { ApiError, getUserErrorMessage } from "./errors";
 
@@ -75,6 +76,29 @@ describe("report manager API", () => {
       "/backend-api/reports/REPORT%20%2F%20Q4",
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+
+  it("reads one report's readiness from the administrative contract", async () => {
+    const body = {
+      report_code: "COTIZACION", enabled: false, ready: false,
+      issues: [{ code: "BUILDER_MISSING", severity: "blocker", step: "data", message: "Configura las columnas." }],
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getReportReadiness("COTIZACION")).resolves.toEqual(body);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/admin/reports/COTIZACION/readiness",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("surfaces a readiness 404 as an ApiError", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ detail: "El reporte NOPE no existe." }, { status: 404 }),
+    ));
+
+    await expect(getReportReadiness("NOPE")).rejects.toMatchObject({ status: 404, message: "El reporte NOPE no existe." });
   });
 
   it("executes any report through the generic data endpoint", async () => {

@@ -149,6 +149,22 @@ describe("ReportDefinitionForm", () => {
     expect(listReportDataSources).toHaveBeenCalledTimes(1);
   });
 
+  it("L: hands the backend's effective `enabled` to the wizard after creating", async () => {
+    const user = userEvent.setup();
+    const onSaved = vi.fn();
+    createReport.mockResolvedValue({ ...REPORT, enabled: false } satisfies ReportDefinition);
+    render(<ReportDefinitionForm onSaved={onSaved} />);
+
+    await screen.findByRole("option", { name: "Catálogo de productos" });
+    await user.type(screen.getByLabelText("Nombre"), "Catálogo");
+    await user.type(screen.getByLabelText("Código"), "product-report");
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(PRODUCT_SOURCE.id));
+    await user.click(screen.getByRole("button", { name: "Crear reporte" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ enabled: false })));
+    expect(screen.queryByText(/Reporte habilitado/)).toBeNull();
+  });
+
   it("selects a source, shows metadata, and creates without query_text", async () => {
     const user = userEvent.setup();
     createReport.mockResolvedValue({ ...REPORT } satisfies ReportDefinition);
@@ -170,9 +186,11 @@ describe("ReportDefinitionForm", () => {
     expect(createReport.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       code: "PRODUCT_REPORT",
       data_source_id: PRODUCT_SOURCE.id,
-      enabled: true,
+      // Creation never asks to publish: Finalizar does, gated by readiness (#44).
+      enabled: false,
       parameters: [],
     }));
+    expect(screen.queryByLabelText("Reporte habilitado")).toBeNull();
     expect(createReport.mock.calls[0]?.[0]).not.toHaveProperty("query_text");
     expect(createReport.mock.calls[0]?.[0]).not.toHaveProperty("data_source_type");
     expect(push).toHaveBeenCalledWith("/administracion/reportes/PRODUCT_REPORT/configurar");
@@ -349,7 +367,7 @@ describe("ReportDefinitionForm", () => {
       description: null,
       category: null,
       data_source_id: PRODUCT_SOURCE.id,
-      enabled: true,
+      enabled: false,
       parameters: [],
     });
   });

@@ -193,7 +193,7 @@ export function ReportBuilderWorkspace({
       // The edited state is intentionally preserved on failure.
       const failure = reportSaveFailure(error, "No se pudo guardar el constructor. Tus cambios siguen en pantalla.");
       setSaveError(failure);
-      if (failure.kind !== "message") onTemplateMayHaveChanged?.();
+      if (failure.kind === "template" || failure.kind === "conflict") onTemplateMayHaveChanged?.();
     }
   }
 

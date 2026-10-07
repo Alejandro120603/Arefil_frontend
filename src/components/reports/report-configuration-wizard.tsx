@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/errors";
 import { useReportBuilderDraft } from "@/hooks/use-report-builder-draft";
+import { useReportReadiness } from "@/hooks/use-report-readiness";
 import { useReportTemplateInspection } from "@/hooks/use-report-template-inspection";
 import { getReportExcelTemplate } from "@/lib/api/reports";
 import {
@@ -52,9 +53,14 @@ const STEP_DESCRIPTIONS: Record<ReportWizardStepId, string> = {
  *
  * The active template's inspection has one owner too (Frontend #43):
  * `useReportTemplateInspection` inspects the version the template card
- * reports, once, and steps 2, 3, 5 and 7 share it — "Fuente y entradas" and
+ * reports, once, and steps 2, 3 and 5 share it — "Fuente y entradas" and
  * "Datos del reporte" use it to warn before removing something the template
  * still reads; Backend #37 stays the authority on save.
+ *
+ * Whether the report can be enabled is the backend's readiness (Backend #38,
+ * Frontend #44): `useReportReadiness` is asked only while Finalizar is
+ * visible, and every save that can change it bumps `readinessRevision`, so
+ * Finalizar never shows an answer older than the last change.
  */
 export function ReportConfigurationWizard({
   report: initialReport,
@@ -76,7 +82,7 @@ export function ReportConfigurationWizard({
   /** Whether `ReportExcelTemplateCard` has reported back at least once — `templateState == null` is ambiguous otherwise. */
   const [templateChecked, setTemplateChecked] = useState(false);
   const [templateSkipped, setTemplateSkipped] = useState(false);
-  const [previewGenerated, setPreviewGenerated] = useState(false);
+  const [readinessRevision, setReadinessRevision] = useState(0);
   const mounted = useRef(false);
   const [mappingsDirty, setMappingsDirty] = useState(false);
   const [savedRevision, setSavedRevision] = useState(0);
@@ -93,10 +99,19 @@ export function ReportConfigurationWizard({
     report?.code ?? null,
     templateChecked ? templateState : "pending",
   );
+  const readiness = useReportReadiness(report?.code ?? null, {
+    active: step === "finalize",
+    revision: readinessRevision,
+  });
+  /** A save that can change readiness happened: the answer held so far is stale. */
+  function invalidateReadiness() {
+    setReadinessRevision((revision) => revision + 1);
+  }
   /** Something may have changed the active template behind this session: re-read its metadata and inspection. */
   function refreshTemplate() {
     setSavedRevision((revision) => revision + 1);
     templateInspection.reload();
+    invalidateReadiness();
   }
 
   useEffect(() => {
@@ -180,7 +195,12 @@ export function ReportConfigurationWizard({
           templateDependencies={templateInspection.dependencies}
           onGoToMapping={templateState != null ? () => goTo("mapping") : undefined}
           onTemplateMayHaveChanged={refreshTemplate}
-          onDefinitionSaved={(saved) => { if (report != null) setReport(saved); }}
+          onDefinitionSaved={(saved) => {
+            if (report != null) {
+              setReport(saved);
+              invalidateReadiness();
+            }
+          }}
           onSaved={(saved) => {
             if (report != null) {
               setReport(saved);
@@ -199,7 +219,10 @@ export function ReportConfigurationWizard({
               code={report.code}
               builder={builder}
               parameters={report.parameters}
-              onSaved={() => setSavedRevision((revision) => revision + 1)}
+              onSaved={() => {
+                setSavedRevision((revision) => revision + 1);
+                invalidateReadiness();
+              }}
               templateDependencies={templateInspection.dependencies}
               onGoToMapping={templateState != null ? () => goTo("mapping") : undefined}
               onTemplateMayHaveChanged={refreshTemplate}
@@ -217,6 +240,11 @@ export function ReportConfigurationWizard({
               refreshToken={savedRevision}
               hasUnsavedMappings={mappingsDirty}
               onTemplateChange={(template) => {
+                // The card's first report only describes what the backend already
+                // had; a later different version (upload, restore, delete) is new.
+                const changed = templateChecked
+                  && `${templateState?.version}:${templateState?.checksum}` !== `${template?.version}:${template?.checksum}`;
+                if (changed) invalidateReadiness();
                 setTemplateState(template);
                 setTemplateChecked(true);
                 if (template != null) setTemplateSkipped(false);
@@ -260,10 +288,11 @@ export function ReportConfigurationWizard({
                   mode={templateMode}
                   templateInspection={templateInspection}
                   onModeChange={handleTemplateModeChange}
-                  onPreviewReady={() => setPreviewGenerated(true)}
-                  onPreviewInvalidated={() => setPreviewGenerated(false)}
                   onDirtyChange={setMappingsDirty}
-                  onTemplateSaved={() => setSavedRevision((revision) => revision + 1)}
+                  onTemplateSaved={() => {
+                    setSavedRevision((revision) => revision + 1);
+                    invalidateReadiness();
+                  }}
                 />
               </CardContent>
             </Card>
@@ -281,11 +310,9 @@ export function ReportConfigurationWizard({
               <CardContent>
                 <ReportWizardFinalizeStep
                   report={report}
-                  builder={savedBuilder}
-                  active={step === "finalize"}
-                  previewGeneratedThisSession={previewGenerated}
-                  templateInspection={templateInspection}
+                  readiness={readiness}
                   onReportChange={setReport}
+                  onGoTo={goTo}
                 />
               </CardContent>
             </Card>

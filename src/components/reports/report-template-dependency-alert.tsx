@@ -85,8 +85,9 @@ export function TemplateDependencyAlert({
 
 /**
  * How a failed configuration save reads (Frontend #43): the authoritative
- * `ACTIVE_TEMPLATE_INCOMPATIBLE` as a list of affected template cells, a `409`
- * as a temporary conflict, anything else as the backend's own message.
+ * `ACTIVE_TEMPLATE_INCOMPATIBLE` as a list of affected template cells,
+ * `REPORT_NOT_READY` as its blockers (#44), a `409` as a temporary conflict,
+ * anything else as the backend's own message.
  */
 export function ReportSaveFailureAlert({
   title,
@@ -102,6 +103,20 @@ export function ReportSaveFailureAlert({
   if (failure.kind === "message") return <ErrorAlert title={title} message={failure.message} />;
   if (failure.kind === "conflict") {
     return <ErrorAlert title="El guardado no se completó" message={failure.message} />;
+  }
+  if (failure.kind === "not-ready") {
+    const blockers = failure.issues.filter((issue) => issue.severity === "blocker");
+    return (
+      <Alert variant="destructive" role="alert">
+        <TriangleAlert className="h-4 w-4" />
+        <AlertTitle>{failure.message}</AlertTitle>
+        {blockers.length > 0 && (
+          <AlertDescription>
+            <ul className="list-disc pl-5">{blockers.map((issue) => <li key={`${issue.code}:${issue.message}`}>{issue.message}</li>)}</ul>
+          </AlertDescription>
+        )}
+      </Alert>
+    );
   }
   return (
     <Alert variant="destructive" role="alert">

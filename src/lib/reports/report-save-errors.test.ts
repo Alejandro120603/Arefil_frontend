@@ -45,6 +45,33 @@ describe("reportSaveFailure", () => {
     expect(reportSaveFailure(new ApiError(422, [{ loc: ["body", "name"], msg: "requerido" }]), "fallback").kind).toBe("message");
   });
 
+  it("reads REPORT_NOT_READY into readiness issues", () => {
+    const failure = reportSaveFailure(new ApiError(422, {
+      code: "REPORT_NOT_READY",
+      message: "El reporte todavía tiene configuraciones pendientes.",
+      issues: [
+        { code: "BUILDER_MISSING", severity: "blocker", step: "data", message: "Configura las columnas." },
+        { code: "TEMPLATE_MISSING", severity: "warning", step: "template", message: "Sin plantilla." },
+      ],
+    }), "fallback");
+    expect(failure).toEqual({
+      kind: "not-ready",
+      message: "El reporte todavía tiene configuraciones pendientes.",
+      issues: [
+        { code: "BUILDER_MISSING", severity: "blocker", step: "data", message: "Configura las columnas." },
+        { code: "TEMPLATE_MISSING", severity: "warning", step: "template", message: "Sin plantilla." },
+      ],
+    });
+  });
+
+  it("summarizes REPORT_NOT_READY with its blockers on one line", () => {
+    expect(reportSaveFailureMessage(new ApiError(422, {
+      code: "REPORT_NOT_READY",
+      message: "Pendientes.",
+      issues: [{ code: "BUILDER_MISSING", severity: "blocker", step: "data", message: "Configura las columnas." }],
+    }), "fallback")).toBe("Pendientes. Configura las columnas.");
+  });
+
   it("maps a 409 to a temporary conflict, not to an incompatible template", () => {
     expect(reportSaveFailure(new ApiError(409, "La plantilla Excel activa cambió."), "fallback")).toEqual({
       kind: "conflict", message: SAVE_CONFLICT_MESSAGE,

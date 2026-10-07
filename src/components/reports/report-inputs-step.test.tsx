@@ -363,11 +363,13 @@ describe("Fuente y entradas — editing a report", () => {
       name: "Cotización 2026",
       description: null,
       category: null,
-      enabled: true,
       data_source_id: QUOTATION_SOURCE.id,
       parameters: [PRICE_LIST, CUSTOMER, TAX],
       parameter_groups: [ITEMS],
     }));
+    // Publishing belongs to Finalizar: an inputs save never sends `enabled`,
+    // so it cannot revert a report enabled there meanwhile (#44).
+    expect(updateReportInputs.mock.calls[0][1]).not.toHaveProperty("enabled");
     expect(updateReport).not.toHaveBeenCalled();
     expect(saveReportBuilder).not.toHaveBeenCalled();
     expect(getReportBuilder).toHaveBeenCalledTimes(1);
