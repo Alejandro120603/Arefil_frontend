@@ -182,6 +182,30 @@ En el navegador, `/backend-api/*` se reenvía desde Next.js hacia
 como destino del navegador y el flujo normal no requiere CORS ni una IP LAN
 horneada en el bundle.
 
+## Sesión
+
+El panel exige sesión. `/login` pide usuario y contraseña y llama
+`POST /backend-api/auth/login`; el backend responde con la cookie HttpOnly
+`arefil_session`, que el proxy `/backend-api` devuelve tal cual al navegador.
+El token nunca se guarda en JavaScript (`localStorage`, estado de React, etc.).
+Los usuarios se crean en el backend con su CLI (`python -m app.cli.users`).
+
+- `src/proxy.ts` sólo redirige a `/login` cuando falta la cookie; tenerla no
+  prueba nada.
+- `src/app/(app)/layout.tsx` valida la sesión con `GET /auth/me`
+  (`src/lib/auth/server-session.ts`, reenviando la cookie) y redirige a
+  `/login?next=…` si el backend ya no la acepta. `administracion/` exige
+  además `reports:admin`.
+- Un `401` en el navegador manda a `/login?next=<página actual>`; un `403`
+  muestra el mensaje del backend sin cerrar la sesión.
+- El proxy `/backend-api` rechaza escrituras (`POST/PUT/PATCH/DELETE`) de otro
+  origen (`Origin`/`Sec-Fetch-Site`). Si el panel se publica bajo un origen
+  distinto al `Host` que ve Next.js, agrégalo en `TRUSTED_ORIGINS` (lista
+  separada por comas).
+
+El backend sigue siendo la única autoridad: estas comprobaciones sólo guían la
+navegación.
+
 Los campos `Decimal` del backend (p. ej. `unit_price`, `unit_weight_kg`)
 llegan como **string** en el JSON y así se tipan en `src/types/api.ts`
 (`DecimalString = string`) — nunca se convierten silenciosamente a `number`;
@@ -306,6 +330,7 @@ Variables de la imagen:
 |---|---|---|---|
 | `NEXT_PUBLIC_API_URL` | build | `/backend-api` | Destino visible al navegador; queda horneado en el bundle. |
 | `API_INTERNAL_URL` | runtime | `http://127.0.0.1:8000/api` | Destino privado de Server Components y del proxy. |
+| `TRUSTED_ORIGINS` | runtime | vacío | Orígenes públicos adicionales aceptados para escrituras vía `/backend-api`. |
 | `HOSTNAME` | runtime | `0.0.0.0` | Bind del servidor standalone. |
 | `PORT` | runtime | `3000` | Puerto del servidor standalone. |
 
