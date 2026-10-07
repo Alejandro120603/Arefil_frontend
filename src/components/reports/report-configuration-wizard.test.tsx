@@ -6,12 +6,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportConfigurationWizard } from "./report-configuration-wizard";
 import type { ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
+import type { ReportReadinessState } from "@/hooks/use-report-readiness";
 import type { ReportTemplateInspection } from "@/hooks/use-report-template-inspection";
 import type { TemplateDependencies } from "@/lib/reports/report-template-dependencies";
 import { inspectionWithPlaceholders } from "@/test/template-inspection";
 import type { ReportAdminDefinition, ReportBuilderDefinition, ReportExcelTemplate } from "@/types/api";
 
-const { push, replace, getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder, inspectReportExcelTemplate, cardTemplate } = vi.hoisted(() => ({
+const { push, replace, getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder, inspectReportExcelTemplate, cardTemplate, getReportReadiness } = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
   getReportBuilder: vi.fn(),
@@ -19,11 +20,12 @@ const { push, replace, getReportBuilder, getReportExcelTemplate, getReportFieldC
   getReportFieldCatalog: vi.fn(),
   saveReportBuilder: vi.fn(),
   inspectReportExcelTemplate: vi.fn(),
+  getReportReadiness: vi.fn(),
   /** What the mocked template card reports on its first load. */
   cardTemplate: { current: null as ReportExcelTemplate | null },
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace }) }));
-vi.mock("@/lib/api/reports", () => ({ getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder, inspectReportExcelTemplate }));
+vi.mock("@/lib/api/reports", () => ({ getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder, inspectReportExcelTemplate, getReportReadiness }));
 
 /**
  * The wizard shell is orchestration over five already-shipped, already-tested
@@ -59,7 +61,7 @@ vi.mock("@/components/reports/report-definition-form", () => ({
 vi.mock("@/components/reports/report-builder-workspace", () => ({
   // Stands in for the real (controlled) workspace: it shows the wizard-owned
   // draft and edits/saves it only through the props it is given.
-  ReportBuilderWorkspace: ({ code, builder, templateDependencies }: { code: string; builder: ReportBuilderDraft; templateDependencies?: TemplateDependencies }) => (
+  ReportBuilderWorkspace: ({ code, builder, templateDependencies, onSaved }: { code: string; builder: ReportBuilderDraft; templateDependencies?: TemplateDependencies; onSaved?: () => void }) => (
     <div data-testid="builder-workspace">
       builder:{code}
       <p>template-rows:{[...(templateDependencies?.rows.keys() ?? [])].join(",")}</p>
@@ -71,7 +73,7 @@ vi.mock("@/components/reports/report-builder-workspace", () => ({
         type="button"
         onClick={() => builder.updateDraft((draft) => ({ ...draft, columns: draft.columns.map((column) => ({ ...column, label: `${column.label} (editada)` })) }))}
       >fake-edit-column</button>
-      <button type="button" onClick={() => { void builder.save(); }}>fake-save-builder</button>
+      <button type="button" onClick={() => { void builder.save().then((saved) => { if (saved) onSaved?.(); }); }}>fake-save-builder</button>
     </div>
   ),
 }));
@@ -119,12 +121,15 @@ vi.mock("@/components/reports/report-excel-template-inspector", () => ({
   ),
 }));
 vi.mock("@/components/reports/report-wizard-finalize-step", () => ({
-  ReportWizardFinalizeStep: ({ report, previewGeneratedThisSession }: {
+  ReportWizardFinalizeStep: ({ report, readiness, onGoTo }: {
     report: ReportAdminDefinition;
-    previewGeneratedThisSession: boolean;
+    readiness: ReportReadinessState;
+    onGoTo?: (step: "data") => void;
   }) => (
     <div data-testid="finalize-step">
-      finalize:{report.code}:preview-generated:{String(previewGeneratedThisSession)}
+      finalize:{report.code}:enabled:{String(report.enabled)}
+      <p>readiness:{readiness.status}:{readiness.readiness?.issues.map((issue) => issue.code).join(",") ?? "none"}</p>
+      <button type="button" onClick={() => onGoTo?.("data")}>fake-go-to-data</button>
     </div>
   ),
 }));
@@ -153,6 +158,10 @@ beforeEach(() => {
   getReportFieldCatalog.mockResolvedValue([]);
   getReportExcelTemplate.mockResolvedValue(null);
   inspectReportExcelTemplate.mockResolvedValue(inspectionWithPlaceholders([], { version: 4, checksum: "abc" }));
+  getReportReadiness.mockResolvedValue({
+    report_code: "COTIZACION", enabled: false, ready: true,
+    issues: [{ code: "TEMPLATE_MISSING", severity: "warning", step: "template", message: "Sin plantilla." }],
+  });
 });
 
 afterEach(() => {
@@ -311,12 +320,14 @@ describe("ReportConfigurationWizard — editing an existing report", () => {
     expect(screen.getByText(/Vista previa/, { selector: "h2" })).toBeTruthy();
   });
 
-  it("carries a preview generated during the session through to the Finalizar checklist", async () => {
+  it("asks the backend for readiness only once Finalizar is shown", async () => {
     const user = userEvent.setup();
     render(<ReportConfigurationWizard report={REPORT} initialStepParam={6} />);
-    await user.click(screen.getByRole("button", { name: "fake-preview-ready" }));
+    await waitFor(() => expect(getReportBuilder).toHaveBeenCalled());
+    expect(getReportReadiness).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Continuar" }));
-    expect(screen.getByText(/preview-generated:true/)).toBeTruthy();
+    expect(await screen.findByText("readiness:ready:TEMPLATE_MISSING")).toBeTruthy();
+    expect(getReportReadiness).toHaveBeenCalledTimes(1);
   });
 
   it("syncs the current step into the URL without a full navigation", async () => {
@@ -434,5 +445,48 @@ describe("ReportConfigurationWizard — shared template inspection (#43)", () =>
     expect(screen.getByText("template-rows:")).toBeTruthy();
     expect(screen.getByTestId("template-card").getAttribute("data-refresh-token")).toBe("1");
     expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ReportConfigurationWizard — backend readiness (#44)", () => {
+  it("reuses the readiness answer across steps until a save makes it stale", async () => {
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={7} />);
+    expect(await screen.findByText("readiness:ready:TEMPLATE_MISSING")).toBeTruthy();
+    expect(getReportReadiness).toHaveBeenCalledTimes(1);
+
+    // Leaving and coming back without saving anything: no new request.
+    await user.click(screen.getByRole("button", { name: "fake-go-to-data" }));
+    await user.click(screen.getByRole("button", { name: /Finalizar/ }));
+    expect(await screen.findByText("readiness:ready:TEMPLATE_MISSING")).toBeTruthy();
+    expect(getReportReadiness).toHaveBeenCalledTimes(1);
+
+    // Saving the builder makes it stale; it is re-read only when Finalizar is shown again.
+    getReportReadiness.mockResolvedValue({ report_code: "COTIZACION", enabled: false, ready: true, issues: [] });
+    await user.click(screen.getByRole("button", { name: /Datos del reporte/ }));
+    await user.click(screen.getByRole("button", { name: "fake-save-builder" }));
+    await waitFor(() => expect(saveReportBuilder).toHaveBeenCalled());
+    expect(getReportReadiness).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: /Finalizar/ }));
+    expect(await screen.findByText("readiness:ready:")).toBeTruthy();
+    expect(getReportReadiness).toHaveBeenCalledTimes(2);
+  });
+
+  it("a mappings save also makes readiness stale", async () => {
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={7} />);
+    expect(await screen.findByText("readiness:ready:TEMPLATE_MISSING")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Mapear campos/ }));
+    await user.click(screen.getByRole("button", { name: "fake-mapper-save" }));
+    await user.click(screen.getByRole("button", { name: /Finalizar/ }));
+    await waitFor(() => expect(getReportReadiness).toHaveBeenCalledTimes(2));
+  });
+
+  it("N: never asks for readiness nor shows the report as enabled while creating", async () => {
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={null} initialStepParam={null} />);
+    await user.click(screen.getByRole("button", { name: "Continuar" }));
+    expect(screen.queryByText(/Reporte habilitado/)).toBeNull();
+    expect(getReportReadiness).not.toHaveBeenCalled();
   });
 });

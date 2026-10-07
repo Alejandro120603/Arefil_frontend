@@ -382,7 +382,7 @@ export function ReportDefinitionForm({
         ? { kind: "message", message: getUserErrorMessage(error, fallback) }
         : reportSaveFailure(error, fallback);
       setSubmitError(failure);
-      if (failure.kind !== "message") onTemplateMayHaveChanged?.();
+      if (failure.kind === "template" || failure.kind === "conflict") onTemplateMayHaveChanged?.();
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -449,10 +449,7 @@ export function ReportDefinitionForm({
               <Label htmlFor="report-category">Categoría</Label>
               <Input id="report-category" value={value.category} onChange={(event) => change({ category: event.target.value })} />
             </div>
-            <label className="flex items-center gap-2 self-end pb-2 text-sm">
-              <input type="checkbox" checked={value.enabled} onChange={(event) => change({ enabled: event.target.checked })} />
-              Reporte habilitado
-            </label>
+            {/* Publishing lives in Finalizar, gated by backend readiness (#44). */}
           </CardContent>
         </Card>
       )}

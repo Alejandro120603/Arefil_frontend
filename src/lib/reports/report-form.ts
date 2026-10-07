@@ -154,7 +154,9 @@ export function emptyReportForm(): ReportFormValue {
     description: "",
     category: "",
     data_source_id: null,
-    enabled: true,
+    // A new report is published from Finalizar once the backend says it is
+    // ready (Backend #38); creation never asks to publish it.
+    enabled: false,
     parameters: [],
   };
 }
@@ -272,11 +274,24 @@ export function toReportUpdate(value: ReportFormValue): ReportUpdateRequest {
   };
 }
 
+/**
+ * Source, inputs and metadata — never `enabled`: publishing belongs to
+ * Finalizar, and leaving it out keeps an inputs save from reverting a report
+ * enabled there meanwhile (the form holds the value it was opened with).
+ */
 export function toReportInputsUpdate(
   value: ReportFormValue,
   parameterGroups: ReportParameterGroup[],
 ): ReportInputsUpdateRequest {
-  return { ...toReportUpdate(value), parameter_groups: toParameterGroupsRequest(parameterGroups) };
+  const request = toReportRequest(value);
+  return {
+    name: request.name,
+    description: request.description,
+    category: request.category,
+    data_source_id: request.data_source_id,
+    parameters: request.parameters,
+    parameter_groups: toParameterGroupsRequest(parameterGroups),
+  };
 }
 
 export function coerceRuntimeValue(parameter: ReportParameter, raw: string | boolean): unknown {

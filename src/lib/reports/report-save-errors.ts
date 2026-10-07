@@ -1,7 +1,8 @@
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { placeholderIdentity } from "@/lib/reports/report-excel-mapping";
+import { parseReadinessIssues } from "@/lib/reports/report-readiness";
 import { templateLocationLabel } from "@/lib/reports/report-template-dependencies";
-import type { ReportColumn, ReportParameter, ReportSummaryConfiguration } from "@/types/api";
+import type { ReportColumn, ReportParameter, ReportReadinessIssue, ReportSummaryConfiguration } from "@/types/api";
 
 /**
  * The one place that reads the failure of a report configuration save
@@ -9,10 +10,13 @@ import type { ReportColumn, ReportParameter, ReportSummaryConfiguration } from "
  *
  * Backend #37 answers a write that would orphan a placeholder of the active
  * Excel template with a *structured* `detail`; every other failure keeps
- * `detail: "mensaje"` (or FastAPI's validation array). Components ask this
- * module instead of branching on `typeof detail` themselves.
+ * `detail: "mensaje"` (or FastAPI's validation array). Backend #38 adds
+ * `REPORT_NOT_READY`, raised when enabling a report that still has readiness
+ * blockers (Frontend #44). Components ask this module instead of branching on
+ * `typeof detail` themselves.
  */
 export const ACTIVE_TEMPLATE_INCOMPATIBLE = "ACTIVE_TEMPLATE_INCOMPATIBLE";
+export const REPORT_NOT_READY = "REPORT_NOT_READY";
 
 export interface ActiveTemplateIssue {
   /** Bare `namespace.key`, when the backend could tell which placeholder. */
@@ -26,10 +30,12 @@ export interface ActiveTemplateIssue {
 
 export type ReportSaveFailure =
   | { kind: "template"; message: string; templateVersion: number | null; issues: ActiveTemplateIssue[] }
+  | { kind: "not-ready"; message: string; issues: ReportReadinessIssue[] }
   | { kind: "conflict"; message: string }
   | { kind: "message"; message: string };
 
 export const TEMPLATE_INCOMPATIBLE_MESSAGE = "La plantilla Excel utiliza datos que este cambio eliminaría.";
+export const REPORT_NOT_READY_MESSAGE = "El reporte todavía tiene configuraciones pendientes.";
 export const SAVE_CONFLICT_MESSAGE =
   "La configuración o la plantilla cambió mientras guardabas. Intenta guardar nuevamente.";
 
@@ -73,6 +79,13 @@ export function reportSaveFailure(error: unknown, fallback: string): ReportSaveF
         issues: parseIssues(detail.issues),
       };
     }
+    if (detail.code === REPORT_NOT_READY) {
+      return {
+        kind: "not-ready",
+        message: text(detail.message) ?? REPORT_NOT_READY_MESSAGE,
+        issues: parseReadinessIssues(detail.issues),
+      };
+    }
   }
   return { kind: "message", message: getUserErrorMessage(error, fallback) };
 }
@@ -80,6 +93,10 @@ export function reportSaveFailure(error: unknown, fallback: string): ReportSaveF
 /** For surfaces with room for one line only (e.g. enabling the report). */
 export function reportSaveFailureMessage(error: unknown, fallback: string): string {
   const failure = reportSaveFailure(error, fallback);
+  if (failure.kind === "not-ready") {
+    const blockers = failure.issues.filter((issue) => issue.severity === "blocker").map((issue) => issue.message);
+    return blockers.length > 0 ? `${failure.message} ${blockers.join(" ")}` : failure.message;
+  }
   if (failure.kind !== "template" || failure.issues.length === 0) return failure.message;
   const where = failure.issues.map((issue) => issueLocation(issue)).filter(Boolean).join(", ");
   return where ? `${failure.message} (${where})` : failure.message;

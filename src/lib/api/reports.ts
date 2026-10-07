@@ -17,6 +17,7 @@ import type {
   ReportExcelTemplateUpload,
   ReportUpdateRequest,
   ReportInputsUpdateRequest,
+  ReportReadiness,
   ExcelMappingsRequest,
   ExcelMappingsResponse,
   ExcelTemplateRestoreRequest,
@@ -64,6 +65,11 @@ export function updateReportInputs(
   options?: RequestOptions,
 ): Promise<ReportBuilderDefinition> {
   return browserApiClient.apiPutJson<ReportBuilderDefinition>(reportPath(code, "/inputs"), request, options);
+}
+
+/** Backend #38: computed readiness of one report (`404` for an unknown code). */
+export function getReportReadiness(code: string, options?: RequestOptions): Promise<ReportReadiness> {
+  return browserApiClient.apiGet<ReportReadiness>(`/admin${reportPath(code, "/readiness")}`, options);
 }
 
 export function getAdminReport(code: string, options?: RequestOptions): Promise<ReportAdminDefinition> {

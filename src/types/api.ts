@@ -335,13 +335,42 @@ export interface ReportCreateRequest {
   parameters: ReportParameter[];
 }
 
-export type ReportUpdateRequest = Omit<ReportCreateRequest, "code">;
+/** `PATCH /reports/{code}`: every field is optional; only the ones sent change. */
+export type ReportUpdateRequest = Partial<Omit<ReportCreateRequest, "code">>;
 
 /** Atomic body of `PUT /reports/{code}/inputs` for an existing report. */
 export type ReportInputsUpdateRequest =
-  Pick<ReportUpdateRequest, "data_source_id" | "parameters">
+  Required<Pick<ReportUpdateRequest, "data_source_id" | "parameters">>
   & Partial<Omit<ReportUpdateRequest, "data_source_id" | "parameters">>
   & { parameter_groups: ReportParameterGroup[] };
+
+/**
+ * Report readiness (Backend #38, `app/schemas/report_readiness.py`): whether a
+ * report can be operated by end users right now. Computed by the backend on
+ * every request and never stored; `enabled` stays the administrator's intent.
+ * `code` and `step` are open strings on purpose — a code or step this build
+ * does not know must still render its `message`.
+ */
+export type ReportReadinessSeverity = "blocker" | "warning";
+
+/** Known values: information, source, data, template, mapping. */
+export type ReportReadinessStep = string;
+
+export interface ReportReadinessIssue {
+  /** Stable machine code, e.g. `BUILDER_MISSING`, `TEMPLATE_MISSING`. */
+  code: string;
+  severity: ReportReadinessSeverity;
+  step: ReportReadinessStep;
+  message: string;
+}
+
+export interface ReportReadiness {
+  report_code: string;
+  enabled: boolean;
+  /** True iff there is no `blocker` issue. */
+  ready: boolean;
+  issues: ReportReadinessIssue[];
+}
 
 export interface ReportPreviewResponse {
   columns: string[];

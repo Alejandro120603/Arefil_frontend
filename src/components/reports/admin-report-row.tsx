@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FileText, Loader2, MoreHorizontal, Settings, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { EnabledBadge } from "@/components/shared/status-badge";
+import { ReportOperationalBadge } from "@/components/reports/report-operational-badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -92,7 +92,7 @@ export function AdminReportRow({ report }: { report: ReportDefinition }) {
           )}
         </TableCell>
         <TableCell>
-          <EnabledBadge enabled={report.enabled} />
+          <ReportOperationalBadge code={report.code} enabled={report.enabled} />
         </TableCell>
         <TableCell className="text-right">
           <DropdownMenu>
