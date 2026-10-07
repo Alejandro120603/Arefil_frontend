@@ -19,7 +19,7 @@ import type { PriceList } from "@/types/api";
 
 const BASE_PATH = "/donaldson/price-lists";
 
-export function PriceListRow({ priceList }: { priceList: PriceList }) {
+export function PriceListRow({ priceList, canDelete }: { priceList: PriceList; canDelete: boolean }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [deleted, setDeleted] = useState(false);
@@ -72,23 +72,27 @@ export function PriceListRow({ priceList }: { priceList: PriceList }) {
               >
                 <XCircle /> Ver cancelados
               </DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" onClick={() => setConfirming(true)}>
-                <Trash2 /> Eliminar
-              </DropdownMenuItem>
+              {canDelete && (
+                <DropdownMenuItem variant="destructive" onClick={() => setConfirming(true)}>
+                  <Trash2 /> Eliminar
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </TableCell>
       </TableRow>
 
-      <PriceListDeleteDialog
-        priceList={priceList}
-        open={confirming}
-        onOpenChange={setConfirming}
-        onDeleted={() => {
-          setDeleted(true);
-          router.refresh();
-        }}
-      />
+      {canDelete && (
+        <PriceListDeleteDialog
+          priceList={priceList}
+          open={confirming}
+          onOpenChange={setConfirming}
+          onDeleted={() => {
+            setDeleted(true);
+            router.refresh();
+          }}
+        />
+      )}
     </>
   );
 }

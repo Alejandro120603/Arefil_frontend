@@ -32,7 +32,7 @@ describe("ReportCatalogCards", () => {
     render(<ReportCatalogCards reports={[
       { ...BASE, code: "PRICE_LIST_COMPARISON", name: "Comparación" },
       { ...BASE, code: "PRODUCT_CATALOG", name: "Productos" },
-    ]} />);
+    ]} canConfigure />);
 
     expect(screen.queryByRole("button", { name: /Diseñar/ })).toBeNull();
     expect(screen.getAllByRole("button", { name: /Configurar/ })).toHaveLength(2);
@@ -47,10 +47,22 @@ describe("ReportCatalogCards", () => {
   it("blocks runtime actions for disabled definitions without blocking configuration", () => {
     render(<ReportCatalogCards reports={[
       { ...BASE, code: "DISABLED", name: "Deshabilitado", enabled: false },
-    ]} />);
+    ]} canConfigure />);
     expect((screen.getByRole("button", { name: "Generar" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("button", { name: /Configurar/ }).getAttribute("href")).toBe("/administracion/reportes/DISABLED/configurar");
     expect(screen.queryByRole("button", { name: /Diseñar/ })).toBeNull();
     expect(screen.getByText(/está deshabilitado/)).toBeTruthy();
+  });
+
+  it("shows a USER only runtime actions", () => {
+    render(<ReportCatalogCards reports={[
+      { ...BASE, code: "PRICE_LIST_COMPARISON", name: "Comparación" },
+      { ...BASE, code: "DISABLED", name: "Deshabilitado", enabled: false },
+    ]} canConfigure={false} />);
+    expect(screen.getAllByRole("button", { name: "Generar" })).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /Configurar/ })).toBeNull();
+    expect(document.querySelector('a[href*="/administracion"]')).toBeNull();
+    expect(screen.queryByText(/puedes configurarlo/)).toBeNull();
+    expect(screen.getByText("Este reporte está deshabilitado.")).toBeTruthy();
   });
 });

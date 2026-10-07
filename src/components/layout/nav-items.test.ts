@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { NAV_SECTIONS } from "./nav-items";
+import { NAV_SECTIONS, navSectionsFor } from "./nav-items";
+import type { CurrentUser } from "@/lib/auth/session";
 
 describe("NAV_SECTIONS", () => {
   it("exposes Reportes inside Donaldson without dropping the existing routes", () => {
@@ -20,5 +21,15 @@ describe("NAV_SECTIONS", () => {
       "/administracion/respaldos",
       "/administracion/reportes",
     ]);
+  });
+
+  it("filters links by the permissions /auth/me reports, not by role name", () => {
+    const user: CurrentUser = { id: 2, username: "u", role: "USER", is_active: true, permissions: ["catalog:read", "reports:run"] };
+    expect(navSectionsFor(user).map((section) => section.label)).toEqual([null, "Donaldson"]);
+    expect(navSectionsFor(user).flatMap((section) => section.links.map((link) => link.href))).not.toContain("/donaldson/import");
+    // A hypothetical role with only system:backup sees Respaldos and nothing else administrative.
+    const backupOnly: CurrentUser = { ...user, permissions: ["catalog:read", "system:backup"] };
+    const admin = navSectionsFor(backupOnly).find((section) => section.label === "Administración");
+    expect(admin?.links.map((link) => link.href)).toEqual(["/administracion/respaldos"]);
   });
 });

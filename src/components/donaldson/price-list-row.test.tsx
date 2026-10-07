@@ -35,11 +35,11 @@ const PRICE_LIST: PriceList = {
   created_at: "2026-08-16T10:00:00Z",
 };
 
-function renderRow() {
+function renderRow(canDelete = true) {
   return render(
     <table>
       <tbody>
-        <PriceListRow priceList={PRICE_LIST} />
+        <PriceListRow priceList={PRICE_LIST} canDelete={canDelete} />
       </tbody>
     </table>,
   );
@@ -132,5 +132,14 @@ describe("PriceListRow", () => {
       expect(mocks.replace).toHaveBeenCalledWith("/donaldson/price-lists"),
     );
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("never offers Eliminar to a user without catalog:write", async () => {
+    renderRow(false);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: `Acciones de la lista #${PRICE_LIST.id}` }));
+    expect(await screen.findByRole("menuitem", { name: /Ver detalle/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Eliminar/ })).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 });

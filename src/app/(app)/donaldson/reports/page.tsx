@@ -7,6 +7,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { listRuntimeReportDefinitions } from "@/lib/api/report-catalog";
+import { getCurrentUser } from "@/lib/auth/server-session";
+import { hasPermission } from "@/lib/auth/session";
 import type { ReportRuntimeCatalogItem } from "@/types/api";
 
 export const metadata = {
@@ -14,6 +16,8 @@ export const metadata = {
 };
 
 export default async function ReportsPage() {
+  // Same request-scoped session the layout already loaded: no second /auth/me.
+  const canConfigure = hasPermission(await getCurrentUser(), "reports:admin");
   let reports: ReportRuntimeCatalogItem[] = [];
   let errorMessage: string | null = null;
   try {
@@ -35,9 +39,11 @@ export default async function ReportsPage() {
             Consulta los reportes habilitados y abre las acciones disponibles para cada definición.
           </p>
         </div>
-        <Button nativeButton={false} render={<Link href="/administracion/reportes/nuevo" />}>
-          <Plus /> Nuevo reporte
-        </Button>
+        {canConfigure && (
+          <Button nativeButton={false} render={<Link href="/administracion/reportes/nuevo" />}>
+            <Plus /> Nuevo reporte
+          </Button>
+        )}
       </div>
 
       {errorMessage && <ErrorAlert title="No se pudo cargar el catálogo de reportes" message={errorMessage} />}
@@ -50,7 +56,7 @@ export default async function ReportsPage() {
         </Card>
       )}
 
-      {!errorMessage && reports.length > 0 && <ReportCatalogCards reports={reports} />}
+      {!errorMessage && reports.length > 0 && <ReportCatalogCards reports={reports} canConfigure={canConfigure} />}
     </div>
   );
 }

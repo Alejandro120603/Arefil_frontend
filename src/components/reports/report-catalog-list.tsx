@@ -12,7 +12,7 @@ import type { ReportDefinition } from "@/types/api";
  * not. `Generar` is the primary action per row; `Configurar` stays visible
  * because it is the only way into the administrative surface from here.
  */
-export function ReportCatalogList({ reports }: { reports: ReportDefinition[] }) {
+export function ReportCatalogList({ reports, canConfigure }: { reports: ReportDefinition[]; canConfigure: boolean }) {
   return (
     <Table>
       <TableHeader>
@@ -37,7 +37,9 @@ export function ReportCatalogList({ reports }: { reports: ReportDefinition[] }) 
                   </span>
                   {!report.enabled && (
                     <span className="text-xs text-muted-foreground">
-                      Este reporte está deshabilitado; puedes configurarlo, pero no ejecutarlo.
+                      {canConfigure
+                        ? "Este reporte está deshabilitado; puedes configurarlo, pero no ejecutarlo."
+                        : "Este reporte está deshabilitado."}
                     </span>
                   )}
                 </div>
@@ -59,9 +61,11 @@ export function ReportCatalogList({ reports }: { reports: ReportDefinition[] }) 
                       <FileText /> Generar
                     </Button>
                   )}
-                  <Button size="sm" variant="ghost" nativeButton={false} render={<Link href={configureHref} />}>
-                    <Settings /> Configurar
-                  </Button>
+                  {canConfigure && (
+                    <Button size="sm" variant="ghost" nativeButton={false} render={<Link href={configureHref} />}>
+                      <Settings /> Configurar
+                    </Button>
+                  )}
                 </div>
               </TableCell>
             </TableRow>

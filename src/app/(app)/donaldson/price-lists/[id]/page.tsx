@@ -13,6 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApiError, getErrorMessage } from "@/lib/api/errors";
 import { getPriceList, listPriceListItems } from "@/lib/api/price-lists";
+import { getCurrentUser } from "@/lib/auth/server-session";
+import { hasPermission } from "@/lib/auth/session";
 import { formatDate } from "@/lib/format/date";
 import { formatCurrency, formatNumber } from "@/lib/format/decimal";
 import type { Page, PriceListDetail, PriceListItem } from "@/types/api";
@@ -38,6 +40,7 @@ function firstValue(value: string | string[] | undefined): string | undefined {
 }
 
 export default async function PriceListDetailPage({ params, searchParams }: PriceListDetailPageProps) {
+  const canDelete = hasPermission(await getCurrentUser(), "catalog:write");
   const { id } = await params;
   const priceListId = Number(id);
   const query = await searchParams;
@@ -134,7 +137,7 @@ export default async function PriceListDetailPage({ params, searchParams }: Pric
           <h1 className="text-2xl font-semibold tracking-tight">Lista de precios #{priceList.id}</h1>
           <p className="text-sm text-muted-foreground">{priceList.source_filename}</p>
         </div>
-        <DeletePriceListButton priceList={priceList} />
+        {canDelete && <DeletePriceListButton priceList={priceList} />}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
