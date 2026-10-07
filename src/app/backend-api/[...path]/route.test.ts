@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GET, POST, PUT } from "./route";
+import { GET, PATCH, POST, PUT } from "./route";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -95,6 +95,72 @@ describe("backend API proxy", () => {
     expect(init?.method).toBe("PUT");
     expect((init?.headers as Headers).get("content-type")).toBe("application/json");
     expect(new TextDecoder().decode(init?.body as ArrayBuffer)).toBe(builder);
+    expect(response.status).toBe(200);
+  });
+
+  it("forwards the session cookie upstream and the backend's Set-Cookie back to the browser", async () => {
+    vi.stubEnv("API_INTERNAL_URL", "http://backend:8000/api");
+    const upstreamHeaders = new Headers({ "Content-Type": "application/json" });
+    upstreamHeaders.append("Set-Cookie", "arefil_session=new-token; HttpOnly; Path=/; SameSite=lax");
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ username: "user1" }), { headers: upstreamHeaders }));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new NextRequest("http://frontend:3000/backend-api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "user1", password: "x" }),
+      headers: {
+        "content-type": "application/json",
+        cookie: "arefil_session=old-token",
+        origin: "http://frontend:3000",
+        "sec-fetch-site": "same-origin",
+        "x-forwarded-for": "192.168.1.20, 10.0.0.1",
+      },
+    });
+
+    const response = await POST(request, { params: Promise.resolve({ path: ["auth", "login"] }) });
+
+    const upstream = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(upstream.get("cookie")).toBe("arefil_session=old-token");
+    expect(upstream.get("x-forwarded-for")).toBe("192.168.1.20");
+    expect(upstream.has("origin")).toBe(false);
+    expect(response.status).toBe(200);
+    expect(response.headers.getSetCookie()).toEqual([
+      "arefil_session=new-token; HttpOnly; Path=/; SameSite=lax",
+    ]);
+  });
+
+  it.each([
+    [{ origin: "https://evil.example" }],
+    [{ origin: "http://frontend:3001" }],
+    [{ origin: "null" }],
+    [{ "sec-fetch-site": "cross-site" }],
+    [{ "sec-fetch-site": "same-site", origin: "http://frontend:3000" }],
+  ])("refuses cross-origin writes before they reach the backend (%o)", async (headers) => {
+    vi.stubEnv("API_INTERNAL_URL", "http://backend:8000/api");
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new NextRequest("http://frontend:3000/backend-api/reports/X", {
+      method: "PATCH",
+      body: "{}",
+      headers: { cookie: "arefil_session=token", ...headers },
+    });
+
+    const response = await PATCH(request, { params: Promise.resolve({ path: ["reports", "X"] }) });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ detail: "Origen no permitido." });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not apply the write rule to reads", async () => {
+    vi.stubEnv("API_INTERNAL_URL", "http://backend:8000/api");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new NextRequest("http://frontend:3000/backend-api/reports/runtime", {
+      headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+    });
+    const response = await GET(request, { params: Promise.resolve({ path: ["reports", "runtime"] }) });
     expect(response.status).toBe(200);
   });
 });

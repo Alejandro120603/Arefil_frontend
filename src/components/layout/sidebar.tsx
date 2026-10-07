@@ -4,15 +4,17 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
+import type { CurrentUser } from "@/lib/auth/session";
 import { cn } from "@/lib/utils";
 import { NAV_SECTIONS } from "./nav-items";
+import { UserMenu } from "./user-menu";
 
 export function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function Sidebar() {
+export function Sidebar({ user }: { user: CurrentUser }) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
 
@@ -100,6 +102,7 @@ export function Sidebar() {
             </div>
           ))}
         </nav>
+        <UserMenu user={user} />
       </aside>
     </>
   );

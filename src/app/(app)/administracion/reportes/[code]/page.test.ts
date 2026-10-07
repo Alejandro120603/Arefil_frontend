@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import nextConfig from "../../../../../next.config";
+import nextConfig from "../../../../../../next.config";
 import LegacyReportPage from "./page";
 
 const { permanentRedirect } = vi.hoisted(() => ({

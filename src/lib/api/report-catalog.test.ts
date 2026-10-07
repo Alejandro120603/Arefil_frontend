@@ -4,6 +4,9 @@ import {
   listRuntimeReportDefinitions,
 } from "./report-catalog";
 
+// Server API calls run outside a Next.js request here: no session cookie.
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }));
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
