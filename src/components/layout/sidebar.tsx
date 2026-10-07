@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import type { CurrentUser } from "@/lib/auth/session";
 import { cn } from "@/lib/utils";
-import { NAV_SECTIONS } from "./nav-items";
+import { navSectionsFor } from "./nav-items";
 import { UserMenu } from "./user-menu";
 
 export function isActive(pathname: string, href: string): boolean {
@@ -17,6 +17,7 @@ export function isActive(pathname: string, href: string): boolean {
 export function Sidebar({ user }: { user: CurrentUser }) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
+  const sections = navSectionsFor(user);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -68,7 +69,7 @@ export function Sidebar({ user }: { user: CurrentUser }) {
           </button>
         </div>
         <nav aria-label="Navegación principal" className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-          {NAV_SECTIONS.map((section) => (
+          {sections.map((section) => (
             <div key={section.label ?? "root"}>
               {section.label && (
                 <p className="px-3 pb-2 text-xs font-medium tracking-wider text-muted-foreground uppercase">

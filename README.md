@@ -203,6 +203,13 @@ Los usuarios se crean en el backend con su CLI (`python -m app.cli.users`).
   distinto al `Host` que ve Next.js, agrégalo en `TRUSTED_ORIGINS` (lista
   separada por comas).
 
+- La interfaz muestra sólo lo que los `permissions` de `/auth/me` permiten
+  (`hasPermission`, nunca el nombre del rol): el menú (`navSectionsFor`),
+  "Nuevo reporte"/"Configurar" (`reports:admin`), importar y eliminar listas
+  (`catalog:write`) y respaldos (`system:backup`). Las páginas administrativas
+  y `/donaldson/import` usan `RequirePermission` en su layout. La sesión sale
+  del mismo `getCurrentUser()` del request (sin llamadas extra a `/auth/me`).
+
 El backend sigue siendo la única autoridad: estas comprobaciones sólo guían la
 navegación.
 

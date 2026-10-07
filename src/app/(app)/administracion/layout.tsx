@@ -1,14 +1,7 @@
 import type { ReactNode } from "react";
-import { ForbiddenNotice } from "@/components/auth/forbidden-notice";
-import { requireUser } from "@/lib/auth/server-session";
-import { hasPermission } from "@/lib/auth/session";
+import { RequirePermission } from "@/components/auth/require-permission";
 
-/**
- * Administration is for ADMIN only. This keeps a USER off the pages; the
- * backend still refuses every administrative request on its own (403).
- */
-export default async function AdministrationLayout({ children }: { children: ReactNode }) {
-  const user = await requireUser();
-  if (!hasPermission(user, "reports:admin")) return <ForbiddenNotice />;
-  return children;
+/** Administration as a whole; each section below narrows it to its own permission. */
+export default function AdministrationLayout({ children }: { children: ReactNode }) {
+  return <RequirePermission anyOf={["reports:admin", "system:backup"]}>{children}</RequirePermission>;
 }

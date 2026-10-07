@@ -7,7 +7,9 @@ import type { ReportRuntimeCatalogItem } from "@/types/api";
 
 type ReportCard = Omit<ReportRuntimeCatalogItem, "ready">;
 
-export function ReportCatalogCards({ reports }: { reports: ReportCard[] }) {
+/** `canConfigure` comes from the server-side session; the backend still answers 403 without it. */
+export function ReportCatalogCards({ reports, canConfigure }: { reports: ReportCard[]; canConfigure: boolean }) {
+  const configureHref = (code: string) => `/administracion/reportes/${encodeURIComponent(code)}/configurar`;
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       {reports.map((report) => {
@@ -28,22 +30,28 @@ export function ReportCatalogCards({ reports }: { reports: ReportCard[] }) {
                 {report.enabled ? (
                   <>
                     <Button size="sm" nativeButton={false} render={<Link href={operationHref} />}><FileText /> Generar</Button>
-                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/configurar`} />}>
-                      <Settings /> Configurar
-                    </Button>
+                    {canConfigure && (
+                      <Button size="sm" variant="outline" nativeButton={false} render={<Link href={configureHref(report.code)} />}>
+                        <Settings /> Configurar
+                      </Button>
+                    )}
                   </>
                 ) : (
                   <>
                     <Button size="sm" disabled><FileText /> Generar</Button>
-                    <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/administracion/reportes/${encodeURIComponent(report.code)}/configurar`} />}>
-                      <Settings /> Configurar
-                    </Button>
+                    {canConfigure && (
+                      <Button size="sm" variant="outline" nativeButton={false} render={<Link href={configureHref(report.code)} />}>
+                        <Settings /> Configurar
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
               {!report.enabled && (
                 <p className="text-xs text-muted-foreground">
-                  Este reporte está deshabilitado; puedes configurarlo, pero no ejecutarlo.
+                  {canConfigure
+                    ? "Este reporte está deshabilitado; puedes configurarlo, pero no ejecutarlo."
+                    : "Este reporte está deshabilitado."}
                 </p>
               )}
             </CardContent>

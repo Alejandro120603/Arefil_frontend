@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getErrorMessage } from "@/lib/api/errors";
 import { listPriceLists } from "@/lib/api/price-lists";
+import { getCurrentUser } from "@/lib/auth/server-session";
+import { hasPermission } from "@/lib/auth/session";
 import type { Page, PriceList } from "@/types/api";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -24,6 +26,7 @@ function firstValue(value: string | string[] | undefined): string | undefined {
 }
 
 export default async function PriceListsPage({ searchParams }: PriceListsPageProps) {
+  const canDelete = hasPermission(await getCurrentUser(), "catalog:write");
   const params = await searchParams;
   const supplier = firstValue(params.supplier) ?? "";
   const effectiveDate = firstValue(params.effective_date) ?? "";
@@ -120,7 +123,7 @@ export default async function PriceListsPage({ searchParams }: PriceListsPagePro
               </TableHeader>
               <TableBody>
                 {data.items.map((priceList) => (
-                  <PriceListRow key={priceList.id} priceList={priceList} />
+                  <PriceListRow key={priceList.id} priceList={priceList} canDelete={canDelete} />
                 ))}
               </TableBody>
             </Table>
