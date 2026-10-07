@@ -9,6 +9,7 @@ import { ReportExcelLayoutEditor } from "@/components/reports/report-excel-layou
 import { ReportRepeatableParameters } from "@/components/reports/report-repeatable-parameters";
 import { ReportSummaryEditor } from "@/components/reports/report-summary-editor";
 import { ReportRuntimeParameters } from "@/components/reports/report-runtime-parameters";
+import { ReportSaveFailureAlert, TemplateDependencyAlert } from "@/components/reports/report-template-dependency-alert";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +17,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { previewReportBuilder } from "@/lib/api/reports";
 import type { ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
-import { pruneTotals, validateBuilderForm } from "@/lib/reports/report-builder";
+import { normalizeSummaries, pruneTotals, validateBuilderForm } from "@/lib/reports/report-builder";
+import { placeholderLabelResolver, reportSaveFailure, type ReportSaveFailure } from "@/lib/reports/report-save-errors";
+import {
+  NO_TEMPLATE_DEPENDENCIES,
+  templateDependencyBlocks,
+  type TemplateContractState,
+  type TemplateDependencies,
+  type TemplateDependencyBlock,
+} from "@/lib/reports/report-template-dependencies";
 import {
   initialRuntimeValues,
   initialRuntimeGroupValues,
@@ -48,6 +57,9 @@ export function ReportBuilderWorkspace({
   builder,
   parameters,
   onSaved,
+  templateDependencies = NO_TEMPLATE_DEPENDENCIES,
+  onGoToMapping,
+  onTemplateMayHaveChanged,
 }: {
   code: string;
   /**
@@ -58,6 +70,15 @@ export function ReportBuilderWorkspace({
   builder: ReportBuilderDraft;
   parameters: ReportParameter[];
   onSaved?: () => void;
+  /**
+   * What the active Excel template uses (Frontend #43). Removing or hiding a
+   * column, or removing a summary, that it uses is refused locally; label,
+   * source, format and formula changes that keep the key never are.
+   */
+  templateDependencies?: TemplateDependencies;
+  onGoToMapping?: () => void;
+  /** A save was refused for template reasons or a conflict: the shared inspection may be stale. */
+  onTemplateMayHaveChanged?: () => void;
 }) {
   const { draft: value, fields, loadError, catalogError, dirty, saving, updateDraft } = builder;
   /**
@@ -67,7 +88,8 @@ export function ReportBuilderWorkspace({
   const groups = value?.parameterGroups ?? EMPTY_GROUPS;
 
   const [errors, setErrors] = useState<string[]>([]);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<ReportSaveFailure | null>(null);
+  const [templateBlock, setTemplateBlock] = useState<TemplateDependencyBlock[] | null>(null);
   const [saved, setSaved] = useState(false);
 
   const [runtimeValues, setRuntimeValues] = useState<RuntimeParameterValues>(
@@ -112,12 +134,25 @@ export function ReportBuilderWorkspace({
     setPreview(null);
   }
 
+  /** Refuses an edit that would take away an identity the active template reads. */
+  function blockedByTemplate(after: TemplateContractState): boolean {
+    if (value == null) return false;
+    const blocks = templateDependencyBlocks(templateDependencies, { columns: value.columns, summaries: value.layout.totals }, after);
+    setTemplateBlock(blocks.length > 0 ? blocks : null);
+    return blocks.length > 0;
+  }
+
   function changeColumns(columns: ReportColumn[]) {
+    if (value == null) return;
+    // Removing a column can also prune the totals that summed it.
+    const layout = pruneTotals(value.layout, columns);
+    if (blockedByTemplate({ columns, summaries: layout.totals })) return;
     updateDraft((current) => ({ ...current, columns, layout: pruneTotals(current.layout, columns) }));
     edited();
   }
 
   function changeSummaries(totals: ReportSummaryConfiguration[]) {
+    if (blockedByTemplate({ columns: value?.columns, summaries: totals })) return;
     updateDraft((current) => ({ ...current, layout: { ...current.layout, totals } }));
     edited();
   }
@@ -134,6 +169,20 @@ export function ReportBuilderWorkspace({
     setSaveError(null);
     setSaved(false);
     if (validationErrors.length > 0) return;
+    // The inspection may have arrived after the draft was edited: compare the
+    // whole draft with what the backend last confirmed before sending it.
+    const persisted = builder.persisted;
+    if (persisted != null) {
+      const blocks = templateDependencyBlocks(
+        templateDependencies,
+        { columns: persisted.columns, summaries: normalizeSummaries(persisted.excel_layout?.totals ?? [], persisted.columns) },
+        { columns: value.columns, summaries: value.layout.totals },
+      );
+      if (blocks.length > 0) {
+        setTemplateBlock(blocks);
+        return;
+      }
+    }
 
     try {
       const confirmed = await builder.save();
@@ -142,7 +191,9 @@ export function ReportBuilderWorkspace({
       onSaved?.();
     } catch (error) {
       // The edited state is intentionally preserved on failure.
-      setSaveError(getUserErrorMessage(error, "No se pudo guardar el constructor. Tus cambios siguen en pantalla."));
+      const failure = reportSaveFailure(error, "No se pudo guardar el constructor. Tus cambios siguen en pantalla.");
+      setSaveError(failure);
+      if (failure.kind !== "message") onTemplateMayHaveChanged?.();
     }
   }
 
@@ -189,7 +240,24 @@ export function ReportBuilderWorkspace({
           <AlertDescription><ul className="list-disc pl-5">{errors.map((error) => <li key={error}>{error}</li>)}</ul></AlertDescription>
         </Alert>
       )}
-      {saveError && <ErrorAlert title="No se guardó el constructor" message={saveError} />}
+      {saveError && (
+        <ReportSaveFailureAlert
+          title="No se guardó el constructor"
+          failure={saveError}
+          resolveLabel={placeholderLabelResolver({
+            parameters,
+            columns: [...(builder.persisted?.columns ?? []), ...value.columns],
+            summaries: [
+              ...normalizeSummaries(builder.persisted?.excel_layout?.totals ?? [], builder.persisted?.columns ?? []),
+              ...value.layout.totals,
+            ],
+          })}
+          onGoToMapping={onGoToMapping}
+        />
+      )}
+      {templateBlock && (
+        <TemplateDependencyAlert blocks={templateBlock} onGoToMapping={onGoToMapping} onCancel={() => setTemplateBlock(null)} />
+      )}
       {saved && (
         <Alert>
           <CircleCheck />
@@ -225,6 +293,7 @@ export function ReportBuilderWorkspace({
                 parameters={parameters}
                 parameterGroups={value.parameterGroups}
                 disabled={saving}
+                templateUsage={templateDependencies.rows}
                 onChange={changeColumns}
               />
             </>
@@ -244,6 +313,7 @@ export function ReportBuilderWorkspace({
             columns={value.columns}
             parameters={parameters}
             disabled={saving}
+            templateUsage={templateDependencies.summary}
             onChange={changeSummaries}
           />
         </CardContent>

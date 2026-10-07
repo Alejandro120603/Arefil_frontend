@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReportExcelTemplateInspector } from "./report-excel-template-inspector";
 import { ApiError } from "@/lib/api/errors";
+import { useReportTemplateInspection, type ActiveTemplateTarget } from "@/hooks/use-report-template-inspection";
 import type { ReportBuilderDefinition, ReportExcelTemplateInspection, ReportWorkbookCellInspection } from "@/types/api";
 
 const {
@@ -429,13 +430,50 @@ describe("ReportExcelTemplateInspector", () => {
   });
 });
 
-it("refreshes a mounted no-template editor when the wizard uploads a template", async () => {
-  inspectReportExcelTemplate.mockRejectedValue(new ApiError(404, "no template"));
-  getReportBuilder.mockResolvedValue(BUILDER);
-  const view = render(<ReportExcelTemplateInspector code="COTIZACION" refreshToken="none" />);
-  expect(await screen.findByText(/todavía no tiene una plantilla Excel activa/)).toBeTruthy();
-  mockReady();
-  view.rerender(<ReportExcelTemplateInspector code="COTIZACION" refreshToken="3" />);
-  expect(await screen.findByText("COTIZACION.xlsx · v3")).toBeTruthy();
-  expect(screen.getByLabelText("Celda B2")).toBeTruthy();
+/** Mirrors the wizard: the inspection follows the template metadata it is handed. */
+function SharedInspector({ template }: { template: ActiveTemplateTarget }) {
+  const templateInspection = useReportTemplateInspection("COTIZACION", template);
+  return <ReportExcelTemplateInspector code="COTIZACION" builder={BUILDER} templateInspection={templateInspection} />;
+}
+
+describe("ReportExcelTemplateInspector — shared wizard inspection (#43)", () => {
+  it("shows the no-template state without requesting /inspect, then inspects once after an upload", async () => {
+    mockReady();
+    const view = render(<SharedInspector template={null} />);
+    expect(await screen.findByText(/todavía no tiene una plantilla Excel activa/)).toBeTruthy();
+    expect(inspectReportExcelTemplate).not.toHaveBeenCalled();
+
+    view.rerender(<SharedInspector template={{ version: 3, checksum: "abc" }} />);
+    expect(await screen.findByText("COTIZACION.xlsx · v3")).toBeTruthy();
+    expect(screen.getByLabelText("Celda B2")).toBeTruthy();
+    expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(1);
+    expect(getReportBuilder).not.toHaveBeenCalled();
+  });
+
+  it("adopts the mappings response as the new inspection, with no extra GET for the new version", async () => {
+    mockReady();
+    const saved = { ...INSPECTION, template: { version: 4, filename: "COTIZACION.xlsx", checksum: "v4" } };
+    updateReportExcelTemplateMappings.mockResolvedValue({ version: 4, checksum: "v4", inspection: saved });
+    const user = userEvent.setup();
+    const view = render(<SharedInspector template={{ version: 3, checksum: "abc" }} />);
+
+    await user.click(await screen.findByLabelText("Celda B2"));
+    await user.click(screen.getByRole("button", { name: "Quitar asignación" }));
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    expect(await screen.findByText("COTIZACION.xlsx · v4")).toBeTruthy();
+
+    // The wizard's metadata refresh then reports the version the response already covered.
+    view.rerender(<SharedInspector template={{ version: 4, checksum: "v4" }} />);
+    expect(screen.getByText("COTIZACION.xlsx · v4")).toBeTruthy();
+    expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the inspection when the template is deleted", async () => {
+    mockReady();
+    const view = render(<SharedInspector template={{ version: 3, checksum: "abc" }} />);
+    await screen.findByText("COTIZACION.xlsx · v3");
+    view.rerender(<SharedInspector template={null} />);
+    expect(await screen.findByText(/todavía no tiene una plantilla Excel activa/)).toBeTruthy();
+    expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(1);
+  });
 });

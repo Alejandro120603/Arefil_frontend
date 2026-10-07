@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TemplateUsageBadge } from "@/components/reports/report-template-dependency-alert";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { listAllReportParameterOptions } from "@/lib/api/reports";
 import {
@@ -21,6 +22,7 @@ import {
   appendPresetParameter,
   emptyParameter,
 } from "@/lib/reports/report-form";
+import type { TemplatePlaceholderLocation } from "@/lib/reports/report-template-dependencies";
 import type { ReportOption, ReportParameter } from "@/types/api";
 
 const CONTROL_CLASS =
@@ -228,12 +230,14 @@ function SourceParameterField({
   index,
   reportCode,
   savedParameters,
+  templateLocations,
   onChange,
 }: {
   parameter: ReportParameter;
   index: number;
   reportCode?: string;
   savedParameters: readonly ReportParameter[];
+  templateLocations?: readonly TemplatePlaceholderLocation[];
   onChange: (parameter: ReportParameter) => void;
 }) {
   const labelId = `source-parameter-label-${index}`;
@@ -246,6 +250,7 @@ function SourceParameterField({
         <Badge variant={parameter.required ? "secondary" : "outline"}>
           {parameter.required ? "Obligatorio" : "Opcional"}
         </Badge>
+        <TemplateUsageBadge locations={templateLocations} />
       </div>
       <p className="mt-1 text-sm text-muted-foreground">{sourceParameterDescription(parameter)}</p>
 
@@ -282,6 +287,7 @@ function ManualParameterField({
   reportCode,
   savedParameters,
   takenNames,
+  templateLocations,
   onChange,
   onMove,
   onRemove,
@@ -293,6 +299,7 @@ function ManualParameterField({
   reportCode?: string;
   savedParameters: readonly ReportParameter[];
   takenNames: string[];
+  templateLocations?: readonly TemplatePlaceholderLocation[];
   onChange: (parameter: ReportParameter) => void;
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
@@ -306,7 +313,10 @@ function ManualParameterField({
   return (
     <div role="group" aria-labelledby={headingId} className="rounded-xl border p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 id={headingId} className="font-medium">{title}</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 id={headingId} className="font-medium">{title}</h3>
+          <TemplateUsageBadge locations={templateLocations} />
+        </div>
         <div className="flex gap-2">
           <Button type="button" size="icon-sm" variant="outline" aria-label={`Mover ${title} arriba`} disabled={position === 0} onClick={() => onMove(-1)}>
             <ArrowUp />
@@ -399,6 +409,7 @@ export function ReportParameterEditor({
   sourceParameterNames = [],
   savedParameters = [],
   reportCode,
+  templateUsage,
   onChange,
 }: {
   parameters: ReportParameter[];
@@ -406,6 +417,8 @@ export function ReportParameterEditor({
   /** The parameters as last persisted: their names are frozen and only they have loadable options. */
   savedParameters?: readonly ReportParameter[];
   reportCode?: string;
+  /** `parameter.name` → where the active Excel template uses it (#43). */
+  templateUsage?: ReadonlyMap<string, TemplatePlaceholderLocation[]>;
   onChange: (parameters: ReportParameter[]) => void;
 }) {
   const entries = parameters.map((parameter, index) => ({ parameter, index }));
@@ -459,6 +472,7 @@ export function ReportParameterEditor({
                 index={index}
                 reportCode={reportCode}
                 savedParameters={savedParameters}
+                templateLocations={templateUsage?.get(parameter.name)}
                 onChange={(next) => replace(index, next)}
               />
             ))}
@@ -508,6 +522,7 @@ export function ReportParameterEditor({
                 reportCode={reportCode}
                 savedParameters={savedParameters}
                 takenNames={takenNamesFor(index)}
+                templateLocations={templateUsage?.get(parameter.name)}
                 onChange={(next) => replace(index, next)}
                 onMove={(direction) => move(position, direction)}
                 onRemove={() => onChange(parameters.filter((_, current) => current !== index))}

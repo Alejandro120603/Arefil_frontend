@@ -7,6 +7,8 @@ import { ReportDefinitionForm } from "./report-definition-form";
 import { useReportBuilderDraft } from "@/hooks/use-report-builder-draft";
 import { ApiError } from "@/lib/api/errors";
 import { emptyExcelLayout } from "@/lib/reports/report-builder";
+import { templatePlaceholderDependencies, type TemplateDependencies } from "@/lib/reports/report-template-dependencies";
+import { inspectionWithPlaceholders } from "@/test/template-inspection";
 import type {
   ReportAdminDefinition,
   ReportBuilderDefinition,
@@ -150,10 +152,16 @@ function Step({
   report = null,
   onSaved = vi.fn(),
   onGoToData,
+  templateDependencies,
+  onGoToMapping,
+  onTemplateMayHaveChanged,
 }: {
   report?: ReportAdminDefinition | null;
   onSaved?: (saved: ReportAdminDefinition) => void;
   onGoToData?: () => void;
+  templateDependencies?: TemplateDependencies;
+  onGoToMapping?: () => void;
+  onTemplateMayHaveChanged?: () => void;
 }) {
   const builder = useReportBuilderDraft(report?.code ?? null);
   return (
@@ -164,6 +172,9 @@ function Step({
         createRedirectPath={(code) => `/administracion/reportes/${code}/configurar?step=3`}
         onSaved={onSaved}
         onGoToData={onGoToData}
+        templateDependencies={templateDependencies}
+        onGoToMapping={onGoToMapping}
+        onTemplateMayHaveChanged={onTemplateMayHaveChanged}
       />
       {/* What "Datos del reporte" would see, and a way to leave unsaved edits there. */}
       <p data-testid="draft-columns">{builder.draft?.columns.map((item) => item.label).join("|")}</p>
@@ -629,5 +640,138 @@ describe("Fuente y entradas — protecting what the saved builder uses", () => {
     await user.click(manualCard("IVA %").getByLabelText("Permitir decimales"));
     expect((manualCard("IVA %").getByLabelText("Permitir decimales") as HTMLInputElement).checked).toBe(false);
     expect(screen.queryByText(/No puedes/)).toBeNull();
+  });
+});
+
+describe("Fuente y entradas — protecting what the active Excel template uses (#43)", () => {
+  const usingCustomer = templatePlaceholderDependencies(inspectionWithPlaceholders(["parameters.customer_name"]));
+  const report = reportFor(PRODUCT_SOURCE, [CUSTOMER, TAX]);
+
+  async function renderWithTemplate(
+    dependencies: TemplateDependencies | undefined,
+    current = report,
+    extra: { onGoToMapping?: () => void; onTemplateMayHaveChanged?: () => void } = {},
+  ) {
+    const onSaved = vi.fn();
+    getReportBuilder.mockResolvedValue(builderFor(current));
+    render(<Step report={current} onSaved={onSaved} templateDependencies={dependencies} {...extra} />);
+    await waitFor(() => expect(screen.getByRole("option", { name: current.data_source.name })).toBeTruthy());
+    await waitFor(() => expect(getReportBuilder).toHaveBeenCalledTimes(1));
+    return { onSaved, user: userEvent.setup() };
+  }
+
+  it("marks the parameter the template uses, and only that one", async () => {
+    await renderWithTemplate(usingCustomer);
+    expect(within(screen.getByRole("group", { name: /Cliente/ })).getByText("Plantilla Excel")).toBeTruthy();
+    expect(within(screen.getByRole("group", { name: /IVA/ })).queryByText("Plantilla Excel")).toBeNull();
+  });
+
+  it("A: removes a parameter the template does not use", async () => {
+    const { user, onSaved } = await renderWithTemplate(usingCustomer);
+    await user.click(screen.getByRole("button", { name: "Quitar IVA %" }));
+    expect(screen.queryByRole("group", { name: /IVA/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+  });
+
+  it("B: refuses to remove a parameter the template uses, with its location and a way to the mapper", async () => {
+    const onGoToMapping = vi.fn();
+    const { user } = await renderWithTemplate(usingCustomer, report, { onGoToMapping });
+    await user.click(screen.getByRole("button", { name: "Quitar Cliente" }));
+
+    expect(screen.getByText('No puedes quitar "Cliente".')).toBeTruthy();
+    expect(screen.getByText("La plantilla Excel utiliza este dato. Primero quítalo o reemplázalo en la plantilla.")).toBeTruthy();
+    expect(screen.getByText(/Cotización!B2/)).toBeTruthy();
+    expect(screen.getByRole("group", { name: /Cliente/ })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Ir a Mapear campos" }));
+    expect(onGoToMapping).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByText('No puedes quitar "Cliente".')).toBeNull();
+    expect(updateReportInputs).not.toHaveBeenCalled();
+  });
+
+  it("C: allows relabeling a used parameter, since its name stays", async () => {
+    const { user, onSaved } = await renderWithTemplate(usingCustomer);
+    const label = within(screen.getByRole("group", { name: /Cliente/ })).getByLabelText("Nombre visible");
+    await user.type(label, " principal");
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(updateReportInputs.mock.calls[0][1].parameters[0]).toEqual(
+      expect.objectContaining({ name: "customer_name", label: "Cliente principal" }),
+    );
+  });
+
+  it("D: blocks a datasource change that drops a parameter the template uses, inside the same dialog", async () => {
+    const quotation = reportFor(QUOTATION_SOURCE, [PRICE_LIST, CUSTOMER, TAX], [ITEMS]);
+    const usingPriceList = templatePlaceholderDependencies(inspectionWithPlaceholders(["parameters.price_list_id"]));
+    const onGoToMapping = vi.fn();
+    getReportBuilder.mockResolvedValue(builderFor(quotation, [column({})], [ITEMS]));
+    render(<Step report={quotation} templateDependencies={usingPriceList} onGoToMapping={onGoToMapping} />);
+    await waitFor(() => expect(screen.getByRole("option", { name: REPEATABLE_SOURCE.name })).toBeTruthy());
+    await waitFor(() => expect(getReportBuilder).toHaveBeenCalledTimes(1));
+    const user = userEvent.setup();
+
+    await user.selectOptions(screen.getByLabelText("Fuente de datos"), String(REPEATABLE_SOURCE.id));
+
+    expect(screen.getByText(`Antes de cambiar a "${REPEATABLE_SOURCE.name}", ajusta estos elementos en la plantilla Excel:`)).toBeTruthy();
+    expect(screen.getByText('Plantilla Excel — usa el dato "Lista de precios" en Cotización!B2, que se quitaría.')).toBeTruthy();
+    expect(screen.queryByText(/Confirmar cambio/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ir a Datos del reporte" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Ir a Mapear campos" }));
+    expect(onGoToMapping).toHaveBeenCalledTimes(1);
+    expect((screen.getByLabelText("Fuente de datos") as HTMLSelectElement).value).toBe(String(QUOTATION_SOURCE.id));
+    expect(updateReportInputs).not.toHaveBeenCalled();
+  });
+
+  it("E: without a template nothing is marked and nothing is blocked", async () => {
+    const { user } = await renderWithTemplate(undefined);
+    expect(screen.queryByText("Plantilla Excel")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Quitar Cliente" }));
+    expect(screen.queryByRole("group", { name: /Cliente/ })).toBeNull();
+  });
+
+  it("S/T: shows the backend's ACTIVE_TEMPLATE_INCOMPATIBLE with labels and locations, keeping the draft", async () => {
+    updateReportInputs.mockRejectedValueOnce(new ApiError(422, {
+      code: "ACTIVE_TEMPLATE_INCOMPATIBLE",
+      message: "La plantilla Excel activa utiliza datos que ya no existirían.",
+      template_version: 4,
+      issues: [
+        { placeholder: "parameters.tax_rate", sheet: "Cotización", cell: "B2", range: null, reason: "unknown_placeholder" },
+        { placeholder: "parameters.legacy", sheet: "Anexo", cell: "D9", range: null, reason: "brand_new_reason" },
+      ],
+    }));
+    const onTemplateMayHaveChanged = vi.fn();
+    // A stale inspection: it does not know the template uses tax_rate.
+    const { user, onSaved } = await renderWithTemplate(undefined, report, { onTemplateMayHaveChanged });
+    await user.click(screen.getByRole("button", { name: "Quitar IVA %" }));
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+
+    expect(await screen.findByText("La plantilla Excel utiliza datos que este cambio eliminaría.")).toBeTruthy();
+    expect(screen.getByText("IVA % — Cotización!B2 (ya no existiría)")).toBeTruthy();
+    expect(screen.getByText("parameters.legacy — Anexo!D9 (no sería compatible)")).toBeTruthy();
+    expect(onTemplateMayHaveChanged).toHaveBeenCalledTimes(1);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: /IVA/ })).toBeNull();
+  });
+
+  it("U: shows a 409 as a temporary conflict, keeping the draft for a manual retry", async () => {
+    updateReportInputs.mockRejectedValueOnce(new ApiError(409, "La plantilla Excel activa cambió."));
+    const onTemplateMayHaveChanged = vi.fn();
+    const { user, onSaved } = await renderWithTemplate(usingCustomer, report, { onTemplateMayHaveChanged });
+    const label = within(screen.getByRole("group", { name: /IVA/ })).getByLabelText("Nombre visible");
+    await user.clear(label);
+    await user.type(label, "Impuesto");
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+
+    expect(await screen.findByText("La configuración o la plantilla cambió mientras guardabas. Intenta guardar nuevamente.")).toBeTruthy();
+    expect(screen.queryByText(/utiliza datos que este cambio eliminaría/)).toBeNull();
+    expect(onTemplateMayHaveChanged).toHaveBeenCalledTimes(1);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect((within(screen.getByRole("group", { name: /Impuesto/ })).getByLabelText("Nombre visible") as HTMLInputElement).value).toBe("Impuesto");
+    expect(updateReportInputs).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
   });
 });

@@ -1,15 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Circle, Loader2, RefreshCw } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { ReportTemplateInspection } from "@/hooks/use-report-template-inspection";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { getReportBuilder, getReportExcelTemplate, inspectReportExcelTemplate, updateReport } from "@/lib/api/reports";
 import { reportFormFromDefinition, toReportUpdate } from "@/lib/reports/report-form";
+import { reportSaveFailureMessage } from "@/lib/reports/report-save-errors";
 import { buildReportWizardChecklist, reportWizardChecklistComplete } from "@/lib/reports/report-wizard";
 import type {
   ReportAdminDefinition,
@@ -35,6 +37,7 @@ export function ReportWizardFinalizeStep({
   onReportChange,
   active = true,
   builder: ownedBuilder,
+  templateInspection,
 }: {
   report: ReportAdminDefinition;
   /** The saved builder when the wizard already owns it (#41A); `null` while it loads; omitted, the step reads it itself. */
@@ -42,7 +45,16 @@ export function ReportWizardFinalizeStep({
   previewGeneratedThisSession: boolean;
   onReportChange: (report: ReportAdminDefinition) => void;
   active?: boolean;
+  /**
+   * The wizard's shared inspection (#43): reused when it describes the very
+   * version this step just read, so finalizing costs no second `/inspect`.
+   */
+  templateInspection?: ReportTemplateInspection;
 }) {
+  const sharedInspection = useRef(templateInspection?.inspection ?? null);
+  useEffect(() => {
+    sharedInspection.current = templateInspection?.inspection ?? null;
+  }, [templateInspection?.inspection]);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [refreshToken, setRefreshToken] = useState(0);
   const [enabling, setEnabling] = useState(false);
@@ -57,9 +69,12 @@ export function ReportWizardFinalizeStep({
             throw error;
           });
           if (signal?.aborted) return;
-          const inspection = template
-            ? await inspectReportExcelTemplate(report.code, { signal }).catch(() => null)
-            : null;
+          const shared = sharedInspection.current;
+          const reusable = template != null && shared != null
+            && shared.template.version === template.version && shared.template.checksum === template.checksum;
+          const inspection = template == null
+            ? null
+            : reusable ? shared : await inspectReportExcelTemplate(report.code, { signal }).catch(() => null);
           if (signal?.aborted) return;
           setState({ status: "ready", builder, template, inspection });
         })
@@ -90,7 +105,7 @@ export function ReportWizardFinalizeStep({
       const updated = await updateReport(report.code, toReportUpdate({ ...reportFormFromDefinition(report), enabled: true }));
       onReportChange(updated);
     } catch (error) {
-      setEnableError(getUserErrorMessage(error, "No se pudo habilitar el reporte."));
+      setEnableError(reportSaveFailureMessage(error, "No se pudo habilitar el reporte."));
     } finally {
       setEnabling(false);
     }

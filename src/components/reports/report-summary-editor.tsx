@@ -2,6 +2,7 @@
 
 import { ArrowDown, ArrowUp, Sigma, Trash2 } from "lucide-react";
 import { ReportFormulaExpressionInput } from "@/components/reports/report-formula-input";
+import { TemplateUsageBadge } from "@/components/reports/report-template-dependency-alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +14,7 @@ import {
   newSumSummary,
   summableColumns,
 } from "@/lib/reports/report-builder";
+import type { TemplatePlaceholderLocation } from "@/lib/reports/report-template-dependencies";
 import type {
   ReportColumn,
   ReportFormatType,
@@ -39,12 +41,15 @@ export function ReportSummaryEditor({
   columns,
   parameters,
   disabled = false,
+  templateUsage,
   onChange,
 }: {
   summaries: ReportSummaryConfiguration[];
   columns: ReportColumn[];
   parameters: ReportParameter[];
   disabled?: boolean;
+  /** `summary.key` → where the active Excel template reads it as `{{summary.<key>}}` (#43). */
+  templateUsage?: ReadonlyMap<string, TemplatePlaceholderLocation[]>;
   onChange: (summaries: ReportSummaryConfiguration[]) => void;
 }) {
   const candidates = summableColumns(columns);
@@ -108,7 +113,10 @@ export function ReportSummaryEditor({
               <li key={index} className="rounded-xl border p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate font-medium">{title}</p>
+                    <p className="flex items-center gap-2 font-medium">
+                      <span className="truncate">{title}</span>
+                      <TemplateUsageBadge locations={templateUsage?.get(summary.key)} />
+                    </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {summary.operation === "SUM"
                         ? `Total de columna · ${columnTitle(summary.column_key)}`

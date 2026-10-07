@@ -6,18 +6,24 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportConfigurationWizard } from "./report-configuration-wizard";
 import type { ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
+import type { ReportTemplateInspection } from "@/hooks/use-report-template-inspection";
+import type { TemplateDependencies } from "@/lib/reports/report-template-dependencies";
+import { inspectionWithPlaceholders } from "@/test/template-inspection";
 import type { ReportAdminDefinition, ReportBuilderDefinition, ReportExcelTemplate } from "@/types/api";
 
-const { push, replace, getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder } = vi.hoisted(() => ({
+const { push, replace, getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder, inspectReportExcelTemplate, cardTemplate } = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
   getReportBuilder: vi.fn(),
   getReportExcelTemplate: vi.fn(),
   getReportFieldCatalog: vi.fn(),
   saveReportBuilder: vi.fn(),
+  inspectReportExcelTemplate: vi.fn(),
+  /** What the mocked template card reports on its first load. */
+  cardTemplate: { current: null as ReportExcelTemplate | null },
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace }) }));
-vi.mock("@/lib/api/reports", () => ({ getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder }));
+vi.mock("@/lib/api/reports", () => ({ getReportBuilder, getReportExcelTemplate, getReportFieldCatalog, saveReportBuilder, inspectReportExcelTemplate }));
 
 /**
  * The wizard shell is orchestration over five already-shipped, already-tested
@@ -27,12 +33,16 @@ vi.mock("@/lib/api/reports", () => ({ getReportBuilder, getReportExcelTemplate, 
  * re-testing report-definition-form.test.tsx etc. through five extra layers.
  */
 vi.mock("@/components/reports/report-definition-form", () => ({
-  ReportDefinitionForm: ({ section, onSaved, createRedirectPath }: {
+  ReportDefinitionForm: ({ section, onSaved, createRedirectPath, templateDependencies, onGoToMapping }: {
     section: "information" | "source" | "all";
     onSaved?: (saved: ReportAdminDefinition) => void;
     createRedirectPath?: (code: string) => string;
+    templateDependencies?: TemplateDependencies;
+    onGoToMapping?: () => void;
   }) => (
     <div data-testid={`definition-form-${section}`}>
+      <p>template-parameters:{[...(templateDependencies?.parameters.keys() ?? [])].join(",")}</p>
+      {onGoToMapping && <button type="button" onClick={onGoToMapping}>fake-go-to-mapping</button>}
       <button
         type="button"
         onClick={() => {
@@ -49,9 +59,11 @@ vi.mock("@/components/reports/report-definition-form", () => ({
 vi.mock("@/components/reports/report-builder-workspace", () => ({
   // Stands in for the real (controlled) workspace: it shows the wizard-owned
   // draft and edits/saves it only through the props it is given.
-  ReportBuilderWorkspace: ({ code, builder }: { code: string; builder: ReportBuilderDraft }) => (
+  ReportBuilderWorkspace: ({ code, builder, templateDependencies }: { code: string; builder: ReportBuilderDraft; templateDependencies?: TemplateDependencies }) => (
     <div data-testid="builder-workspace">
       builder:{code}
+      <p>template-rows:{[...(templateDependencies?.rows.keys() ?? [])].join(",")}</p>
+      <p>template-summary:{[...(templateDependencies?.summary.keys() ?? [])].join(",")}</p>
       <p>draft-columns:{builder.draft?.columns.map((column) => column.label).join(",") ?? "loading"}</p>
       <p>persisted-columns:{builder.persisted?.columns.map((column) => column.label).join(",") ?? "none"}</p>
       <p>dirty:{String(builder.dirty)}</p>
@@ -67,17 +79,20 @@ vi.mock("@/components/reports/report-excel-template-card", () => ({
   ReportExcelTemplateCard: ({ onTemplateChange, hasUnsavedMappings, refreshToken }: { onTemplateChange?: (template: ReportExcelTemplate | null) => void; hasUnsavedMappings?: boolean; refreshToken?: number }) => {
     // Mirrors the real component reporting its initial load (even a "no template" one) once mounted.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once on mount only, like a real initial-load effect
-    useEffect(() => { onTemplateChange?.(null); }, []);
+    useEffect(() => { onTemplateChange?.(cardTemplate.current); }, []);
     return (
       <div data-testid="template-card" data-mappings-dirty={String(hasUnsavedMappings)} data-refresh-token={refreshToken}>
         <button type="button" onClick={() => onTemplateChange?.(TEMPLATE)}>fake-upload</button>
+        <button type="button" onClick={() => onTemplateChange?.({ ...TEMPLATE, version: 5, checksum: "v5" })}>fake-upload-v5</button>
+        <button type="button" onClick={() => onTemplateChange?.({ ...TEMPLATE })}>fake-same-metadata</button>
         <button type="button" onClick={() => onTemplateChange?.(null)}>fake-report-no-template</button>
       </div>
     );
   },
 }));
 vi.mock("@/components/reports/report-excel-template-inspector", () => ({
-  ReportExcelTemplateInspector: ({ mode, onModeChange, onPreviewReady, onDirtyChange, onTemplateSaved }: {
+  ReportExcelTemplateInspector: ({ mode, onModeChange, onPreviewReady, onDirtyChange, onTemplateSaved, templateInspection }: {
+    templateInspection?: ReportTemplateInspection;
     mode?: "design" | "preview";
     onModeChange?: (mode: "design" | "preview") => void;
     onPreviewReady?: () => void;
@@ -86,7 +101,16 @@ vi.mock("@/components/reports/report-excel-template-inspector", () => ({
   }) => (
     <div data-testid="mapper">
       <p>mapper-mode:{mode}</p>
+      <p>mapper-inspection:{templateInspection?.status}:{templateInspection?.templateVersion ?? "none"}</p>
       <button type="button" onClick={() => onTemplateSaved?.()}>fake-mapper-save</button>
+      <button
+        type="button"
+        onClick={() => {
+          // Like the real mapper: adopt the response's inspection (the mapping is gone), then notify.
+          templateInspection?.replace(inspectionWithPlaceholders([], { version: 5, checksum: "v5" }));
+          onTemplateSaved?.();
+        }}
+      >fake-mapper-clear-mapping</button>
       <button type="button" onClick={() => onDirtyChange?.(true)}>fake-dirty-mapping</button>
       <button type="button" onClick={() => onModeChange?.("preview")}>fake-switch-to-preview</button>
       <button type="button" onClick={() => onModeChange?.("design")}>fake-switch-to-design</button>
@@ -128,11 +152,13 @@ beforeEach(() => {
   getReportBuilder.mockResolvedValue(BUILDER_WITH_COLUMNS);
   getReportFieldCatalog.mockResolvedValue([]);
   getReportExcelTemplate.mockResolvedValue(null);
+  inspectReportExcelTemplate.mockResolvedValue(inspectionWithPlaceholders([], { version: 4, checksum: "abc" }));
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  cardTemplate.current = null;
 });
 
 describe("ReportConfigurationWizard — creation", () => {
@@ -320,4 +346,93 @@ it("refreshes the template-card metadata after saving or restoring in the mounte
   await user.click(screen.getByRole("button", { name: "fake-mapper-save" }));
   await user.click(screen.getByRole("button", { name: "Anterior" }));
   expect(screen.getByTestId("template-card").getAttribute("data-refresh-token")).toBe("1");
+});
+
+describe("ReportConfigurationWizard — shared template inspection (#43)", () => {
+  it("never inspects while creating a report", () => {
+    render(<ReportConfigurationWizard report={null} initialStepParam={null} />);
+    expect(inspectReportExcelTemplate).not.toHaveBeenCalled();
+    expect(screen.getByText("template-parameters:")).toBeTruthy();
+  });
+
+  it("does not inspect an existing report without an active template", async () => {
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={2} />);
+    await screen.findByTestId("template-card");
+    await waitFor(() => expect(getReportBuilder).toHaveBeenCalled());
+    expect(inspectReportExcelTemplate).not.toHaveBeenCalled();
+    expect(screen.getByText("mapper-inspection:none:none")).toBeTruthy();
+  });
+
+  it("inspects once on open and shares it with steps 2, 3 and 5 — moving between steps costs no GET", async () => {
+    cardTemplate.current = TEMPLATE;
+    inspectReportExcelTemplate.mockResolvedValue(inspectionWithPlaceholders(["parameters.customer_name", "rows.unit_price", "summary.subtotal"], { version: 4, checksum: "abc" }));
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={2} />);
+
+    expect(await screen.findByText("template-parameters:customer_name")).toBeTruthy();
+    expect(screen.getByText("template-rows:unit_price")).toBeTruthy();
+    expect(screen.getByText("template-summary:subtotal")).toBeTruthy();
+    expect(screen.getByText("mapper-inspection:ready:4")).toBeTruthy();
+    expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: /Datos del reporte/ }));
+    await user.click(screen.getByRole("button", { name: /Mapear campos/ }));
+    await user.click(screen.getByRole("button", { name: /Fuente y entradas/ }));
+    // Same metadata reported again (e.g. the card re-reading it): still cached.
+    await user.click(screen.getByRole("button", { name: "fake-same-metadata" }));
+    expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-inspects exactly once when another version becomes active (upload, mappings, restore)", async () => {
+    cardTemplate.current = TEMPLATE;
+    inspectReportExcelTemplate
+      .mockResolvedValueOnce(inspectionWithPlaceholders(["rows.unit_price"], { version: 4, checksum: "abc" }))
+      .mockResolvedValueOnce(inspectionWithPlaceholders([], { version: 5, checksum: "v5" }));
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={3} />);
+    expect(await screen.findByText("template-rows:unit_price")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "fake-upload-v5" }));
+    expect(await screen.findByText("template-rows:")).toBeTruthy();
+    expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops every dependency once the template is deleted, without another GET", async () => {
+    cardTemplate.current = TEMPLATE;
+    inspectReportExcelTemplate.mockResolvedValue(inspectionWithPlaceholders(["rows.unit_price"], { version: 4, checksum: "abc" }));
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={3} />);
+    expect(await screen.findByText("template-rows:unit_price")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "fake-report-no-template" }));
+    expect(await screen.findByText("template-rows:")).toBeTruthy();
+    expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  it("Ir a Mapear campos opens the mapping step", async () => {
+    cardTemplate.current = TEMPLATE;
+    inspectReportExcelTemplate.mockResolvedValue(inspectionWithPlaceholders(["parameters.customer_name"], { version: 4, checksum: "abc" }));
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={2} />);
+    await user.click(await screen.findByRole("button", { name: "fake-go-to-mapping" }));
+    expect(replace).toHaveBeenLastCalledWith("/administracion/reportes/COTIZACION/configurar?step=5", { scroll: false });
+  });
+
+  it("after removing the mapping and saving a new version, the dependency disappears with no extra GET", async () => {
+    cardTemplate.current = TEMPLATE;
+    inspectReportExcelTemplate.mockResolvedValue(inspectionWithPlaceholders(["rows.unit_price"], { version: 4, checksum: "abc" }));
+    const user = userEvent.setup();
+    render(<ReportConfigurationWizard report={REPORT} initialStepParam={3} />);
+    expect(await screen.findByText("template-rows:unit_price")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /Mapear campos/ }));
+    await user.click(screen.getByRole("button", { name: "fake-mapper-clear-mapping" }));
+    expect(screen.getByText("mapper-inspection:ready:5")).toBeTruthy();
+    // The card's metadata refresh then reports the version the response already covered.
+    await user.click(screen.getByRole("button", { name: "fake-upload-v5" }));
+    await user.click(screen.getByRole("button", { name: /Datos del reporte/ }));
+    expect(screen.getByText("template-rows:")).toBeTruthy();
+    expect(screen.getByTestId("template-card").getAttribute("data-refresh-token")).toBe("1");
+    expect(inspectReportExcelTemplate).toHaveBeenCalledTimes(1);
+  });
 });

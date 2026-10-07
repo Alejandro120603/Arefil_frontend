@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/errors";
 import { useReportBuilderDraft } from "@/hooks/use-report-builder-draft";
+import { useReportTemplateInspection } from "@/hooks/use-report-template-inspection";
 import { getReportExcelTemplate } from "@/lib/api/reports";
 import {
   reportWizardStepFromOrder,
@@ -48,6 +49,12 @@ const STEP_DESCRIPTIONS: Record<ReportWizardStepId, string> = {
  * once here, and every step reads that same copy — the workspace edits its
  * draft, the template, mapper and finalize steps read what was last saved,
  * and the resume position is computed from it.
+ *
+ * The active template's inspection has one owner too (Frontend #43):
+ * `useReportTemplateInspection` inspects the version the template card
+ * reports, once, and steps 2, 3, 5 and 7 share it — "Fuente y entradas" and
+ * "Datos del reporte" use it to warn before removing something the template
+ * still reads; Backend #37 stays the authority on save.
  */
 export function ReportConfigurationWizard({
   report: initialReport,
@@ -82,6 +89,15 @@ export function ReportConfigurationWizard({
   const savedBuilder = builder.loading ? null : builder.persisted ?? undefined;
   const resumeBuilder = builder.persisted;
   const resumeFailed = !builder.loading && builder.loadError != null;
+  const templateInspection = useReportTemplateInspection(
+    report?.code ?? null,
+    templateChecked ? templateState : "pending",
+  );
+  /** Something may have changed the active template behind this session: re-read its metadata and inspection. */
+  function refreshTemplate() {
+    setSavedRevision((revision) => revision + 1);
+    templateInspection.reload();
+  }
 
   useEffect(() => {
     if (resumed || report == null) return;
@@ -161,6 +177,9 @@ export function ReportConfigurationWizard({
           createRedirectPath={(code) => `/administracion/reportes/${encodeURIComponent(code)}/configurar?step=3`}
           builder={builder}
           onGoToData={() => goTo("data")}
+          templateDependencies={templateInspection.dependencies}
+          onGoToMapping={templateState != null ? () => goTo("mapping") : undefined}
+          onTemplateMayHaveChanged={refreshTemplate}
           onDefinitionSaved={(saved) => { if (report != null) setReport(saved); }}
           onSaved={(saved) => {
             if (report != null) {
@@ -181,6 +200,9 @@ export function ReportConfigurationWizard({
               builder={builder}
               parameters={report.parameters}
               onSaved={() => setSavedRevision((revision) => revision + 1)}
+              templateDependencies={templateInspection.dependencies}
+              onGoToMapping={templateState != null ? () => goTo("mapping") : undefined}
+              onTemplateMayHaveChanged={refreshTemplate}
             />
           </div>
           {step === "data" && (
@@ -236,7 +258,7 @@ export function ReportConfigurationWizard({
                   code={report.code}
                   builder={savedBuilder}
                   mode={templateMode}
-                  refreshToken={`${savedRevision}:${templateState?.version ?? "none"}`}
+                  templateInspection={templateInspection}
                   onModeChange={handleTemplateModeChange}
                   onPreviewReady={() => setPreviewGenerated(true)}
                   onPreviewInvalidated={() => setPreviewGenerated(false)}
@@ -262,6 +284,7 @@ export function ReportConfigurationWizard({
                   builder={savedBuilder}
                   active={step === "finalize"}
                   previewGeneratedThisSession={previewGenerated}
+                  templateInspection={templateInspection}
                   onReportChange={setReport}
                 />
               </CardContent>
