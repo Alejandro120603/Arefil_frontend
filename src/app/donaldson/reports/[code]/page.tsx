@@ -7,7 +7,7 @@ import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { getReportBuilderDefinition, getReportDefinition } from "@/lib/api/report-catalog";
 import { normalizeSummaries } from "@/lib/reports/report-builder";
 import { PRICE_LIST_COMPARISON_CODE } from "@/lib/reports/report-constants";
-import type { ReportDefinition, ReportSummaryConfiguration } from "@/types/api";
+import type { ReportColumn, ReportDefinition, ReportSummaryConfiguration } from "@/types/api";
 
 interface ReportOperationPageProps {
   params: Promise<{ code: string }>;
@@ -25,6 +25,7 @@ export default async function ReportOperationPage({ params, searchParams }: Repo
   const query = await searchParams;
   let report: ReportDefinition | null = null;
   let summaries: ReportSummaryConfiguration[] = [];
+  let columns: ReportColumn[] = [];
   let errorMessage: string | null = null;
   try {
     report = await getReportDefinition(code);
@@ -34,9 +35,10 @@ export default async function ReportOperationPage({ params, searchParams }: Repo
   }
   if (report != null && !errorMessage) {
     try {
-      // Labels only: a report with no builder still runs, it just has no summary.
+      // Labels and the line-amount estimate only: a report with no builder still runs.
       const builder = await getReportBuilderDefinition(code);
       summaries = normalizeSummaries(builder.excel_layout?.totals ?? [], builder.columns);
+      columns = builder.columns;
     } catch {
       summaries = [];
     }
@@ -59,6 +61,7 @@ export default async function ReportOperationPage({ params, searchParams }: Repo
         <GenericReportRuntime
           report={report}
           summaries={summaries}
+          columns={columns}
           initialParameters={code === PRICE_LIST_COMPARISON_CODE ? {
             price_list_a_id: positiveId(query.price_list_a_id ?? query.a),
             price_list_b_id: positiveId(query.price_list_b_id ?? query.b),

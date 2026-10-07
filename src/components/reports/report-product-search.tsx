@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { Popover } from "@base-ui/react/popover";
 import { Loader2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { getUserErrorMessage } from "@/lib/api/errors";
@@ -15,6 +16,11 @@ const SEARCH_DEBOUNCE_MS = 250;
  * The catalog is never materialized in the browser: every keystroke asks the
  * backend for one bounded page scoped to the selected price list, and each hit
  * already carries the description and unit price the row needs.
+ *
+ * The suggestions render in a portal anchored to the input (Frontend #45):
+ * the line-item table scrolls horizontally, and an `overflow-x: auto`
+ * ancestor also clips vertically, so an in-flow absolute list was cut off.
+ * The positioner keeps the list beside the input and inside the viewport.
  */
 export function ReportProductSearch({
   code,
@@ -47,6 +53,7 @@ export function ReportProductSearch({
   const [results, setResults] = useState<ReportProductOption[]>([]);
   const [active, setActive] = useState(0);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => () => { if (blurTimer.current) clearTimeout(blurTimer.current); }, []);
 
@@ -133,8 +140,18 @@ export function ReportProductSearch({
   }
 
   return (
-    <div className="relative">
+    <Popover.Root
+      open={open}
+      modal={false}
+      onOpenChange={(next, details) => {
+        // Pressing the input itself is not "outside": typing keeps it open.
+        const target = details.event?.target;
+        if (!next && target instanceof Node && inputRef.current?.contains(target)) return;
+        setOpen(next);
+      }}
+    >
       <Input
+        ref={inputRef}
         role="combobox"
         aria-label={label}
         aria-expanded={open}
@@ -150,36 +167,50 @@ export function ReportProductSearch({
         onKeyDown={handleKeyDown}
         onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
       />
-      {open && (
-        <div className="absolute z-20 mt-1 max-h-64 w-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md">
-          {loading && (
-            <p className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" /> Buscando...
-            </p>
-          )}
-          {error && <p className="px-2 py-1.5 text-xs text-destructive">{error}</p>}
-          {!loading && !error && results.length === 0 && (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">Sin coincidencias.</p>
-          )}
-          <ul id={listId} role="listbox" className="list-none p-0">
-            {results.map((option, index) => (
-              <li key={option.product_id}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={index === active}
-                  className={`w-full rounded-md px-2 py-1.5 text-left text-xs ${index === active ? "bg-accent" : ""}`}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => choose(option)}
-                >
-                  <span className="block font-medium">{option.part_number}</span>
-                  <span className="block truncate text-muted-foreground">{option.description ?? option.item_number ?? "Sin descripción"}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+      <Popover.Portal>
+        <Popover.Positioner
+          anchor={inputRef}
+          side="bottom"
+          align="start"
+          sideOffset={4}
+          collisionPadding={8}
+          className="isolate z-50"
+          data-slot="product-suggestions"
+        >
+          <Popover.Popup
+            initialFocus={false}
+            finalFocus={false}
+            className="max-h-64 w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md outline-none"
+          >
+            {loading && (
+              <p className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" /> Buscando...
+              </p>
+            )}
+            {error && <p className="px-2 py-1.5 text-xs text-destructive">{error}</p>}
+            {!loading && !error && results.length === 0 && (
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">Sin coincidencias.</p>
+            )}
+            <ul id={listId} role="listbox" className="list-none p-0">
+              {results.map((option, index) => (
+                <li key={option.product_id}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={index === active}
+                    className={`w-full rounded-md px-2 py-1.5 text-left text-xs ${index === active ? "bg-accent" : ""}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => choose(option)}
+                  >
+                    <span className="block font-medium">{option.part_number}</span>
+                    <span className="block truncate text-muted-foreground">{option.description ?? option.item_number ?? "Sin descripción"}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
