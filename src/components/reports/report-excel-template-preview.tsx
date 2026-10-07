@@ -30,7 +30,7 @@ type PreviewStage =
   | { status: "idle" }
   | { status: "executing" }
   | { status: "rendering" }
-  | { status: "ready"; preview: ReportExcelRenderPreview; rowCount: number }
+  | { status: "ready"; preview: ReportExcelRenderPreview; rowCount: number; truncated: boolean }
   | { status: "expired" }
   | { status: "error"; message: string };
 
@@ -139,7 +139,7 @@ export function ReportExcelTemplatePreview({
       setStage({ status: "rendering" });
       const preview = await renderReportExcelTemplatePreview(report.code, executionId, { signal: controller.signal });
       if (controller.signal.aborted) return;
-      setStage({ status: "ready", preview, rowCount: payload.row_count });
+      setStage({ status: "ready", preview, rowCount: payload.row_count, truncated: payload.truncated });
       onPreviewReady?.();
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -221,6 +221,7 @@ export function ReportExcelTemplatePreview({
         <PreviewResult
           preview={stage.preview}
           rowCount={stage.rowCount}
+          truncated={stage.truncated}
           hasSummaries={hasSummaries}
           currentTemplateVersion={templateVersion}
           reportCode={report.code}
@@ -235,6 +236,7 @@ export function ReportExcelTemplatePreview({
 function PreviewResult({
   preview,
   rowCount,
+  truncated,
   hasSummaries,
   currentTemplateVersion,
   reportCode,
@@ -243,6 +245,8 @@ function PreviewResult({
 }: {
   preview: ReportExcelRenderPreview;
   rowCount: number;
+  /** The builder preview hit its row limit: this snapshot shows, but never downloads. */
+  truncated: boolean;
   hasSummaries: boolean;
   currentTemplateVersion: number;
   reportCode: string;
@@ -315,10 +319,12 @@ function PreviewResult({
 
       <div className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Descargar</h3>
-        <p className="text-sm text-muted-foreground">
-          El archivo descargado corresponde exactamente a esta vista previa (ejecución {preview.execution_id}).
-        </p>
-        <ReportDocumentDownloadButton code={reportCode} executionId={preview.execution_id} />
+        {!truncated && (
+          <p className="text-sm text-muted-foreground">
+            El archivo descargado corresponde exactamente a esta vista previa (ejecución {preview.execution_id}).
+          </p>
+        )}
+        <ReportDocumentDownloadButton code={reportCode} executionId={preview.execution_id} truncated={truncated} />
       </div>
     </div>
   );

@@ -191,10 +191,11 @@ export function GenericReportRuntime({
           <Card id="descargas" className="scroll-mt-6">
             <CardHeader><CardTitle>Descargar reporte</CardTitle></CardHeader>
             <CardContent className="flex flex-col gap-4">
-              {/* The document renders from `execution.executionId`, the frozen
-                  snapshot behind this preview; the tabular exports still run on
-                  `execution.parameters`. Any edit clears the execution, so a
-                  stale document can never be downloaded. */}
+              {/* Every download renders from `execution.executionId`, the frozen
+                  snapshot behind this preview — the backend never re-runs it.
+                  Only a result without a snapshot (a report with no builder)
+                  falls back to `execution.parameters`. Any edit clears the
+                  execution, so a stale file can never be downloaded. */}
               {isReportBuilderPreviewResponse(execution.payload) && (
                 <div className="flex flex-col gap-2">
                   <h3 className="text-sm font-medium">Documento</h3>
@@ -205,7 +206,7 @@ export function GenericReportRuntime({
               <div className="flex flex-col gap-2">
                 <h3 className="text-sm font-medium">Exportar datos</h3>
                 <p className="text-sm text-muted-foreground">También puedes descargar los datos tabulares que generó el backend.</p>
-                <ReportDataDownloadButtons code={report.code} parameters={execution.parameters} />
+                <ReportDataDownloadButtons code={report.code} executionId={execution.executionId} parameters={execution.parameters} />
               </div>
             </CardContent>
           </Card>

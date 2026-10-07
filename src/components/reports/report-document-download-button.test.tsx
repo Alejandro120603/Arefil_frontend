@@ -20,6 +20,24 @@ afterEach(() => {
 });
 
 describe("ReportDocumentDownloadButton", () => {
+  it("never offers a truncated preview snapshot for download", () => {
+    render(<ReportDocumentDownloadButton code="COTIZACION" executionId={EXECUTION_ID} truncated />);
+    expect((screen.getByRole("button", { name: "Descargar cotización Excel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/solo las primeras filas/)).toBeTruthy();
+    expect(downloadReportDocumentXlsx).not.toHaveBeenCalled();
+  });
+
+  it("locks the button when the backend refuses a truncated snapshot", async () => {
+    downloadReportDocumentXlsx.mockRejectedValue(new ApiError(409, {
+      code: "EXECUTION_TRUNCATED", message: "La ejecución es una vista previa truncada.", execution_id: EXECUTION_ID,
+    }));
+    const user = userEvent.setup();
+    render(<ReportDocumentDownloadButton code="COTIZACION" executionId={EXECUTION_ID} />);
+    await user.click(screen.getByRole("button", { name: "Descargar cotización Excel" }));
+    expect(await screen.findByText(/solo las primeras filas/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Descargar cotización Excel" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("keeps the backend filename and uses the report code only as fallback", async () => {
     downloadReportDocumentXlsx.mockResolvedValue({
       blob: new Blob(["PK"]),

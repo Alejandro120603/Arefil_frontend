@@ -159,11 +159,21 @@ describe("report manager API", () => {
       .resolves.toBeNull();
   });
 
+  it("exports a stored execution by its id alone, never by parameters", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("csv"));
+    vi.stubGlobal("fetch", fetchMock);
+    await downloadReportData("COTIZACION", "xlsx", { executionId: "exec-1" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/export/xlsx",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ execution_id: "exec-1" }) }),
+    );
+  });
+
   it("prefers an RFC 5987 backend filename and removes path separators", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response("csv", {
       headers: { "Content-Disposition": "attachment; filename=fallback.csv; filename*=UTF-8''reporte%20agosto%2Ffinal.csv" },
     })));
-    await expect(downloadReportData("REPORT", "csv", {})).resolves.toMatchObject({
+    await expect(downloadReportData("REPORT", "csv", { parameters: {} })).resolves.toMatchObject({
       filename: "reporte agosto_final.csv",
     });
   });
@@ -213,7 +223,7 @@ describe("report manager API", () => {
     await expect(previewReport(definition.code, {})).resolves.toMatchObject({ row_count: 1 });
     await expect(getReportParameterOptions(definition.code, "supplier_id")).resolves.toMatchObject({ items: [{ value: 1, label: "Donaldson" }] });
     await expect(updateReport(definition.code, { ...createRequest, enabled: true })).resolves.toMatchObject({ enabled: true });
-    await expect(downloadReportData(definition.code, "csv", {})).resolves.toMatchObject({ filename: "product-catalog.csv" });
+    await expect(downloadReportData(definition.code, "csv", { parameters: {} })).resolves.toMatchObject({ filename: "product-catalog.csv" });
 
     expect(fetchMock.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
       ["/backend-api/reports", "POST"],

@@ -146,13 +146,15 @@ describe("GenericReportRuntime", () => {
     expect(screen.getAllByText("$788.79")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Descargar Excel de datos" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Descargar Excel de datos" }));
-    await waitFor(() => expect(downloadReportData).toHaveBeenCalledWith("COTIZACION", "xlsx", {
-      price_list_id: 7,
-      items: [
-        { product_id: 101, quantity: 2, discount: "10" },
-        { product_id: 202, quantity: 5, discount: "0" },
-      ],
-    }, expect.anything()));
+    // The data export renders the snapshot on screen: its id alone, no re-run.
+    await waitFor(() => expect(downloadReportData).toHaveBeenCalledWith(
+      "COTIZACION", "xlsx", { executionId: EXECUTION_ID }, expect.anything(),
+    ));
+    await user.click(screen.getByRole("button", { name: "Descargar CSV de datos" }));
+    await waitFor(() => expect(downloadReportData).toHaveBeenLastCalledWith(
+      "COTIZACION", "csv", { executionId: EXECUTION_ID }, expect.anything(),
+    ));
+    expect(executeReport).toHaveBeenCalledTimes(1);
     expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "COTIZACION.xlsx");
 
     // The document layer renders from the frozen execution snapshot, never

@@ -190,13 +190,23 @@ function isReportProductOption(option: ReportOption): option is ReportProductOpt
   return typeof (option as ReportProductOption).product_id === "number";
 }
 
+/**
+ * What a data export renders from. An `executionId` exports exactly the stored
+ * snapshot the user is looking at (the backend never re-runs it); `parameters`
+ * is the legacy re-run, kept for reports whose result carries no snapshot.
+ */
+export type ReportDataExportSource =
+  | { executionId: string }
+  | { parameters: Record<string, unknown> };
+
 export function downloadReportData(
   code: string,
   format: "csv" | "xlsx",
-  parameters: Record<string, unknown>,
+  source: ReportDataExportSource,
   options?: RequestOptions,
 ): Promise<BlobDownload> {
-  return browserApiClient.apiPostBlob(reportPath(code, `/export/${format}`), parameters, options);
+  const body = "executionId" in source ? { execution_id: source.executionId } : source.parameters;
+  return browserApiClient.apiPostBlob(reportPath(code, `/export/${format}`), body, options);
 }
 
 /**
