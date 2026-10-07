@@ -6,18 +6,18 @@ import { ReportCatalogCards } from "@/components/reports/report-catalog-cards";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getUserErrorMessage } from "@/lib/api/errors";
-import { listReportDefinitions } from "@/lib/api/report-catalog";
-import type { ReportDefinition } from "@/types/api";
+import { listRuntimeReportDefinitions } from "@/lib/api/report-catalog";
+import type { ReportRuntimeCatalogItem } from "@/types/api";
 
 export const metadata = {
   title: "Reportes | Arefil",
 };
 
 export default async function ReportsPage() {
-  let reports: ReportDefinition[] = [];
+  let reports: ReportRuntimeCatalogItem[] = [];
   let errorMessage: string | null = null;
   try {
-    reports = (await listReportDefinitions()).filter((report) => report.enabled);
+    reports = (await listRuntimeReportDefinitions()).filter((report) => report.enabled && report.ready);
   } catch (error) {
     errorMessage = getUserErrorMessage(
       error,
@@ -45,7 +45,7 @@ export default async function ReportsPage() {
       {!errorMessage && reports.length === 0 && (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            No hay reportes habilitados para operación.
+            No hay reportes disponibles en este momento.
           </CardContent>
         </Card>
       )}

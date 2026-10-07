@@ -251,6 +251,21 @@ export interface ReportDefinition {
   updated_at: string;
 }
 
+/** Minimal backend-authoritative entry returned by the end-user catalog. */
+export interface ReportRuntimeCatalogItem {
+  code: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  enabled: boolean;
+  ready: boolean;
+}
+
+/** Full definition rechecked when an end user opens a report directly. */
+export interface ReportRuntimeDefinition extends ReportDefinition {
+  ready: boolean;
+}
+
 export type ReportParameterDataType = "integer" | "string" | "decimal" | "boolean" | "date" | "datetime";
 export type ReportParameterInputType = "text" | "number" | "date" | "datetime" | "checkbox" | "select";
 export type ReportOptionsSource = "price_lists" | "suppliers" | "products" | "products_by_price_list";

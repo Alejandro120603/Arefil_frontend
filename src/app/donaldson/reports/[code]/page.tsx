@@ -4,10 +4,10 @@ import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { GenericReportRuntime } from "@/components/reports/generic-report-runtime";
 import { Button } from "@/components/ui/button";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
-import { getReportBuilderDefinition, getReportDefinition } from "@/lib/api/report-catalog";
+import { getReportBuilderDefinition, getRuntimeReportDefinition } from "@/lib/api/report-catalog";
 import { normalizeSummaries } from "@/lib/reports/report-builder";
 import { PRICE_LIST_COMPARISON_CODE } from "@/lib/reports/report-constants";
-import type { ReportColumn, ReportDefinition, ReportSummaryConfiguration } from "@/types/api";
+import type { ReportColumn, ReportRuntimeDefinition, ReportSummaryConfiguration } from "@/types/api";
 
 interface ReportOperationPageProps {
   params: Promise<{ code: string }>;
@@ -23,14 +23,22 @@ function positiveId(value: string | string[] | undefined): number | null {
 export default async function ReportOperationPage({ params, searchParams }: ReportOperationPageProps) {
   const { code } = await params;
   const query = await searchParams;
-  let report: ReportDefinition | null = null;
+  let report: ReportRuntimeDefinition | null = null;
   let summaries: ReportSummaryConfiguration[] = [];
   let columns: ReportColumn[] = [];
+  let errorTitle: string | null = null;
   let errorMessage: string | null = null;
   try {
-    report = await getReportDefinition(code);
-    if (!report.enabled) errorMessage = "Este reporte está deshabilitado y no puede ejecutarse.";
+    report = await getRuntimeReportDefinition(code);
+    if (!report.enabled) {
+      errorTitle = "Reporte no disponible";
+      errorMessage = "Este reporte está deshabilitado y no puede utilizarse en este momento.";
+    } else if (!report.ready) {
+      errorTitle = "Reporte temporalmente no disponible";
+      errorMessage = "Este reporte requiere atención antes de poder utilizarse. Intenta nuevamente más tarde o contacta al administrador.";
+    }
   } catch (error) {
+    errorTitle = "No se pudo abrir el reporte";
     errorMessage = getUserErrorMessage(error, error instanceof ApiError && error.status === 404 ? "El reporte solicitado no existe." : "No se pudo cargar el reporte.");
   }
   if (report != null && !errorMessage) {
@@ -56,7 +64,7 @@ export default async function ReportOperationPage({ params, searchParams }: Repo
           Volver al catálogo
         </Button>
       </div>
-      {errorMessage && <ErrorAlert title="No se pudo abrir el reporte" message={errorMessage} />}
+      {errorMessage && <ErrorAlert title={errorTitle ?? "No se pudo abrir el reporte"} message={errorMessage} />}
       {report != null && !errorMessage && (
         <GenericReportRuntime
           report={report}
