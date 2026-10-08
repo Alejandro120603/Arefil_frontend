@@ -89,6 +89,59 @@ describe("GenericReportRuntime", () => {
     expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("keeps the dedicated comparison UX while downloads follow its latest execution id", async () => {
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "PRICE_LIST_COMPARISON",
+      name: "Comparación de listas de precios",
+      data_source_id: 4,
+      data_source: { ...REPORT.data_source, id: 4, code: "PRICE_LIST_COMPARISON", name: "Comparación" },
+      parameters: [
+        { name: "price_list_a_id", label: "Lista A", input_type: "select", data_type: "integer", required: true, default_value: 1, display_order: 0, configuration_json: { options_source: "price_lists" } },
+        { name: "price_list_b_id", label: "Lista B", input_type: "select", data_type: "integer", required: true, default_value: 2, display_order: 1, configuration_json: { options_source: "price_lists" } },
+      ],
+    };
+    listAllReportParameterOptions.mockResolvedValue([
+      { value: 1, label: "Donaldson · 2025-01-01" },
+      { value: 2, label: "Donaldson · 2026-01-01" },
+      { value: 3, label: "Donaldson · 2027-01-01" },
+    ]);
+    const comparison = (executionId: string, listA: number) => ({
+      execution_id: executionId,
+      report: { code: "PRICE_LIST_COMPARISON", generated_at: "2026-10-08T12:00:00Z" },
+      supplier: { id: 1, code: "DONALDSON", name: "Donaldson" },
+      list_a: { id: listA, effective_date: "2025-01-01", currency: "MXN", source_filename: "a.xlsx" },
+      list_b: { id: 2, effective_date: "2026-01-01", currency: "MXN", source_filename: "b.xlsx" },
+      summary: { total_products: 0, increased: 0, decreased: 0, unchanged: 0, new: 0, removed: 0, average_percentage_change: null },
+      items: [],
+    });
+    executeReport
+      .mockResolvedValueOnce(comparison("comparison-e1", 1))
+      .mockResolvedValueOnce(comparison("comparison-e2", 3));
+    downloadReportData.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "PRICE_LIST_COMPARISON-datos.xlsx" });
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={report} />);
+
+    await waitFor(() => expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    expect(await screen.findByRole("heading", { name: "Comparación de listas · Donaldson" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Descargar Excel de datos" }));
+    await waitFor(() => expect(downloadReportData).toHaveBeenLastCalledWith(
+      "PRICE_LIST_COMPARISON", "xlsx", { executionId: "comparison-e1" }, expect.anything(),
+    ));
+    expect(executeReport).toHaveBeenCalledTimes(1);
+
+    await user.selectOptions(screen.getByLabelText("Lista A *"), "3");
+    expect(screen.queryByRole("heading", { name: "Comparación de listas · Donaldson" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar Excel de datos" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Regenerar reporte" }));
+    await user.click(await screen.findByRole("button", { name: "Descargar CSV de datos" }));
+    await waitFor(() => expect(downloadReportData).toHaveBeenLastCalledWith(
+      "PRICE_LIST_COMPARISON", "csv", { executionId: "comparison-e2" }, expect.anything(),
+    ));
+    expect(executeReport).toHaveBeenCalledTimes(2);
+  });
+
   it("serializes repeatable rows, renders the backend builder dataset, and invalidates the snapshot after edits", async () => {
     const report: ReportDefinition = {
       ...REPORT,

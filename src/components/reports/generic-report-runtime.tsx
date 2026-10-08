@@ -197,7 +197,7 @@ export function GenericReportRuntime({
             <CardContent className="flex flex-col gap-4">
               {/* Every download renders from `execution.executionId`, the frozen
                   snapshot behind this preview — the backend never re-runs it.
-                  Only a result without a snapshot (a report with no builder)
+                  Only a legacy result without a snapshot
                   falls back to `execution.parameters`. Any edit clears the
                   execution, so a stale file can never be downloaded. */}
               {isReportBuilderPreviewResponse(execution.payload) && execution.documentAvailable && (
