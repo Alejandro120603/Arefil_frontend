@@ -340,12 +340,11 @@ export function isReportBuilderPreviewResponse(value: unknown): value is ReportB
 
 /**
  * Public id of the immutable snapshot the backend persisted for this dataset
- * (Backend #25). Only builder datasets carry one; every other payload answers
- * `null`, which is what keeps the document layer from offering a download it
- * could not honour.
+ * (Backend #25). Builder datasets and modern dedicated runtimes carry one;
+ * legacy payloads answer `null`.
  */
 export function reportExecutionId(payload: unknown): string | null {
-  if (!isReportBuilderPreviewResponse(payload)) return null;
+  if (!isReportBuilderPreviewResponse(payload) && !isPriceListComparisonResponse(payload)) return null;
   const executionId = payload.execution_id;
   return typeof executionId === "string" && executionId.trim() !== "" ? executionId : null;
 }

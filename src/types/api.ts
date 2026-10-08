@@ -224,6 +224,7 @@ export interface PriceListComparisonItem {
 }
 
 export interface PriceListComparisonResponse {
+  execution_id: string;
   report: ComparisonReportMetadata;
   supplier: ComparisonSupplier;
   list_a: ComparisonPriceList;
