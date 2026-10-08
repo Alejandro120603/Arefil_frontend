@@ -17,6 +17,10 @@ services:
       UPLOADS_DIR: /app/data/uploads
       BACKUPS_DIR: /app/data/backups
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REPORT_EXECUTION_CLEANUP_ENABLED: ${REPORT_EXECUTION_CLEANUP_ENABLED:-true}
+      REPORT_EXECUTION_CLEANUP_INTERVAL_SECONDS: ${REPORT_EXECUTION_CLEANUP_INTERVAL_SECONDS:-3600}
+      REPORT_EXECUTION_CLEANUP_BATCH_SIZE: ${REPORT_EXECUTION_CLEANUP_BATCH_SIZE:-500}
+      REPORT_EXECUTION_CLEANUP_MAX_RECORDS: ${REPORT_EXECUTION_CLEANUP_MAX_RECORDS:-5000}
       SESSION_COOKIE_SECURE: "true"
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
       CORS_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:-https://localhost}"]'
@@ -34,6 +38,41 @@ services:
       - "8000"
     networks:
       - internal
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+  report-execution-cleanup:
+    build:
+      context: ../Arefil_backend
+      dockerfile: Dockerfile
+      args:
+        APP_UID: ${AREFIL_UID:-1000}
+        APP_GID: ${AREFIL_GID:-1000}
+    command: ["python", "-m", "app.cli.report_executions", "worker"]
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite:////app/data/arefil.db
+      UPLOADS_DIR: /app/data/uploads
+      BACKUPS_DIR: /app/data/backups
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SESSION_COOKIE_SECURE: "true"
+      CORS_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:-https://localhost}"]'
+      TRUSTED_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:-https://localhost}"]'
+      REPORT_EXECUTION_CLEANUP_ENABLED: ${REPORT_EXECUTION_CLEANUP_ENABLED:-true}
+      REPORT_EXECUTION_CLEANUP_INTERVAL_SECONDS: ${REPORT_EXECUTION_CLEANUP_INTERVAL_SECONDS:-3600}
+      REPORT_EXECUTION_CLEANUP_BATCH_SIZE: ${REPORT_EXECUTION_CLEANUP_BATCH_SIZE:-500}
+      REPORT_EXECUTION_CLEANUP_MAX_RECORDS: ${REPORT_EXECUTION_CLEANUP_MAX_RECORDS:-5000}
+    volumes:
+      - type: bind
+        source: ${BACKEND_DATA_DIR:-../Arefil_backend/backend/data}
+        target: /app/data
+        bind:
+          create_host_path: false
+    networks:
+      - internal
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     stop_grace_period: 15s
 

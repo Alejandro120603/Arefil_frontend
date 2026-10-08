@@ -19,16 +19,18 @@ const config = JSON.parse(await new Promise((resolve) => {
 }));
 const failures = [];
 const expect = (ok, message) => { if (!ok) failures.push(message); };
-const { backend, frontend, caddy } = config.services;
+const { backend, frontend, caddy, "report-execution-cleanup": cleanup } = config.services;
 
 expect(!backend.ports?.length, "backend must not publish any host port");
 expect(!frontend.ports?.length, "frontend must not publish any host port");
+expect(!cleanup.ports?.length, "cleanup worker must not publish any host port");
 expect(JSON.stringify((caddy.ports ?? []).map((p) => p.target).sort()) === "[443,80]", "only Caddy publishes 443/80");
 for (const [name, service] of Object.entries(config.services)) {
   expect(service.network_mode == null, `${name} must not use network_mode`);
 }
 expect(config.networks.internal?.internal === true, "frontend<->backend network must be internal");
 expect(Object.keys(backend.networks ?? {}).join() === "internal", "backend only on the internal network");
+expect(Object.keys(cleanup.networks ?? {}).join() === "internal", "cleanup worker only on the internal network");
 expect(!Object.keys(caddy.networks ?? {}).includes("internal"), "Caddy must not reach the backend network");
 
 const env = backend.environment;
@@ -43,6 +45,9 @@ expect(Boolean(frontendIp), "frontend has a fixed address on the internal networ
 expect(JSON.parse(env.TRUSTED_PROXIES).join() === `${frontendIp}/32`, "backend trusts X-Forwarded-For only from the frontend's address");
 expect(frontend.environment.TRUST_PROXY_FORWARDED_FOR === "true", "frontend relays Caddy's X-Forwarded-For");
 expect(frontend.environment.API_INTERNAL_URL === "http://backend:8000/api", "frontend reaches the backend internally");
+expect(cleanup.command?.join(" ") === "python -m app.cli.report_executions worker", "cleanup runs the dedicated worker command");
+expect(cleanup.environment.REPORT_EXECUTION_CLEANUP_ENABLED === "true", "periodic cleanup is enabled by default");
+expect(cleanup.environment.DATABASE_URL === backend.environment.DATABASE_URL, "cleanup and backend share the database URL");
 
 const serialized = JSON.stringify(config);
 expect(!/PASSWORD|SECRET|PRIVATE KEY/i.test(serialized), "no credentials in the rendered configuration");

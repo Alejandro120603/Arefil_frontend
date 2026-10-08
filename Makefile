@@ -103,7 +103,7 @@ docker_down: docker_preflight
 ## Follow logs for both application services.
 docker_logs: docker_preflight
 	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
-		docker compose logs --follow --tail=100 caddy frontend backend
+		docker compose logs --follow --tail=100 caddy frontend backend report-execution-cleanup
 
 ## Show Compose service and health status.
 docker_ps: docker_preflight

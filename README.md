@@ -239,7 +239,7 @@ Comandos operativos:
 
 ```bash
 make docker_ps       # estado y health
-make docker_logs     # logs de caddy, frontend y backend; Ctrl+C solo deja de seguirlos
+make docker_logs     # logs de caddy, frontend, backend y cleanup; Ctrl+C sólo deja de seguirlos
 make docker_rebuild  # reconstruye/recrea sin borrar datos
 make docker_down     # detiene el stack sin borrar datos
 ```
@@ -273,6 +273,9 @@ Topología de `compose.yaml`:
 ```text
 navegador ──HTTPS:443──▶ caddy ──edge──▶ frontend:3000 ──internal──▶ backend:8000
            (HTTP:80 → 308 a HTTPS)        (Next.js, /backend-api)      (FastAPI, sin puerto en el host)
+                                                                        ▲
+                                               report-execution-cleanup ┘
+                                               (worker periódico, sin puertos)
 ```
 
 - Sólo Caddy publica puertos (`HTTPS_PORT`/`HTTP_PORT`, 443/80 por defecto).
@@ -312,7 +315,32 @@ AREFIL_HOSTNAME=arefil.example.internal
 AREFIL_PUBLIC_ORIGIN=https://arefil.example.internal   # incluye :puerto si HTTPS_PORT != 443
 AREFIL_TLS=internal
 SESSION_TTL_HOURS=12
+REPORT_EXECUTION_CLEANUP_ENABLED=true
+REPORT_EXECUTION_CLEANUP_INTERVAL_SECONDS=3600
+REPORT_EXECUTION_CLEANUP_BATCH_SIZE=500
+REPORT_EXECUTION_CLEANUP_MAX_RECORDS=5000
 ```
+
+`report-execution-cleanup` usa la misma imagen y bind mount que el backend,
+espera su healthcheck y ejecuta exclusivamente
+`python -m app.cli.report_executions worker`. No corre migraciones, seed ni
+Uvicorn. Por default limpia al iniciar y cada hora, en lotes de 500 y con un
+máximo de 5000 registros por ciclo. No publica puertos y sólo pertenece a la
+red interna.
+
+Operación:
+
+```bash
+docker compose logs --follow report-execution-cleanup
+docker compose stop report-execution-cleanup       # detener automatización
+docker compose start report-execution-cleanup      # reanudar
+docker compose exec backend python -m app.cli.report_executions cleanup --dry-run
+```
+
+Para deshabilitarlo de forma declarativa fija
+`REPORT_EXECUTION_CLEANUP_ENABLED=false` y recrea el servicio; permanecerá
+inactivo hasta volver a habilitarlo. El TTL de snapshots no depende de la
+frecuencia del worker y sigue controlado por el backend.
 
 Primer administrador (contraseña pedida de forma interactiva, nunca como
 argumento):
