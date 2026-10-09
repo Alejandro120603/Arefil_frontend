@@ -229,17 +229,28 @@ make docker_up
 make docker_down
 ```
 
-El preflight valida Docker, el daemon, Compose, ambos Dockerfiles, el repo
-hermano y que el directorio persistente sea escribible. Después construye ambas
-imágenes, arranca FastAPI, espera su healthcheck, arranca Next.js y finalmente
-Caddy (HTTPS). Ver "Despliegue HTTPS".
+El preflight valida Docker, el daemon, Compose, ambos Dockerfiles y el repo
+hermano, y lee de la configuración efectiva de Compose (`.env` y `COMPOSE_FILE`
+incluidos) el directorio persistente que se montaría. Falla si ese directorio no
+existe o no es escribible, si no contiene `arefil.db` (salvo
+`AREFIL_ALLOW_NEW_DATABASE=true` en una instalación nueva) o si el backend
+existente del proyecto (en ejecución o detenido) monta otro directorio (salvo
+`AREFIL_ALLOW_DATA_DIR_CHANGE=true`).
+Después construye ambas imágenes, arranca FastAPI, espera su healthcheck,
+arranca Next.js y, en el modo Caddy, Caddy. Ver "Despliegue HTTPS".
+
+`BACKEND_DATA_DIR`, `COMPOSE_FILE` y demás variables de despliegue se leen de
+`.env`; `make` sólo las sobrescribe cuando se pasan explícitamente
+(`make docker_up BACKEND_DATA_DIR=...`). El nombre de proyecto está fijado a
+`arefil` en `compose.yaml` para que otro checkout no levante un segundo stack
+sobre los mismos datos.
 No usa `node_modules`, `.next` ni `.venv` del host.
 
 Comandos operativos:
 
 ```bash
 make docker_ps       # estado y health
-make docker_logs     # logs de caddy, frontend, backend y cleanup; Ctrl+C sólo deja de seguirlos
+make docker_logs     # logs de todos los servicios activos; Ctrl+C sólo deja de seguirlos
 make docker_rebuild  # reconstruye/recrea sin borrar datos
 make docker_down     # detiene el stack sin borrar datos
 ```
@@ -257,7 +268,9 @@ viven en el bind mount real:
 
 No borres ese directorio, no uses `docker compose down -v` como hábito y no
 copies una base SQLite/WAL activa. Para un respaldo consistente usa
-`Administración > Respaldos` o `GET /api/admin/database/backup`.
+`Administración > Respaldos`, `GET /api/admin/database/backup` o
+`docker compose exec backend python -m app.cli.backup create` (API de backup
+de SQLite + restauración de prueba en una copia aislada).
 
 ### Despliegue HTTPS
 
@@ -266,7 +279,36 @@ Dos modos, nunca mezclados:
 | Modo | Comando | URL | Sesión |
 |---|---|---|---|
 | Desarrollo | `make compose_up` (procesos del host) | `http://localhost:3001` | `APP_ENV=development`; `SESSION_COOKIE_SECURE=false` permitido |
-| Despliegue interno | `make docker_up` (`compose.yaml`) | `https://<AREFIL_HOSTNAME>` | `APP_ENV=production`, `SESSION_COOKIE_SECURE=true` obligatorio |
+| Despliegue con Caddy | `make docker_up` (`compose.yaml`) | `https://<AREFIL_HOSTNAME>` | `APP_ENV=production`, `SESSION_COOKIE_SECURE=true` obligatorio |
+| Despliegue con Cloudflare Tunnel | `make docker_up` con `COMPOSE_FILE=compose.yaml:compose.cloudflare.yaml` | `AREFIL_PUBLIC_ORIGIN` | Igual; TLS termina en Cloudflare |
+
+#### Borde Cloudflare Tunnel (`compose.cloudflare.yaml`)
+
+```text
+navegador ──HTTPS──▶ Cloudflare ──túnel saliente──▶ cloudflared (servicio del host)
+   ──▶ http://127.0.0.1:${FRONTEND_PORT:-3001} ──▶ frontend:3000 ──internal──▶ backend:8000
+```
+
+- `cloudflared` corre en el host como servicio (túnel gestionado desde el
+  dashboard de Cloudflare); la regla de ingreso del hostname público debe
+  apuntar a `http://127.0.0.1:${FRONTEND_PORT}`. Ningún puerto queda abierto a la
+  red: el frontend escucha sólo en loopback y Caddy no se inicia (perfil `caddy`).
+- `.env`: `COMPOSE_FILE=compose.yaml:compose.cloudflare.yaml`,
+  `AREFIL_PUBLIC_ORIGIN=https://<hostname público>` (obligatorio: sin él Compose
+  no renderiza) y `FRONTEND_PORT` igual al de la regla del túnel.
+- TLS termina en Cloudflare. En la zona activa **SSL/TLS → Edge Certificates →
+  Always Use HTTPS** y HSTS. Además, el frontend redirige a `https://` toda
+  página que Cloudflare haya recibido por `http://` (`CF-Visitor`) y añade
+  `Strict-Transport-Security` a las servidas por HTTPS: una página abierta por
+  HTTP nunca podría guardar la cookie `Secure`.
+- Dirección del cliente: Cloudflare añade (no reemplaza) `X-Forwarded-For`,
+  así que el frontend usa `CF-Connecting-IP` (`CLIENT_IP_HEADER`) y no confía en
+  `X-Forwarded-For`. El backend sigue aceptando la dirección sólo desde la IP
+  fija del frontend (`TRUSTED_PROXIES`).
+- Cloudflare Access es opcional; si se activa, debe cubrir todo el hostname
+  (páginas y `/backend-api`) para no romper el login de AREFIL.
+
+#### Borde Caddy (`compose.yaml` solo)
 
 Topología de `compose.yaml`:
 
@@ -394,6 +436,8 @@ Variables de la imagen:
 | `API_INTERNAL_URL` | runtime | `http://127.0.0.1:8000/api` | Destino privado de Server Components y del proxy. |
 | `TRUSTED_ORIGINS` | runtime | vacío | Orígenes públicos adicionales aceptados para escrituras vía `/backend-api`. |
 | `TRUST_PROXY_FORWARDED_FOR` | runtime | vacío | `true` sólo detrás de un proxy que sobrescribe `X-Forwarded-For`. |
+| `PUBLIC_ORIGIN` | runtime | vacío | Origen `https://` público; destino de la redirección http→https tras Cloudflare (si falta, se usa el `Host`). |
+| `CLIENT_IP_HEADER` | runtime | vacío | Header con la IP del navegador puesto por el único proxy de entrada (`cf-connecting-ip` tras Cloudflare); tiene prioridad. |
 | `HOSTNAME` | runtime | `0.0.0.0` | Bind del servidor standalone. |
 | `PORT` | runtime | `3000` | Puerto del servidor standalone. |
 
