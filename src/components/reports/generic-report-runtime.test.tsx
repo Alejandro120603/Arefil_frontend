@@ -89,10 +89,64 @@ describe("GenericReportRuntime", () => {
     expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("keeps the dedicated comparison UX while downloads follow its latest execution id", async () => {
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "PRICE_LIST_COMPARISON",
+      name: "Comparación de listas de precios",
+      data_source_id: 4,
+      data_source: { ...REPORT.data_source, id: 4, code: "PRICE_LIST_COMPARISON", name: "Comparación" },
+      parameters: [
+        { name: "price_list_a_id", label: "Lista A", input_type: "select", data_type: "integer", required: true, default_value: 1, display_order: 0, configuration_json: { options_source: "price_lists" } },
+        { name: "price_list_b_id", label: "Lista B", input_type: "select", data_type: "integer", required: true, default_value: 2, display_order: 1, configuration_json: { options_source: "price_lists" } },
+      ],
+    };
+    listAllReportParameterOptions.mockResolvedValue([
+      { value: 1, label: "Donaldson · 2025-01-01" },
+      { value: 2, label: "Donaldson · 2026-01-01" },
+      { value: 3, label: "Donaldson · 2027-01-01" },
+    ]);
+    const comparison = (executionId: string, listA: number) => ({
+      execution_id: executionId,
+      report: { code: "PRICE_LIST_COMPARISON", generated_at: "2026-10-08T12:00:00Z" },
+      supplier: { id: 1, code: "DONALDSON", name: "Donaldson" },
+      list_a: { id: listA, effective_date: "2025-01-01", currency: "MXN", source_filename: "a.xlsx" },
+      list_b: { id: 2, effective_date: "2026-01-01", currency: "MXN", source_filename: "b.xlsx" },
+      summary: { total_products: 0, increased: 0, decreased: 0, unchanged: 0, new: 0, removed: 0, average_percentage_change: null },
+      items: [],
+    });
+    executeReport
+      .mockResolvedValueOnce(comparison("comparison-e1", 1))
+      .mockResolvedValueOnce(comparison("comparison-e2", 3));
+    downloadReportData.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "PRICE_LIST_COMPARISON-datos.xlsx" });
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={report} />);
+
+    await waitFor(() => expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    expect(await screen.findByRole("heading", { name: "Comparación de listas · Donaldson" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Descargar Excel de datos" }));
+    await waitFor(() => expect(downloadReportData).toHaveBeenLastCalledWith(
+      "PRICE_LIST_COMPARISON", "xlsx", { executionId: "comparison-e1" }, expect.anything(),
+    ));
+    expect(executeReport).toHaveBeenCalledTimes(1);
+
+    await user.selectOptions(screen.getByLabelText("Lista A *"), "3");
+    expect(screen.queryByRole("heading", { name: "Comparación de listas · Donaldson" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar Excel de datos" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Regenerar reporte" }));
+    await user.click(await screen.findByRole("button", { name: "Descargar CSV de datos" }));
+    await waitFor(() => expect(downloadReportData).toHaveBeenLastCalledWith(
+      "PRICE_LIST_COMPARISON", "csv", { executionId: "comparison-e2" }, expect.anything(),
+    ));
+    expect(executeReport).toHaveBeenCalledTimes(2);
+  });
+
   it("serializes repeatable rows, renders the backend builder dataset, and invalidates the snapshot after edits", async () => {
     const report: ReportDefinition = {
       ...REPORT,
       code: "COTIZACION",
+      filename_template: "legacy_{{parameters.cliente}}",
       data_source_id: 5,
       data_source: { ...REPORT.data_source, id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización", capabilities: ["REPEATABLE_ROWS"] },
       parameters: [{ name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: 7, display_order: 0, configuration_json: { options_source: "price_lists" } }],
@@ -111,6 +165,7 @@ describe("GenericReportRuntime", () => {
       Promise.resolve(PRODUCTS.find((candidate) => candidate.product_id === productId) ?? null));
     executeReport.mockResolvedValue({
       execution_id: EXECUTION_ID,
+      document_available: true,
       columns: [
         { key: "sku", label: "SKU", data_type: "string", format_type: "text" },
         { key: "total", label: "Total", data_type: "decimal", format_type: "currency" },
@@ -118,7 +173,7 @@ describe("GenericReportRuntime", () => {
       rows: [{ sku: "P-001", total: "208.79" }, { sku: "P-002", total: "580.00" }],
       totals: { total: "788.79" }, row_count: 2, truncated: false,
     });
-    downloadReportData.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "cotizacion.xlsx" });
+    downloadReportData.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "COTIZACION-datos.xlsx" });
     const user = userEvent.setup();
     render(<GenericReportRuntime report={report} />);
     await user.click(await screen.findByRole("combobox", { name: "Producto 1" }));
@@ -145,38 +200,48 @@ describe("GenericReportRuntime", () => {
     expect(screen.getAllByText("$788.79")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Descargar Excel de datos" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Descargar Excel de datos" }));
-    await waitFor(() => expect(downloadReportData).toHaveBeenCalledWith("COTIZACION", "xlsx", {
-      price_list_id: 7,
-      items: [
-        { product_id: 101, quantity: 2, discount: "10" },
-        { product_id: 202, quantity: 5, discount: "0" },
-      ],
-    }, expect.anything()));
-    expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "cotizacion.xlsx");
+    // The data export renders the snapshot on screen: its id alone, no re-run.
+    await waitFor(() => expect(downloadReportData).toHaveBeenCalledWith(
+      "COTIZACION", "xlsx", { executionId: EXECUTION_ID }, expect.anything(),
+    ));
+    await user.click(screen.getByRole("button", { name: "Descargar CSV de datos" }));
+    await waitFor(() => expect(downloadReportData).toHaveBeenLastCalledWith(
+      "COTIZACION", "csv", { executionId: EXECUTION_ID }, expect.anything(),
+    ));
+    expect(executeReport).toHaveBeenCalledTimes(1);
+    expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "COTIZACION-datos.xlsx");
 
     // The document layer renders from the frozen execution snapshot, never
     // from the parameters the form still holds.
-    downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "cotizacion-bonatti.xlsx" });
-    await user.click(screen.getByRole("button", { name: "Descargar cotización Excel" }));
+    downloadReportDocumentXlsx.mockResolvedValue({
+      blob: new Blob(["xlsx"]),
+      filename: "COTIZACION-documento.xlsx",
+    });
+    await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
     await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledWith(
       "COTIZACION", EXECUTION_ID, expect.anything(),
     ));
+    expect(triggerBrowserDownload).toHaveBeenLastCalledWith(
+      expect.objectContaining({ filename: "COTIZACION-documento.xlsx" }),
+      "COTIZACION-documento.xlsx",
+    );
 
     await user.clear(screen.getByLabelText("Cantidad * 1"));
     await user.type(screen.getByLabelText("Cantidad * 1"), "3");
     expect(screen.queryByRole("columnheader", { name: "SKU" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Descargar Excel de datos" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Descargar cotización Excel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar documento Excel" })).toBeNull();
     expect(screen.getByRole("button", { name: "Regenerar reporte" })).toBeTruthy();
 
     // Regenerating replaces the id: the obsolete one is never sent again.
     executeReport.mockResolvedValue({
       execution_id: "b9f0a1c2-0000-4000-8000-000000000002",
+      document_available: true,
       columns: [{ key: "sku", label: "SKU", data_type: "string", format_type: "text" }],
       rows: [{ sku: "P-001" }], totals: {}, row_count: 1, truncated: false,
     });
     await user.click(screen.getByRole("button", { name: "Regenerar reporte" }));
-    await user.click(await screen.findByRole("button", { name: "Descargar cotización Excel" }));
+    await user.click(await screen.findByRole("button", { name: "Descargar documento Excel" }));
     await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenLastCalledWith(
       "COTIZACION", "b9f0a1c2-0000-4000-8000-000000000002", expect.anything(),
     ));
@@ -189,7 +254,34 @@ describe("GenericReportRuntime", () => {
     await user.click(screen.getByRole("button", { name: "Generar reporte" }));
     expect(await screen.findByText("Vista previa del reporte")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Descargar Excel de datos" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Descargar cotización Excel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar documento Excel" })).toBeNull();
+  });
+
+  it("uses document availability from each execution without another request", async () => {
+    const user = userEvent.setup();
+    executeReport
+      .mockResolvedValueOnce({
+        execution_id: "execution-without-template",
+        document_available: false,
+        columns: [], rows: [], summary: {}, totals: {}, row_count: 0, truncated: false,
+      })
+      .mockResolvedValueOnce({
+        execution_id: "execution-with-template",
+        document_available: true,
+        columns: [], rows: [], summary: {}, totals: {}, row_count: 0, truncated: false,
+      });
+    render(<GenericReportRuntime report={REPORT} />);
+
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await screen.findByText("Vista previa del reporte");
+    expect(screen.queryByRole("button", { name: "Descargar documento Excel" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Descargar Excel de datos" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Descargar CSV de datos" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Regenerar reporte" }));
+    expect(await screen.findByRole("button", { name: "Descargar documento Excel" })).toBeTruthy();
+    expect(executeReport).toHaveBeenCalledTimes(2);
+    expect(downloadReportDocumentXlsx).not.toHaveBeenCalled();
   });
 
   it("places structured backend errors on the affected repeatable field", async () => {
@@ -212,5 +304,93 @@ describe("GenericReportRuntime", () => {
     await user.click(screen.getByRole("button", { name: "Generar reporte" }));
     expect(await screen.findByText("valor rechazado")).toBeTruthy();
     expect(screen.getByText("items.0.notes: valor rechazado")).toBeTruthy();
+  });
+
+  it("#45: shows the list's name, the line total from the report's formula, and keeps the payload raw", async () => {
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "SMOKE_COT",
+      data_source_id: 5,
+      data_source: { ...REPORT.data_source, id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización", capabilities: ["REPEATABLE_ROWS"] },
+      parameters: [
+        { name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "price_lists" } },
+        { name: "customer_name", label: "Cliente", input_type: "text", data_type: "string", required: false, default_value: null, display_order: 1, configuration_json: null },
+      ],
+      parameter_groups: [{
+        name: "productos", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id", min_items: 1, max_items: null, display_order: 0,
+        fields: [
+          { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" } },
+          { name: "cantidad", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: "0", exclusive_minimum: true } },
+          { name: "descuento", label: "Descuento", data_type: "decimal", input_type: "number", required: false, default_value: null, display_order: 2, configuration_json: { minimum: "0" } },
+        ],
+      }],
+    };
+    const columns = [
+      { key: "part_number", label: "Número de parte", column_type: "FIELD", source_field: "product.part_number", source_parameter: null, formula_definition: null, data_type: "string", format_type: "text", display_order: 0, visible: true, width: null },
+      { key: "unit_price", label: "Precio unitario", column_type: "FIELD", source_field: "price_list_item.unit_price", source_parameter: null, formula_definition: null, data_type: "decimal", format_type: "number", display_order: 1, visible: true, width: null },
+      { key: "cantidad", label: "Cantidad", column_type: "PARAMETER", source_field: null, source_parameter: "productos.cantidad", formula_definition: null, data_type: "integer", format_type: "number", display_order: 2, visible: true, width: null },
+      { key: "calculo", label: "Importe", column_type: "FORMULA", source_field: null, source_parameter: null, formula_definition: "unit_price * cantidad", data_type: "decimal", format_type: "number", display_order: 3, visible: true, width: null },
+    ] as const;
+    const summaries = [{ key: "calculo", label: "Subtotal", column_key: "calculo", operation: "SUM", formula_definition: null, format_type: "number" }] as const;
+    const smk = { value: 1, label: "SMK-001 · Filtro sintético A", product_id: 1, part_number: "SMK-001", item_number: "I-1", description: "Filtro sintético A", unit_price: "125.00", currency: "USD", classification: null };
+    listAllReportParameterOptions.mockResolvedValue([
+      { value: 1, label: "DONALDSON · 2026-10-01 · USD" },
+      { value: 2, label: "DONALDSON · 2026-11-01 · USD" },
+    ]);
+    searchReportProductOptions.mockResolvedValue([smk]);
+    resolveReportProductOption.mockResolvedValue(smk);
+    executeReport.mockImplementation(async (_code, parameters: { price_list_id: number; customer_name?: string }) => ({
+      execution_id: EXECUTION_ID,
+      columns: [{ key: "calculo", label: "Importe", data_type: "decimal", format_type: "number" }],
+      parameters: { price_list_id: parameters.price_list_id, customer_name: parameters.customer_name },
+      rows: [{ calculo: "250.00" }], summary: { calculo: "250.00" }, totals: {}, row_count: 1, truncated: false,
+    }));
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={report} summaries={[...summaries]} columns={[...columns]} />);
+
+    await user.selectOptions(await screen.findByLabelText("Lista de precios *"), "1");
+    await user.type(screen.getByLabelText("Cliente"), "ACME");
+    await user.click(screen.getByRole("combobox", { name: "Producto 1" }));
+    await user.click(await screen.findByRole("option", { name: /SMK-001/ }));
+    await user.clear(screen.getByLabelText("Cantidad * 1"));
+    await user.type(screen.getByLabelText("Cantidad * 1"), "2");
+    // Line total: the report's own `unit_price * cantidad`, in the list's currency.
+    expect(screen.getByText("USD 250.00")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await waitFor(() => expect(executeReport).toHaveBeenCalledWith("SMOKE_COT", {
+      price_list_id: 1,
+      customer_name: "ACME",
+      productos: [{ product_id: 1, cantidad: 2 }],
+    }, expect.anything()));
+    expect(await screen.findByText("DONALDSON · 2026-10-01 · USD", { selector: "dd" })).toBeTruthy();
+    expect(screen.getByText("ACME", { selector: "dd" })).toBeTruthy();
+    expect(screen.queryByText("1", { selector: "dd" })).toBeNull();
+
+    // Another list: the label follows the value actually sent.
+    await user.selectOptions(screen.getByLabelText("Lista de precios *"), "2");
+    await user.click(await screen.findByRole("button", { name: /Generar reporte|Regenerar reporte/ }));
+    await waitFor(() => expect(executeReport).toHaveBeenLastCalledWith("SMOKE_COT", expect.objectContaining({ price_list_id: 2 }), expect.anything()));
+    expect(await screen.findByText("DONALDSON · 2026-11-01 · USD", { selector: "dd" })).toBeTruthy();
+    expect(screen.queryByText("DONALDSON · 2026-10-01 · USD", { selector: "dd" })).toBeNull();
+    expect(listAllReportParameterOptions).toHaveBeenCalledTimes(1);
+  });
+
+  it("#45 G: a preselected default list is labelled without being picked by hand", async () => {
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "LISTA",
+      parameters: [{ name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: 7, display_order: 0, configuration_json: { options_source: "price_lists" } }],
+    };
+    listAllReportParameterOptions.mockResolvedValue([{ value: 7, label: "Donaldson · 2025-10-20" }]);
+    executeReport.mockResolvedValue({
+      execution_id: EXECUTION_ID, columns: [], parameters: { price_list_id: 7 }, rows: [], summary: {}, totals: {}, row_count: 0, truncated: false,
+    });
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={report} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    expect(await screen.findByText("Donaldson · 2025-10-20", { selector: "dd" })).toBeTruthy();
+    await waitFor(() => expect(executeReport).toHaveBeenCalledWith("LISTA", { price_list_id: 7 }, expect.anything()));
   });
 });

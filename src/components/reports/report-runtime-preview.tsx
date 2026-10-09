@@ -13,13 +13,15 @@ export function ReportRuntimePreview({
   payload,
   summaries = [],
   parameters = [],
+  parameterLabels,
 }: {
   payload: unknown;
   summaries?: ReportSummaryConfiguration[];
   parameters?: ReportParameter[];
+  parameterLabels?: Record<string, string>;
 }) {
   if (isReportBuilderPreviewResponse(payload)) {
-    return <ReportBuilderPreviewTable preview={payload} summaries={summaries} parameters={parameters} />;
+    return <ReportBuilderPreviewTable preview={payload} summaries={summaries} parameters={parameters} parameterLabels={parameterLabels} />;
   }
   if (isPriceListComparisonResponse(payload)) return <PriceListComparisonPreview comparison={payload} />;
   if (isSQLReportExecutionResponse(payload)) {

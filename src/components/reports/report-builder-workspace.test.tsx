@@ -4,7 +4,11 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportBuilderWorkspace } from "./report-builder-workspace";
+import { useReportBuilderDraft, type ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
 import { ApiError } from "@/lib/api/errors";
+import { builderFormFromDefinition, toBuilderRequest } from "@/lib/reports/report-builder";
+import { templatePlaceholderDependencies, type TemplateDependencies } from "@/lib/reports/report-template-dependencies";
+import { inspectionWithPlaceholders } from "@/test/template-inspection";
 import type {
   ReportBuilderDefinition,
   ReportBuilderPreviewResponse,
@@ -50,6 +54,16 @@ const QUANTITY: ReportParameter = {
   required: true, default_value: 1, display_order: 0, configuration_json: null,
 };
 
+const CUSTOMER: ReportParameter = {
+  name: "customer_name", label: "Cliente", data_type: "string", input_type: "text",
+  required: false, default_value: null, display_order: 1, configuration_json: null,
+};
+
+const PRICE_LIST: ReportParameter = {
+  name: "price_list_id", label: "Lista de precios", data_type: "integer", input_type: "select",
+  required: true, default_value: null, display_order: 2, configuration_json: { options_source: "price_lists" },
+};
+
 const REPORT = {
   code: "COTIZACION", name: "Cotización", description: null, category: null, filename_template: null, enabled: true,
   data_source_id: 5,
@@ -92,29 +106,92 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function renderWorkspace(dataSourceCapabilities: string[] = []) {
-  return render(
+/** The workspace is controlled: like the wizard, this harness owns the builder through the shared hook. */
+function WorkspaceWithBuilder({ parameters }: { parameters: ReportParameter[] }) {
+  const builder = useReportBuilderDraft("COTIZACION");
+  return (
     <ReportBuilderWorkspace
       code="COTIZACION"
-      parameters={[QUANTITY]}
-      dataSourceCapabilities={dataSourceCapabilities}
-    />,
+      builder={builder}
+      parameters={parameters}
+    />
   );
 }
 
+function renderWorkspace(parameters: ReportParameter[] = [QUANTITY]) {
+  return render(<WorkspaceWithBuilder parameters={parameters} />);
+}
+
 async function addFieldColumn(user: ReturnType<typeof userEvent.setup>, fieldKey: string) {
-  const select = await screen.findByLabelText("Agregar columna de campo");
+  const select = await screen.findByLabelText("Agregar dato de la fuente");
   await user.selectOptions(select, fieldKey);
 }
 
 describe("ReportBuilderWorkspace", () => {
+  it("never loads the builder itself: it renders and edits the draft it is given", async () => {
+    const updateDraft = vi.fn();
+    const save = vi.fn().mockResolvedValue(SAVED_BUILDER);
+    const builder: ReportBuilderDraft = {
+      code: "COTIZACION", loading: false, loadError: null, catalogError: null, fields: FIELDS,
+      draft: builderFormFromDefinition(SAVED_BUILDER), persisted: SAVED_BUILDER, dirty: false, saving: false,
+      groupsDirty: false, updateDraft, save, saveGroups: vi.fn(), applyInputsResponse: vi.fn(), reload: vi.fn(),
+    };
+    const onSaved = vi.fn();
+    const user = userEvent.setup();
+    render(<ReportBuilderWorkspace code="COTIZACION" builder={builder} parameters={[QUANTITY]} onSaved={onSaved} />);
+
+    expect((screen.getByLabelText("Título de columna") as HTMLInputElement).value).toBe("SKU");
+    expect(getReportBuilderMock).not.toHaveBeenCalled();
+    expect(getReportFieldCatalogMock).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("Título de columna"), "!");
+    expect(updateDraft).toHaveBeenCalled();
+    const [update] = updateDraft.mock.calls.at(-1)!;
+    expect(update(builderFormFromDefinition(SAVED_BUILDER)).columns[0].label).toBe("SKU!");
+
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends exactly the PUT payload the workspace built before #41A", async () => {
+    const legacy: ReportBuilderDefinition = {
+      ...SAVED_BUILDER,
+      columns: [
+        SAVED_BUILDER.columns[0],
+        { ...SAVED_BUILDER.columns[0], key: "price", label: "Precio", source_field: "price_list_item.unit_price", data_type: "decimal", format_type: "currency", display_order: 1, width: null },
+        { ...SAVED_BUILDER.columns[0], key: "line_total", label: "Importe", column_type: "FORMULA", source_field: null, formula_definition: "price * quantity", data_type: "decimal", format_type: "currency", display_order: 2, width: null },
+      ],
+      excel_layout: {
+        ...SAVED_BUILDER.excel_layout!,
+        totals: [
+          { key: "subtotal", label: "Subtotal", column_key: "line_total", operation: "SUM", formula_definition: null, format_type: "currency" },
+          { key: "tax", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "subtotal * 0.16", format_type: "currency" },
+        ],
+      },
+    };
+    getReportBuilderMock.mockResolvedValue(legacy);
+    const user = userEvent.setup();
+    renderWorkspace();
+    await screen.findByDisplayValue("IVA");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    // `toBuilderRequest(builderFormFromDefinition(...))` is exactly what the
+    // workspace computed from its own state before the builder moved to the wizard.
+    expect(saveReportBuilderMock).toHaveBeenCalledWith("COTIZACION", toBuilderRequest(builderFormFromDefinition(legacy)));
+    expect(getReportBuilderMock).toHaveBeenCalledTimes(1);
+  });
+
   it("loads the field catalog from the backend and groups it for the user", async () => {
     renderWorkspace();
-    const select = await screen.findByLabelText("Agregar columna de campo");
+    const select = await screen.findByLabelText("Agregar dato de la fuente");
     expect(getReportFieldCatalogMock).toHaveBeenCalled();
     expect(within(select).getByRole("group", { name: "Producto" })).toBeTruthy();
-    // The friendly label leads; the technical key stays visible but secondary.
-    expect(within(select).getByRole("option", { name: /Número de parte · product\.part_number/ })).toBeTruthy();
+    // Only the business label is shown; the catalog key stays internal.
+    expect(within(select).getByRole("option", { name: "Número de parte" })).toBeTruthy();
+    expect(within(select).queryByText(/product\.part_number/)).toBeNull();
   });
 
   it("shows the backend's error when the field catalog cannot be loaded", async () => {
@@ -132,30 +209,127 @@ describe("ReportBuilderWorkspace", () => {
   it("loads an existing builder into the editor", async () => {
     getReportBuilderMock.mockResolvedValue(SAVED_BUILDER);
     renderWorkspace();
-    expect(((await screen.findByLabelText("Etiqueta")) as HTMLInputElement).value).toBe("SKU");
+    expect(((await screen.findByLabelText("Título de columna")) as HTMLInputElement).value).toBe("SKU");
     expect(((await screen.findByLabelText("Ancho")) as HTMLInputElement).value).toBe("18");
     expect(((await screen.findByLabelText("Nombre de hoja")) as HTMLInputElement).value).toBe("Cotización");
   });
 
-  it("adds a FIELD column bound to a catalog key", async () => {
+  it("adds a FIELD column bound to a catalog key, without Origen or Nombre interno", async () => {
     const user = userEvent.setup();
     renderWorkspace();
-    await addFieldColumn(user, "product.part_number");
-    expect(((await screen.findByLabelText("Nombre interno")) as HTMLInputElement).value).toBe("part_number");
-    expect(screen.getByText(/Campo · Producto → Número de parte/)).toBeTruthy();
+    await addFieldColumn(user, "price_list_item.unit_price");
+
+    expect(screen.getByText(/Dato de la fuente · Item de lista → Precio unitario/)).toBeTruthy();
+    const source = screen.getByLabelText("Dato que muestra") as HTMLSelectElement;
+    expect(source.value).toBe("price_list_item.unit_price");
+    expect(source.selectedOptions[0].textContent).toBe("Item de lista → Precio unitario");
+    expect(within(source).queryByText(/price_list_item\.unit_price/)).toBeNull();
+    expect(screen.queryByLabelText("Origen")).toBeNull();
+    expect(screen.queryByLabelText("Nombre interno")).toBeNull();
+    expect(screen.queryByText("Origen")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1].columns).toEqual([{
+      key: "unit_price", label: "Precio unitario", column_type: "FIELD",
+      source_field: "price_list_item.unit_price", source_parameter: null, formula_definition: null,
+      data_type: "decimal", format_type: "number", display_order: 0, visible: true, width: null,
+    }]);
   });
 
-  it("adds a PARAMETER column offering only real report parameters", async () => {
+  it("generates unique hidden keys for new columns", async () => {
     const user = userEvent.setup();
     renderWorkspace();
-    const select = await screen.findByLabelText("Agregar columna de parámetro");
-    expect(within(select).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Selecciona un parámetro…", "Cantidad · quantity",
+    await addFieldColumn(user, "price_list_item.unit_price");
+    await addFieldColumn(user, "price_list_item.unit_price");
+    await user.click(screen.getByRole("button", { name: "Agregar cálculo" }));
+    await user.click(screen.getByRole("button", { name: "Agregar cálculo" }));
+    await user.type(screen.getByLabelText("Fórmula", { selector: "#column-formula-2" }), "unit_price * 2");
+    await user.type(screen.getByLabelText("Fórmula", { selector: "#column-formula-3" }), "unit_price_2 * 3");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1].columns.map((column: { key: string }) => column.key)).toEqual([
+      "unit_price", "unit_price_2", "calculo", "calculo_2",
     ]);
-    await user.selectOptions(select, "quantity");
-    expect(screen.getByText(/Parámetro · quantity/)).toBeTruthy();
+    expect(saveReportBuilderMock.mock.calls[0][1].columns.map((column: { column_type: string }) => column.column_type)).toEqual([
+      "FIELD", "FIELD", "FORMULA", "FORMULA",
+    ]);
+  });
+
+  it("re-points a FIELD column through Dato que muestra, keeping its key and a valid type", async () => {
+    getReportBuilderMock.mockResolvedValue(SAVED_BUILDER);
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.selectOptions(await screen.findByLabelText("Dato que muestra"), "price_list_item.unit_price");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1].columns[0]).toMatchObject({
+      key: "part_number", label: "SKU", column_type: "FIELD", source_field: "price_list_item.unit_price",
+      data_type: "decimal", format_type: "text",
+    });
+  });
+
+  it("adds a PARAMETER column by its business label and sends the real parameter name", async () => {
+    const user = userEvent.setup();
+    renderWorkspace([QUANTITY, CUSTOMER]);
+    const select = await screen.findByLabelText("Agregar dato capturado");
+    expect(within(select).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "¿Qué dato capturado quieres mostrar?", "Cantidad", "Cliente",
+    ]);
+    await user.selectOptions(select, "customer_name");
+
+    expect(screen.getByText(/Dato capturado · Cliente/)).toBeTruthy();
+    const source = screen.getByLabelText("Dato capturado que muestra") as HTMLSelectElement;
+    expect(source.selectedOptions[0].textContent).toBe("Cliente");
+    expect(screen.queryByText(/customer_name/)).toBeNull();
+    expect(screen.queryByLabelText("Nombre interno")).toBeNull();
     // The parameter is consumed, so it is no longer offered a second time.
-    expect(within(await screen.findByLabelText("Agregar columna de parámetro")).getAllByRole("option")).toHaveLength(1);
+    expect(within(await screen.findByLabelText("Agregar dato capturado")).getAllByRole("option").map((option) => option.textContent))
+      .toEqual(["¿Qué dato capturado quieres mostrar?", "Cantidad"]);
+
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1].columns).toEqual([{
+      key: "customer_name", label: "Cliente", column_type: "PARAMETER",
+      source_field: null, source_parameter: "customer_name", formula_definition: null,
+      data_type: "string", format_type: "text", display_order: 0, visible: true, width: null,
+    }]);
+  });
+
+  it("keeps saved columns' keys and sources when only their titles change", async () => {
+    getReportBuilderMock.mockResolvedValue({
+      ...SAVED_BUILDER,
+      columns: [
+        { ...SAVED_BUILDER.columns[0], key: "price", label: "Precio unitario", source_field: "price_list_item.unit_price", data_type: "decimal", format_type: "currency" },
+        { ...SAVED_BUILDER.columns[0], key: "customer", label: "Cliente", column_type: "PARAMETER", source_field: null, source_parameter: "customer_name", display_order: 1 },
+        { ...SAVED_BUILDER.columns[0], key: "subtotal", label: "Subtotal", column_type: "FORMULA", source_field: null, formula_definition: "price * 2", data_type: "decimal", format_type: "currency", display_order: 2 },
+      ],
+    });
+    const user = userEvent.setup();
+    renderWorkspace([QUANTITY, CUSTOMER]);
+
+    expect(((await screen.findByLabelText("Dato que muestra")) as HTMLSelectElement).selectedOptions[0].textContent)
+      .toBe("Item de lista → Precio unitario");
+    expect((screen.getByLabelText("Dato capturado que muestra") as HTMLSelectElement).selectedOptions[0].textContent)
+      .toBe("Cliente");
+    expect((screen.getByLabelText("Fórmula") as HTMLInputElement).value).toBe("price * 2");
+    expect(screen.queryByLabelText("Origen")).toBeNull();
+    expect(screen.queryByLabelText("Nombre interno")).toBeNull();
+
+    const titles = screen.getAllByLabelText("Título de columna");
+    await user.clear(titles[0]);
+    await user.type(titles[0], "Precio");
+    await user.type(titles[2], " neto");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1].columns).toEqual([
+      expect.objectContaining({ key: "price", label: "Precio", column_type: "FIELD", source_field: "price_list_item.unit_price", source_parameter: null }),
+      expect.objectContaining({ key: "customer", label: "Cliente", column_type: "PARAMETER", source_field: null, source_parameter: "customer_name" }),
+      expect.objectContaining({ key: "subtotal", label: "Subtotal neto", column_type: "FORMULA", formula_definition: "price * 2" }),
+    ]);
   });
 
   it("adds a FORMULA column that only offers numeric references", async () => {
@@ -163,7 +337,7 @@ describe("ReportBuilderWorkspace", () => {
     renderWorkspace();
     await addFieldColumn(user, "product.part_number");
     await addFieldColumn(user, "price_list_item.unit_price");
-    await user.click(screen.getByRole("button", { name: /Agregar columna calculada/ }));
+    await user.click(screen.getByRole("button", { name: "Agregar cálculo" }));
 
     const references = await screen.findByLabelText("Insertar referencia");
     const names = within(references).getAllByRole("option").map((option) => option.textContent);
@@ -177,7 +351,7 @@ describe("ReportBuilderWorkspace", () => {
     const user = userEvent.setup();
     renderWorkspace();
     await addFieldColumn(user, "price_list_item.unit_price");
-    await user.click(screen.getByRole("button", { name: /Agregar columna calculada/ }));
+    await user.click(screen.getByRole("button", { name: "Agregar cálculo" }));
 
     await user.selectOptions(await screen.findByLabelText("Insertar referencia"), "unit_price");
     await user.click(screen.getByRole("button", { name: "Insertar *" }));
@@ -189,7 +363,7 @@ describe("ReportBuilderWorkspace", () => {
   it("flags an unknown formula reference inline", async () => {
     const user = userEvent.setup();
     renderWorkspace();
-    await user.click(await screen.findByRole("button", { name: /Agregar columna calculada/ }));
+    await user.click(await screen.findByRole("button", { name: "Agregar cálculo" }));
     await user.type(screen.getByLabelText("Fórmula"), "precio_inventado * 2");
     expect(screen.getByText(/Referencias desconocidas: precio_inventado/)).toBeTruthy();
   });
@@ -200,23 +374,23 @@ describe("ReportBuilderWorkspace", () => {
     await addFieldColumn(user, "product.part_number");
     await addFieldColumn(user, "price_list_item.unit_price");
 
-    const labels = () => screen.getAllByLabelText("Etiqueta").map((input) => (input as HTMLInputElement).value);
+    const labels = () => screen.getAllByLabelText("Título de columna").map((input) => (input as HTMLInputElement).value);
     expect(labels()).toEqual(["Número de parte", "Precio unitario"]);
 
-    await user.click(screen.getByRole("button", { name: "Mover unit_price arriba" }));
+    await user.click(screen.getByRole("button", { name: "Mover Precio unitario arriba" }));
     expect(labels()).toEqual(["Precio unitario", "Número de parte"]);
 
     await user.click(screen.getAllByLabelText("Visible")[0]);
     expect(screen.getByText("Oculta")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Eliminar unit_price" }));
+    await user.click(screen.getByRole("button", { name: "Eliminar Precio unitario" }));
     expect(labels()).toEqual(["Número de parte"]);
   });
 
   it("blocks a save that the backend would reject and keeps the edits on screen", async () => {
     const user = userEvent.setup();
     renderWorkspace();
-    await user.click(await screen.findByRole("button", { name: /Agregar columna calculada/ }));
+    await user.click(await screen.findByRole("button", { name: "Agregar cálculo" }));
     await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
 
     expect(await screen.findByText(/requiere una fórmula/)).toBeTruthy();
@@ -242,25 +416,37 @@ describe("ReportBuilderWorkspace", () => {
     expect(await screen.findByText("Constructor guardado")).toBeTruthy();
   });
 
-  it("configures and saves repeatable metadata in the same transactional builder request", async () => {
+  it("no longer configures repeatable rows, but its columns still read them and saving resends them intact", async () => {
+    const items = {
+      name: "items", label: "Productos", resolver_key: "products_by_price_list" as const, context_parameter: "price_list_id",
+      min_items: 1, max_items: null, display_order: 0,
+      fields: [
+        { name: "product_id", label: "Producto", data_type: "integer" as const, input_type: "select" as const, required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list" as const, context_parameter: "price_list_id" } },
+        { name: "quantity", label: "Cantidad", data_type: "integer" as const, input_type: "number" as const, required: true, default_value: 1, display_order: 1, configuration_json: { minimum: 0, exclusive_minimum: true } },
+        { name: "discount", label: "Descuento", data_type: "decimal" as const, input_type: "number" as const, required: false, default_value: null, display_order: 2, configuration_json: { minimum: 0 } },
+      ],
+    };
+    const quantityColumn = {
+      key: "quantity", label: "Cantidad", column_type: "PARAMETER" as const, source_field: null, source_parameter: "items.quantity",
+      formula_definition: null, data_type: "integer" as const, format_type: "number" as const, display_order: 0, visible: true, width: null,
+    };
+    getReportBuilderMock.mockResolvedValue({ ...SAVED_BUILDER, columns: [quantityColumn], parameter_groups: [items] });
     const user = userEvent.setup();
-    renderWorkspace(["REPEATABLE_ROWS"]);
-    await user.click(await screen.findByRole("button", { name: "Agregar grupo repetible" }));
-    expect((screen.getByLabelText("Nombre interno", { selector: "#group-name" }) as HTMLInputElement).value).toBe("items");
-    expect(screen.getByDisplayValue("Producto")).toBeTruthy();
-    await addFieldColumn(user, "product.part_number");
-    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+    renderWorkspace([PRICE_LIST]);
 
+    const addCaptured = await screen.findByLabelText("Agregar dato capturado");
+    expect(screen.queryByText("Productos por renglón")).toBeNull();
+    expect(screen.queryByLabelText("Nombre visible del grupo")).toBeNull();
+    expect(within(addCaptured).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "¿Qué dato capturado quieres mostrar?", "Lista de precios", "Productos → Producto", "Productos → Descuento",
+    ]);
+    expect((screen.getByLabelText("Dato capturado que muestra") as HTMLSelectElement).selectedOptions[0].textContent).toBe("Productos → Cantidad");
+
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
     await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
-    expect(saveReportBuilderMock.mock.calls[0][1]).toMatchObject({
-      parameter_groups: [{
-        name: "items", resolver_key: "products_by_price_list", context_parameter: "quantity", min_items: 1,
-        fields: [{
-          name: "product_id", data_type: "integer", input_type: "select", required: true,
-          configuration_json: { options_source: "products_by_price_list", context_parameter: "quantity" },
-        }],
-      }],
-    });
+    const request = saveReportBuilderMock.mock.calls[0][1];
+    expect(request.parameter_groups).toEqual([items]);
+    expect(request.columns).toEqual([quantityColumn]);
   });
 
   it("surfaces the backend save error and preserves the edited state", async () => {
@@ -271,7 +457,7 @@ describe("ReportBuilderWorkspace", () => {
     await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
 
     expect(await screen.findByText("Las fórmulas contienen una dependencia cíclica.")).toBeTruthy();
-    expect(((await screen.findByLabelText("Etiqueta")) as HTMLInputElement).value).toBe("Número de parte");
+    expect(((await screen.findByLabelText("Título de columna")) as HTMLInputElement).value).toBe("Número de parte");
   });
 
   it("never reports success before the backend answers, and never submits twice", async () => {
@@ -344,25 +530,68 @@ describe("ReportBuilderWorkspace", () => {
     renderWorkspace();
     await addFieldColumn(user, "price_list_item.unit_price");
 
-    await user.selectOptions(screen.getByLabelText("Agregar suma de columna"), "unit_price");
-    await user.clear(screen.getByLabelText("Etiqueta", { selector: "#summary-label-0" }));
-    await user.type(screen.getByLabelText("Etiqueta", { selector: "#summary-label-0" }), "Subtotal");
-    await user.clear(screen.getByLabelText("Nombre interno", { selector: "#summary-key-0" }));
-    await user.type(screen.getByLabelText("Nombre interno", { selector: "#summary-key-0" }), "subtotal");
+    const addTotal = screen.getByLabelText("Agregar total de columna");
+    // Columns are offered by their title, never by their hidden key.
+    expect(within(addTotal).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "¿Qué columna quieres totalizar?", "Precio unitario",
+    ]);
+    await user.selectOptions(addTotal, "unit_price");
+    await user.clear(screen.getByLabelText("Título", { selector: "#summary-label-0" }));
+    await user.type(screen.getByLabelText("Título", { selector: "#summary-label-0" }), "Subtotal");
+    const totalColumn = screen.getByLabelText("Columna a totalizar") as HTMLSelectElement;
+    expect(totalColumn.selectedOptions[0].textContent).toBe("Precio unitario");
+    expect(screen.getByText("Total de columna · Precio unitario")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /Agregar resumen calculado/ }));
-    await user.clear(screen.getByLabelText("Nombre interno", { selector: "#summary-key-1" }));
-    await user.type(screen.getByLabelText("Nombre interno", { selector: "#summary-key-1" }), "tax");
-    await user.clear(screen.getByLabelText("Etiqueta", { selector: "#summary-label-1" }));
-    await user.type(screen.getByLabelText("Etiqueta", { selector: "#summary-label-1" }), "IVA");
-    await user.type(screen.getByLabelText("Fórmula", { selector: "#summary-formula-1" }), "subtotal * quantity");
+    await user.click(screen.getByRole("button", { name: "Agregar total calculado" }));
+    await user.clear(screen.getByLabelText("Título", { selector: "#summary-label-1" }));
+    await user.type(screen.getByLabelText("Título", { selector: "#summary-label-1" }), "IVA");
+    // The formula editor still lists the identifiers the DSL uses.
+    await user.selectOptions(screen.getByLabelText("Insertar referencia", { selector: "#summary-formula-1-reference" }), "unit_price");
+    await user.type(screen.getByLabelText("Fórmula", { selector: "#summary-formula-1" }), "* quantity");
+
+    expect(screen.queryByLabelText("Origen")).toBeNull();
+    expect(screen.queryByLabelText("Nombre interno")).toBeNull();
+    expect(screen.queryByText(/SUM/)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
 
     await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
     expect(saveReportBuilderMock.mock.calls[0][1].excel_layout.totals).toEqual([
-      { key: "subtotal", label: "Subtotal", column_key: "unit_price", operation: "SUM", formula_definition: null, format_type: "number" },
-      { key: "tax", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "subtotal * quantity", format_type: "number" },
+      { key: "unit_price", label: "Subtotal", column_key: "unit_price", operation: "SUM", formula_definition: null, format_type: "number" },
+      { key: "resumen", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "unit_price * quantity", format_type: "number" },
+    ]);
+  });
+
+  it("keeps saved summary keys when their titles change", async () => {
+    getReportBuilderMock.mockResolvedValue({
+      ...SAVED_BUILDER,
+      columns: [{ ...SAVED_BUILDER.columns[0], key: "line_total", label: "Importe", source_field: "price_list_item.unit_price", data_type: "decimal", format_type: "currency" }],
+      excel_layout: {
+        ...SAVED_BUILDER.excel_layout!,
+        totals: [
+          { key: "subtotal", label: "Subtotal", column_key: "line_total", operation: "SUM", formula_definition: null, format_type: "currency" },
+          { key: "tax", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "subtotal * 0.16", format_type: "currency" },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const totalColumn = (await screen.findByLabelText("Columna a totalizar")) as HTMLSelectElement;
+    expect(totalColumn.selectedOptions[0].textContent).toBe("Importe");
+    expect(within(totalColumn).queryByText(/line_total/)).toBeNull();
+    expect((screen.getByLabelText("Fórmula", { selector: "#summary-formula-1" }) as HTMLInputElement).value).toBe("subtotal * 0.16");
+    expect(screen.queryByLabelText("Nombre interno")).toBeNull();
+
+    await user.clear(screen.getByLabelText("Título", { selector: "#summary-label-0" }));
+    await user.type(screen.getByLabelText("Título", { selector: "#summary-label-0" }), "Suma");
+    await user.type(screen.getByLabelText("Título", { selector: "#summary-label-1" }), " 16%");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1].excel_layout.totals).toEqual([
+      { key: "subtotal", label: "Suma", column_key: "line_total", operation: "SUM", formula_definition: null, format_type: "currency" },
+      { key: "tax", label: "IVA 16%", column_key: null, operation: "FORMULA", formula_definition: "subtotal * 0.16", format_type: "currency" },
     ]);
   });
 
@@ -370,7 +599,7 @@ describe("ReportBuilderWorkspace", () => {
     const user = userEvent.setup();
     renderWorkspace();
     await addFieldColumn(user, "price_list_item.unit_price");
-    await user.click(screen.getByRole("button", { name: /Agregar resumen calculado/ }));
+    await user.click(screen.getByRole("button", { name: "Agregar total calculado" }));
     await user.type(screen.getByLabelText("Fórmula", { selector: "#summary-formula-0" }), "unit_price + 1");
     await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
 
@@ -418,8 +647,164 @@ describe("ReportBuilderWorkspace", () => {
     getReportBuilderMock.mockResolvedValue(SAVED_BUILDER);
     const user = userEvent.setup();
     renderWorkspace();
-    await user.type(await screen.findByLabelText("Etiqueta"), "!");
+    await user.type(await screen.findByLabelText("Título de columna"), "!");
     expect(await screen.findByText(/Guarda el constructor antes de previsualizar/)).toBeTruthy();
     expect((screen.getByRole("button", { name: /Generar vista previa/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("ReportBuilderWorkspace — protecting what the active Excel template uses (#43)", () => {
+  const TEMPLATE_BUILDER: ReportBuilderDefinition = {
+    ...SAVED_BUILDER,
+    columns: [
+      { ...SAVED_BUILDER.columns[0], key: "unit_price", label: "Precio unitario", source_field: "price_list_item.unit_price", data_type: "decimal", format_type: "currency", display_order: 0 },
+      { ...SAVED_BUILDER.columns[0], key: "part_number", label: "Número de parte", display_order: 1 },
+    ],
+    excel_layout: {
+      ...SAVED_BUILDER.excel_layout!,
+      totals: [
+        { key: "subtotal", label: "Subtotal", column_key: "unit_price", operation: "SUM", formula_definition: null, format_type: "currency" },
+        { key: "tax", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "subtotal * 0.16", format_type: "currency" },
+      ],
+    },
+  };
+  const USED = templatePlaceholderDependencies(inspectionWithPlaceholders(["rows.unit_price", "summary.subtotal"]));
+
+  function Harness({ dependencies, onGoToMapping, onTemplateMayHaveChanged }: {
+    dependencies?: TemplateDependencies;
+    onGoToMapping?: () => void;
+    onTemplateMayHaveChanged?: () => void;
+  }) {
+    const builder = useReportBuilderDraft("COTIZACION");
+    return (
+      <ReportBuilderWorkspace
+        code="COTIZACION"
+        builder={builder}
+        parameters={[QUANTITY]}
+        templateDependencies={dependencies}
+        onGoToMapping={onGoToMapping}
+        onTemplateMayHaveChanged={onTemplateMayHaveChanged}
+      />
+    );
+  }
+
+  async function renderUsed(props: Parameters<typeof Harness>[0] = { dependencies: USED }) {
+    getReportBuilderMock.mockResolvedValue(TEMPLATE_BUILDER);
+    render(<Harness {...props} />);
+    await screen.findAllByLabelText("Título de columna");
+    return userEvent.setup();
+  }
+
+  const titles = () => screen.getAllByLabelText("Título de columna").map((input) => (input as HTMLInputElement).value);
+
+  it("marks the column and summary the template uses", async () => {
+    await renderUsed();
+    const columnsCard = screen.getByText("Columnas del reporte").closest("[data-slot='card']") as HTMLElement;
+    const summaryCard = screen.getByText("Resumen y totales").closest("[data-slot='card']") as HTMLElement;
+    expect(within(columnsCard).getAllByText("Plantilla Excel")).toHaveLength(1);
+    expect(within(summaryCard).getAllByText("Plantilla Excel")).toHaveLength(1);
+  });
+
+  it("F: removes a column the template does not use", async () => {
+    const user = await renderUsed();
+    await user.click(screen.getByRole("button", { name: "Eliminar Número de parte" }));
+    expect(titles()).toEqual(["Precio unitario"]);
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+  });
+
+  it("G: refuses to remove a used column, naming where the template reads it", async () => {
+    const onGoToMapping = vi.fn();
+    const user = await renderUsed({ dependencies: USED, onGoToMapping });
+    await user.click(screen.getByRole("button", { name: "Eliminar Precio unitario" }));
+
+    expect(screen.getByText('No puedes quitar "Precio unitario".')).toBeTruthy();
+    expect(screen.getByText("La plantilla Excel utiliza esta columna. Primero quítala o reemplázala en la plantilla.")).toBeTruthy();
+    expect(screen.getByText(/Cotización!B2/)).toBeTruthy();
+    expect(titles()).toEqual(["Precio unitario", "Número de parte"]);
+    await user.click(screen.getByRole("button", { name: "Ir a Mapear campos" }));
+    expect(onGoToMapping).toHaveBeenCalledTimes(1);
+    expect(saveReportBuilderMock).not.toHaveBeenCalled();
+  });
+
+  it("H: refuses to hide a used column", async () => {
+    const user = await renderUsed();
+    await user.click(screen.getAllByLabelText("Visible")[0]);
+    expect(screen.getByText('No puedes ocultar "Precio unitario" porque la plantilla Excel la utiliza.')).toBeTruthy();
+    expect((screen.getAllByLabelText("Visible")[0] as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByText("Oculta")).toBeNull();
+  });
+
+  it("I/J: allows relabeling a used column and re-pointing its source while the key stays", async () => {
+    const user = await renderUsed();
+    const title = screen.getAllByLabelText("Título de columna")[0];
+    await user.clear(title);
+    await user.type(title, "Precio");
+    await user.selectOptions(screen.getAllByLabelText("Dato que muestra")[0], "product.part_number");
+    await user.selectOptions(screen.getAllByLabelText("Dato que muestra")[0], "price_list_item.unit_price");
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+    await waitFor(() => expect(saveReportBuilderMock).toHaveBeenCalledTimes(1));
+    expect(saveReportBuilderMock.mock.calls[0][1].columns[0]).toMatchObject({ key: "unit_price", label: "Precio", source_field: "price_list_item.unit_price" });
+  });
+
+  it("K: removes a summary the template does not use", async () => {
+    const user = await renderUsed();
+    await user.click(screen.getByRole("button", { name: "Eliminar IVA" }));
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+    expect(screen.queryByLabelText("Título", { selector: "#summary-label-1" })).toBeNull();
+  });
+
+  it("L: refuses to remove a used summary", async () => {
+    const user = await renderUsed();
+    await user.click(screen.getByRole("button", { name: "Eliminar Subtotal" }));
+    expect(screen.getByText('No puedes quitar "Subtotal" porque la plantilla Excel lo utiliza.')).toBeTruthy();
+    expect((screen.getByLabelText("Título", { selector: "#summary-label-0" }) as HTMLInputElement).value).toBe("Subtotal");
+  });
+
+  it("M: allows relabeling a used summary", async () => {
+    const user = await renderUsed();
+    const title = screen.getByLabelText("Título", { selector: "#summary-label-0" });
+    await user.clear(title);
+    await user.type(title, "Suma");
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+    expect((title as HTMLInputElement).value).toBe("Suma");
+  });
+
+  it("without a template nothing is marked or blocked", async () => {
+    const user = await renderUsed({});
+    expect(screen.queryByText("Plantilla Excel")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Eliminar Subtotal" }));
+    expect(screen.queryByText(/No puedes/)).toBeNull();
+  });
+
+  it("shows the backend's ACTIVE_TEMPLATE_INCOMPATIBLE as cells and labels, keeping the draft", async () => {
+    saveReportBuilderMock.mockRejectedValueOnce(new ApiError(422, {
+      code: "ACTIVE_TEMPLATE_INCOMPATIBLE",
+      message: "La plantilla Excel activa utiliza datos que ya no existirían.",
+      template_version: 4,
+      issues: [{ placeholder: "rows.part_number", sheet: "Cotización", cell: "C14", range: null, reason: "unknown_placeholder" }],
+    }));
+    const onTemplateMayHaveChanged = vi.fn();
+    // Stale inspection: it does not list rows.part_number.
+    const user = await renderUsed({ dependencies: USED, onTemplateMayHaveChanged });
+    await user.click(screen.getByRole("button", { name: "Eliminar Número de parte" }));
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    expect(await screen.findByText("La plantilla Excel utiliza datos que este cambio eliminaría.")).toBeTruthy();
+    expect(screen.getByText("Número de parte — Cotización!C14 (ya no existiría)")).toBeTruthy();
+    expect(onTemplateMayHaveChanged).toHaveBeenCalledTimes(1);
+    expect(titles()).toEqual(["Precio unitario"]);
+  });
+
+  it("shows a 409 as a temporary conflict, not as an incompatible template", async () => {
+    saveReportBuilderMock.mockRejectedValueOnce(new ApiError(409, "La plantilla Excel activa cambió."));
+    const user = await renderUsed();
+    const title = screen.getAllByLabelText("Título de columna")[1];
+    await user.type(title, " (SKU)");
+    await user.click(screen.getByRole("button", { name: /Guardar constructor/ }));
+
+    expect(await screen.findByText("La configuración o la plantilla cambió mientras guardabas. Intenta guardar nuevamente.")).toBeTruthy();
+    expect(screen.queryByText(/utiliza datos que este cambio eliminaría/)).toBeNull();
+    expect(titles()).toEqual(["Precio unitario", "Número de parte (SKU)"]);
   });
 });

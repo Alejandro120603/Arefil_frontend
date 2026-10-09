@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApiClient, getBrowserApiBaseUrl } from "./browser-client";
 import { getServerApiBaseUrl, serverApiClient } from "./server-client";
 
+// Server API calls run outside a Next.js request here: no session cookie.
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }));
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();

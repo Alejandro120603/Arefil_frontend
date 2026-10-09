@@ -24,8 +24,7 @@ export function buildApiUrl(baseUrl: string, path: string, query?: QueryParams):
   return isAbsolute ? url.toString() : `${url.pathname}${url.search}${url.hash}`;
 }
 
-async function ensureOk(response: Response): Promise<void> {
-  if (response.ok) return;
+async function readError(response: Response): Promise<ApiError> {
   let detail: unknown = null;
   try {
     const body = await response.json();
@@ -33,13 +32,7 @@ async function ensureOk(response: Response): Promise<void> {
   } catch {
     detail = await response.text().catch(() => null);
   }
-  throw new ApiError(response.status, detail);
-}
-
-async function parseJson<T>(response: Response): Promise<T> {
-  await ensureOk(response);
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  return new ApiError(response.status, detail);
 }
 
 export interface RequestOptions {
@@ -59,9 +52,40 @@ export interface ApiClient {
   apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload>;
 }
 
-export function createApiClient(resolveBaseUrl: () => string): ApiClient {
+export interface ApiClientOptions {
+  /** Extra request headers, resolved per request (the server client forwards the session cookie). */
+  resolveHeaders?: () => Promise<Record<string, string>> | Record<string, string>;
+  /** Called on any 401 before the error is thrown (the browser client sends the user to /login). */
+  onUnauthorized?: () => void;
+}
+
+export function createApiClient(resolveBaseUrl: () => string, clientOptions: ApiClientOptions = {}): ApiClient {
+  async function request(path: string, init: RequestInit & { query?: QueryParams }): Promise<Response> {
+    const { query, headers, ...rest } = init;
+    const extra = (await clientOptions.resolveHeaders?.()) ?? {};
+    return fetch(buildApiUrl(resolveBaseUrl(), path, query), {
+      ...rest,
+      headers: { ...extra, ...(headers as Record<string, string> | undefined) },
+      // The session travels as an HttpOnly cookie of this same origin.
+      credentials: "same-origin",
+    });
+  }
+
+  async function ensureOk(response: Response): Promise<void> {
+    if (response.ok) return;
+    if (response.status === 401) clientOptions.onUnauthorized?.();
+    throw await readError(response);
+  }
+
+  async function parseJson<T>(response: Response): Promise<T> {
+    await ensureOk(response);
+    if (response.status === 204) return undefined as T;
+    return (await response.json()) as T;
+  }
+
   async function apiGet<T>(path: string, options?: RequestOptions): Promise<T> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+    const response = await request(path, {
+      query: options?.query,
       method: "GET",
       headers: { Accept: "application/json" },
       signal: options?.signal,
@@ -71,7 +95,8 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
   }
 
   async function apiPostJson<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+    const response = await request(path, {
+      query: options?.query,
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -81,7 +106,8 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
   }
 
   async function apiPatchJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+    const response = await request(path, {
+      query: options?.query,
       method: "PATCH",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
@@ -91,7 +117,8 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
   }
 
   async function apiPutJson<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+    const response = await request(path, {
+      query: options?.query,
       method: "PUT",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
@@ -101,7 +128,8 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
   }
 
   async function apiDelete<T>(path: string, options?: RequestOptions): Promise<T> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+    const response = await request(path, {
+      query: options?.query,
       method: "DELETE",
       headers: { Accept: "application/json" },
       signal: options?.signal,
@@ -110,7 +138,8 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
   }
 
   async function apiPostBlob(path: string, body: unknown, options?: RequestOptions): Promise<BlobDownload> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+    const response = await request(path, {
+      query: options?.query,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -123,7 +152,8 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
   }
 
   async function apiUpload<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+    const response = await request(path, {
+      query: options?.query,
       method: "POST",
       headers: { Accept: "application/json" },
       body: formData,
@@ -134,7 +164,8 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
 
   /** Multipart replace (`PUT`); the browser writes the multipart Content-Type itself. */
   async function apiPutForm<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+    const response = await request(path, {
+      query: options?.query,
       method: "PUT",
       headers: { Accept: "application/json" },
       body: formData,
@@ -144,7 +175,8 @@ export function createApiClient(resolveBaseUrl: () => string): ApiClient {
   }
 
   async function apiDownloadBlob(path: string, options?: RequestOptions): Promise<BlobDownload> {
-    const response = await fetch(buildApiUrl(resolveBaseUrl(), path, options?.query), {
+    const response = await request(path, {
+      query: options?.query,
       method: "GET",
       signal: options?.signal,
     });
@@ -179,8 +211,8 @@ function extractFilename(disposition: string): string | null {
   if (raw == null) return null;
   const unquoted = raw.trim().replace(/^"|"$/g, "");
   try {
-    return decodeURIComponent(unquoted).replace(/[\\/]/g, "_");
+    return decodeURIComponent(unquoted).replace(/[\\/]/g, "_").trim() || null;
   } catch {
-    return unquoted.replace(/[\\/]/g, "_");
+    return unquoted.replace(/[\\/]/g, "_").trim() || null;
   }
 }

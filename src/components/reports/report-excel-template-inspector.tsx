@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { EyeOff, Loader2, TriangleAlert } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -12,10 +12,15 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
-import { getReportBuilder, inspectReportExcelTemplate, updateReportExcelTemplateMappings } from "@/lib/api/reports";
+import { getReportBuilder, updateReportExcelTemplateMappings } from "@/lib/api/reports";
+import {
+  useReportTemplateInspection,
+  type ReportTemplateInspection,
+} from "@/hooks/use-report-template-inspection";
 import { ReportExcelTemplatePreview } from "@/components/reports/report-excel-template-preview";
 import { ReportExcelTemplateVersionHistory } from "@/components/reports/report-excel-template-version-history";
 import { WorkbookGrid } from "@/components/reports/workbook-grid";
+import { normalizeSummaries } from "@/lib/reports/report-builder";
 import {
   MAX_RENDERABLE_CELLS,
   VALUE_TYPE_LABELS,
@@ -70,9 +75,18 @@ export function ReportExcelTemplateInspector({
   onPreviewInvalidated,
   onDirtyChange,
   onTemplateSaved,
-  refreshToken = "",
+  builder,
+  templateInspection,
 }: {
   code: string;
+  /** The saved builder when the wizard already owns it (#41A); `null` while it loads; omitted, the mapper reads it itself. */
+  builder?: ReportBuilderDefinition | null;
+  /**
+   * The wizard's shared inspection (`useReportTemplateInspection`, #43). When
+   * given, the mapper never requests `/inspect` itself; omitted (the
+   * standalone template page), it owns an inspection of its own.
+   */
+  templateInspection?: ReportTemplateInspection;
   /** Controls the Diseño/Vista previa tab from outside (the wizard, #33); uncontrolled (internal tab state) when omitted. */
   mode?: "design" | "preview";
   onModeChange?: (mode: "design" | "preview") => void;
@@ -80,10 +94,10 @@ export function ReportExcelTemplateInspector({
   onPreviewReady?: () => void;
   onPreviewInvalidated?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** Fires whenever this editor changed the active template (mappings saved, version restored, stale-template reload). */
   onTemplateSaved?: () => void;
-  refreshToken?: string;
 }) {
-  return <TemplateMapper key={code} code={code} mode={mode} onModeChange={onModeChange} onPreviewReady={onPreviewReady} onPreviewInvalidated={onPreviewInvalidated} onDirtyChange={onDirtyChange} onTemplateSaved={onTemplateSaved} refreshToken={refreshToken} />;
+  return <TemplateMapper key={code} code={code} mode={mode} onModeChange={onModeChange} onPreviewReady={onPreviewReady} onPreviewInvalidated={onPreviewInvalidated} onDirtyChange={onDirtyChange} onTemplateSaved={onTemplateSaved} builder={builder} templateInspection={templateInspection} />;
 }
 
 function TemplateMapper({
@@ -94,18 +108,25 @@ function TemplateMapper({
   onPreviewInvalidated,
   onDirtyChange,
   onTemplateSaved,
-  refreshToken = "",
+  builder: ownedBuilder,
+  templateInspection: sharedInspection,
 }: {
   code: string;
+  builder?: ReportBuilderDefinition | null;
+  templateInspection?: ReportTemplateInspection;
   mode?: "design" | "preview";
   onModeChange?: (mode: "design" | "preview") => void;
   onPreviewReady?: () => void;
   onPreviewInvalidated?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   onTemplateSaved?: () => void;
-  refreshToken?: string;
 }) {
-  const [state, setState] = useState<MapperState>({ status: "loading" });
+  // Standalone only; and like the builder-owned mode of #41A, wait for the
+  // builder the wizard is still loading instead of inspecting ahead of it.
+  const ownInspection = useReportTemplateInspection(sharedInspection || ownedBuilder === null ? null : code, "discover");
+  const source = sharedInspection ?? ownInspection;
+  const [loadedBuilder, setLoadedBuilder] = useState<{ generation: number; builder: ReportBuilderDefinition | null; error: string | null } | null>(null);
+  const [builderGeneration, setBuilderGeneration] = useState(0);
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
   const [selectedCell, setSelectedCell] = useState<ReportWorkbookCellInspection | null>(null);
   const [draftPlaceholder, setDraftPlaceholder] = useState("");
@@ -124,38 +145,36 @@ function TemplateMapper({
     onModeChange?.(next);
   }
 
-  const load = useCallback(
-    (signal?: AbortSignal) =>
-      Promise.all([
-        inspectReportExcelTemplate(code, { signal }),
-        getReportBuilder(code, { signal }),
-      ])
-        .then(([inspection, builder]) => {
-          if (signal?.aborted) return;
-          setState({ status: "ready", inspection, builder });
-          setActiveSheetIndex(0);
-          setSelectedCell(null);
-        })
-        .catch((error: unknown) => {
-          if (signal?.aborted) return;
-          if (error instanceof ApiError && error.status === 404) {
-            setState({ status: "no-template" });
-            return;
-          }
-          if (error instanceof ApiError && error.status === 422) {
-            setState({ status: "limits", message: error.message });
-            return;
-          }
-          setState({ status: "error", message: getUserErrorMessage(error, "No se pudo abrir el editor visual.") });
-        }),
-    [code],
-  );
-
   useEffect(() => {
+    // The wizard owns the builder (or is still loading it): never read it here.
+    if (ownedBuilder !== undefined) return;
     const controller = new AbortController();
-    void load(controller.signal);
+    getReportBuilder(code, { signal: controller.signal })
+      .then((builder) => {
+        if (!controller.signal.aborted) setLoadedBuilder({ generation: builderGeneration, builder, error: null });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setLoadedBuilder({ generation: builderGeneration, builder: null, error: getUserErrorMessage(error, "No se pudo abrir el editor visual.") });
+        }
+      });
     return () => controller.abort();
-  }, [load, refreshToken]);
+  }, [code, ownedBuilder, builderGeneration]);
+
+  const currentBuilder = ownedBuilder !== undefined
+    ? { builder: ownedBuilder, error: null }
+    : loadedBuilder?.generation === builderGeneration ? loadedBuilder : { builder: null, error: null };
+  const state: MapperState = mapperState(source, currentBuilder.builder, currentBuilder.error);
+
+  // A different workbook (another version, or the first one) starts with a
+  // clean selection — adjusted during render, not in an effect.
+  const readyInspection = state.status === "ready" ? state.inspection : null;
+  const [previousInspection, setPreviousInspection] = useState(readyInspection);
+  if (readyInspection !== previousInspection) {
+    setPreviousInspection(readyInspection);
+    setActiveSheetIndex(0);
+    setSelectedCell(null);
+  }
 
   useEffect(() => {
     onDirtyChange?.(pendingMappings.size > 0);
@@ -186,7 +205,7 @@ function TemplateMapper({
     setDraftPlaceholder(effective ?? "");
   }
 
-  function handleReload() {
+  function resetLocalEdits() {
     onPreviewInvalidated?.();
     setPendingMappings(new Map());
     setSelectedCell(null);
@@ -195,8 +214,27 @@ function TemplateMapper({
     setGlobalErrors([]);
     setSaveError(null);
     setSavedNotice(null);
-    setState({ status: "loading" });
-    void load();
+  }
+
+  /** Re-reads the active template after a stale-template conflict. */
+  function handleReload() {
+    resetLocalEdits();
+    source.reload();
+    if (ownedBuilder === undefined) setBuilderGeneration((value) => value + 1);
+    onTemplateSaved?.();
+  }
+
+  /**
+   * After a restore the active version changed: the wizard learns it through
+   * `onTemplateSaved` (its metadata refresh re-keys the shared inspection);
+   * a standalone mapper re-reads its own inspection and builder.
+   */
+  function handleRestored() {
+    resetLocalEdits();
+    onTemplateSaved?.();
+    if (sharedInspection) return;
+    source.reload();
+    if (ownedBuilder === undefined) setBuilderGeneration((value) => value + 1);
   }
 
   function stageMapping(placeholder: string) {
@@ -280,7 +318,9 @@ function TemplateMapper({
         mappings,
         clear,
       });
-      setState({ status: "ready", inspection: response.inspection, builder: state.builder });
+      // The response already carries the new version's inspection: adopt it
+      // instead of asking `/inspect` again.
+      source.replace(response.inspection);
       setPendingMappings(new Map());
       setSelectedCell(null);
       setCellErrors(new Map());
@@ -390,10 +430,7 @@ function TemplateMapper({
           <ReportExcelTemplateVersionHistory
             code={code}
             disabledReason={isDirty ? "Guarda o descarta tus cambios antes de restaurar otra versión." : null}
-            onRestored={() => {
-              onTemplateSaved?.();
-              handleReload();
-            }}
+            onRestored={handleRestored}
           />
         </div>
       </CardHeader>
@@ -517,6 +554,10 @@ function TemplateMapper({
             hasUnsavedChanges={isDirty}
             onPreviewReady={onPreviewReady}
             onPreviewInvalidated={onPreviewInvalidated}
+            lineAmount={{
+              columns: builder.columns,
+              summaries: normalizeSummaries(builder.excel_layout?.totals ?? [], builder.columns),
+            }}
           />
         </div>
       </CardContent>
@@ -650,4 +691,17 @@ function MappingPanel({
       )}
     </section>
   );
+}
+
+function mapperState(
+  source: ReportTemplateInspection,
+  builder: ReportBuilderDefinition | null,
+  builderError: string | null,
+): MapperState {
+  if (source.status === "none") return { status: "no-template" };
+  if (source.status === "limits") return { status: "limits", message: source.error ?? "La plantilla excede los límites del inspector." };
+  if (source.status === "error") return { status: "error", message: source.error ?? "No se pudo abrir el editor visual." };
+  if (builderError) return { status: "error", message: builderError };
+  if (source.status !== "ready" || source.inspection == null || builder == null) return { status: "loading" };
+  return { status: "ready", inspection: source.inspection, builder };
 }

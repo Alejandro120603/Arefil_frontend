@@ -16,6 +16,8 @@ import type {
   ReportExcelTemplateInspection,
   ReportExcelTemplateUpload,
   ReportUpdateRequest,
+  ReportInputsUpdateRequest,
+  ReportReadiness,
   ExcelMappingsRequest,
   ExcelMappingsResponse,
   ExcelTemplateRestoreRequest,
@@ -31,6 +33,10 @@ function reportPath(code: string, suffix = ""): string {
 
 export function createReport(request: ReportCreateRequest, options?: RequestOptions): Promise<ReportDefinition> {
   return browserApiClient.apiPostJson<ReportDefinition>("/reports", request, options);
+}
+
+export function deleteReport(code: string, options?: RequestOptions): Promise<void> {
+  return browserApiClient.apiDelete<void>(reportPath(code), options);
 }
 
 export function listReportDataSources(options?: RequestOptions): Promise<ReportDataSource[]> {
@@ -50,6 +56,20 @@ export function updateReport(
   options?: RequestOptions,
 ): Promise<ReportDefinition> {
   return browserApiClient.apiPatchJson<ReportDefinition>(reportPath(code), request, options);
+}
+
+/** Atomically replaces source, scalar parameters, and repeatable groups. */
+export function updateReportInputs(
+  code: string,
+  request: ReportInputsUpdateRequest,
+  options?: RequestOptions,
+): Promise<ReportBuilderDefinition> {
+  return browserApiClient.apiPutJson<ReportBuilderDefinition>(reportPath(code, "/inputs"), request, options);
+}
+
+/** Backend #38: computed readiness of one report (`404` for an unknown code). */
+export function getReportReadiness(code: string, options?: RequestOptions): Promise<ReportReadiness> {
+  return browserApiClient.apiGet<ReportReadiness>(`/admin${reportPath(code, "/readiness")}`, options);
 }
 
 export function getAdminReport(code: string, options?: RequestOptions): Promise<ReportAdminDefinition> {
@@ -170,13 +190,23 @@ function isReportProductOption(option: ReportOption): option is ReportProductOpt
   return typeof (option as ReportProductOption).product_id === "number";
 }
 
+/**
+ * What a data export renders from. An `executionId` exports exactly the stored
+ * snapshot the user is looking at (the backend never re-runs it); `parameters`
+ * is the legacy re-run, kept for reports whose result carries no snapshot.
+ */
+export type ReportDataExportSource =
+  | { executionId: string }
+  | { parameters: Record<string, unknown> };
+
 export function downloadReportData(
   code: string,
   format: "csv" | "xlsx",
-  parameters: Record<string, unknown>,
+  source: ReportDataExportSource,
   options?: RequestOptions,
 ): Promise<BlobDownload> {
-  return browserApiClient.apiPostBlob(reportPath(code, `/export/${format}`), parameters, options);
+  const body = "executionId" in source ? { execution_id: source.executionId } : source.parameters;
+  return browserApiClient.apiPostBlob(reportPath(code, `/export/${format}`), body, options);
 }
 
 /**

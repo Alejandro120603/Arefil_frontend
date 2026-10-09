@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createReport,
+  deleteReport,
   downloadReportData,
   executeReport,
   getReportParameterOptions,
@@ -9,6 +10,7 @@ import {
   resolveReportProductOption,
   searchReportProductOptions,
   updateReport,
+  updateReportInputs,
   getReportBuilder,
   getReportFieldCatalog,
   previewReportBuilder,
@@ -18,6 +20,7 @@ import {
   downloadReportExcelTemplate,
   getReportExcelTemplate,
   uploadReportExcelTemplate,
+  getReportReadiness,
 } from "./reports";
 import { ApiError, getUserErrorMessage } from "./errors";
 
@@ -36,6 +39,68 @@ function optionsPage<T>(items: T[], meta: Partial<{ page: number; page_size: num
 }
 
 describe("report manager API", () => {
+  it("updates report inputs with one PUT and surfaces backend validation errors", async () => {
+    const request = {
+      name: "Cotización",
+      description: null,
+      category: "Ventas",
+      enabled: true,
+      data_source_id: 5,
+      parameters: [],
+      parameter_groups: [],
+    };
+    const response = { report: { code: "COTIZACION" }, columns: [], parameter_groups: [], excel_layout: null };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(response))
+      .mockResolvedValueOnce(Response.json({ detail: "El builder no es compatible." }, { status: 422 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateReportInputs("COTIZACION / 2026", request)).resolves.toEqual(response);
+    await expect(updateReportInputs("COTIZACION", request)).rejects.toMatchObject({
+      status: 422,
+      message: "El builder no es compatible.",
+    });
+    expect(fetchMock.mock.calls[0]).toEqual([
+      "/backend-api/reports/COTIZACION%20%2F%202026/inputs",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify(request) }),
+    ]);
+  });
+
+  it("deletes one report using its encoded public code", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteReport("REPORT / Q4")).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/REPORT%20%2F%20Q4",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("reads one report's readiness from the administrative contract", async () => {
+    const body = {
+      report_code: "COTIZACION", enabled: false, ready: false,
+      issues: [{ code: "BUILDER_MISSING", severity: "blocker", step: "data", message: "Configura las columnas." }],
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getReportReadiness("COTIZACION")).resolves.toEqual(body);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/admin/reports/COTIZACION/readiness",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("surfaces a readiness 404 as an ApiError", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ detail: "El reporte NOPE no existe." }, { status: 404 }),
+    ));
+
+    await expect(getReportReadiness("NOPE")).rejects.toMatchObject({ status: 404, message: "El reporte NOPE no existe." });
+  });
+
   it("executes any report through the generic data endpoint", async () => {
     const payload = { columns: ["id"], rows: [{ id: 1 }], row_count: 1 };
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(payload));
@@ -94,11 +159,21 @@ describe("report manager API", () => {
       .resolves.toBeNull();
   });
 
+  it("exports a stored execution by its id alone, never by parameters", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("csv"));
+    vi.stubGlobal("fetch", fetchMock);
+    await downloadReportData("COTIZACION", "xlsx", { executionId: "exec-1" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/reports/COTIZACION/export/xlsx",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ execution_id: "exec-1" }) }),
+    );
+  });
+
   it("prefers an RFC 5987 backend filename and removes path separators", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response("csv", {
       headers: { "Content-Disposition": "attachment; filename=fallback.csv; filename*=UTF-8''reporte%20agosto%2Ffinal.csv" },
     })));
-    await expect(downloadReportData("REPORT", "csv", {})).resolves.toMatchObject({
+    await expect(downloadReportData("REPORT", "csv", { parameters: {} })).resolves.toMatchObject({
       filename: "reporte agosto_final.csv",
     });
   });
@@ -148,7 +223,7 @@ describe("report manager API", () => {
     await expect(previewReport(definition.code, {})).resolves.toMatchObject({ row_count: 1 });
     await expect(getReportParameterOptions(definition.code, "supplier_id")).resolves.toMatchObject({ items: [{ value: 1, label: "Donaldson" }] });
     await expect(updateReport(definition.code, { ...createRequest, enabled: true })).resolves.toMatchObject({ enabled: true });
-    await expect(downloadReportData(definition.code, "csv", {})).resolves.toMatchObject({ filename: "product-catalog.csv" });
+    await expect(downloadReportData(definition.code, "csv", { parameters: {} })).resolves.toMatchObject({ filename: "product-catalog.csv" });
 
     expect(fetchMock.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
       ["/backend-api/reports", "POST"],
@@ -328,12 +403,12 @@ describe("report builder API", () => {
 
   it("renders the final quotation from the approved execution snapshot", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("PK", {
-      headers: { "Content-Disposition": "attachment; filename=cotizacion-document.xlsx" },
+      headers: { "Content-Disposition": 'attachment; filename="COTIZACION.xlsx"' },
     }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(downloadReportDocumentXlsx("COTIZACION", "10d693fd-ecc3-4759-aec7-d3d7cb086eb7"))
-      .resolves.toMatchObject({ filename: "cotizacion-document.xlsx" });
+      .resolves.toMatchObject({ filename: "COTIZACION.xlsx" });
     // The backend rejects a body that mixes the id with report parameters, so
     // `execution_id` has to travel alone.
     expect(fetchMock).toHaveBeenCalledWith(

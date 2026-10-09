@@ -1,0 +1,68 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { ReportCatalogList } from "./report-catalog-list";
+import type { ReportDefinition } from "@/types/api";
+
+const BASE: Omit<ReportDefinition, "code" | "name"> = {
+  description: null,
+  category: null,
+  filename_template: null,
+  enabled: true,
+  data_source_id: 1,
+  data_source: {
+    id: 1,
+    code: "PRODUCT_CATALOG",
+    name: "Catálogo de productos",
+    description: null,
+    enabled: true,
+    capabilities: [],
+  },
+  parameters: [],
+  parameter_groups: [],
+  created_at: "2026-08-25T12:00:00Z",
+  updated_at: "2026-08-25T12:00:00Z",
+};
+
+afterEach(cleanup);
+
+describe("ReportCatalogList", () => {
+  it("keeps A/B operational and exposes capability-aware actions for generic reports", () => {
+    render(<ReportCatalogList reports={[
+      { ...BASE, code: "PRICE_LIST_COMPARISON", name: "Comparación" },
+      { ...BASE, code: "PRODUCT_CATALOG", name: "Productos" },
+    ]} canConfigure />);
+
+    expect(screen.queryByRole("button", { name: /Diseñar/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /Configurar/ })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Generar" }).map((button) => button.getAttribute("href"))).toEqual([
+      "/donaldson/reports/PRICE_LIST_COMPARISON",
+      "/donaldson/reports/PRODUCT_CATALOG",
+    ]);
+    expect(screen.queryByRole("button", { name: /Descargar datos/ })).toBeNull();
+    expect(screen.queryByText(/Runner de Frontend #12/)).toBeNull();
+  });
+
+  it("blocks runtime actions for disabled definitions without blocking configuration", () => {
+    render(<ReportCatalogList reports={[
+      { ...BASE, code: "DISABLED", name: "Deshabilitado", enabled: false },
+    ]} canConfigure />);
+    expect((screen.getByRole("button", { name: "Generar" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /Configurar/ }).getAttribute("href")).toBe("/administracion/reportes/DISABLED/configurar");
+    expect(screen.queryByRole("button", { name: /Diseñar/ })).toBeNull();
+    expect(screen.getByText(/está deshabilitado/)).toBeTruthy();
+  });
+
+  it("shows a USER only runtime actions", () => {
+    render(<ReportCatalogList reports={[
+      { ...BASE, code: "PRICE_LIST_COMPARISON", name: "Comparación" },
+      { ...BASE, code: "DISABLED", name: "Deshabilitado", enabled: false },
+    ]} canConfigure={false} />);
+    expect(screen.getAllByRole("button", { name: "Generar" })).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /Configurar/ })).toBeNull();
+    expect(document.querySelector('a[href*="/administracion"]')).toBeNull();
+    expect(screen.queryByText(/puedes configurarlo/)).toBeNull();
+    expect(screen.getByText("Este reporte está deshabilitado.")).toBeTruthy();
+  });
+});

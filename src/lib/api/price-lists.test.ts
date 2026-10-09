@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { listAllPriceLists } from "./price-lists";
 import type { Page, PriceList } from "@/types/api";
 
+// Server API calls run outside a Next.js request here: no session cookie.
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }));
+
 function makePriceList(id: number): PriceList {
   return {
     id,

@@ -4,17 +4,20 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
+import type { CurrentUser } from "@/lib/auth/session";
 import { cn } from "@/lib/utils";
-import { NAV_SECTIONS } from "./nav-items";
+import { navSectionsFor } from "./nav-items";
+import { UserMenu } from "./user-menu";
 
-function isActive(pathname: string, href: string): boolean {
+export function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function Sidebar() {
+export function Sidebar({ user }: { user: CurrentUser }) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
+  const sections = navSectionsFor(user);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -66,7 +69,7 @@ export function Sidebar() {
           </button>
         </div>
         <nav aria-label="Navegación principal" className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-          {NAV_SECTIONS.map((section) => (
+          {sections.map((section) => (
             <div key={section.label ?? "root"}>
               {section.label && (
                 <p className="px-3 pb-2 text-xs font-medium tracking-wider text-muted-foreground uppercase">
@@ -100,6 +103,7 @@ export function Sidebar() {
             </div>
           ))}
         </nav>
+        <UserMenu user={user} />
       </aside>
     </>
   );

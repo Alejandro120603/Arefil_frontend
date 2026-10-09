@@ -12,7 +12,10 @@ import { ReportWizardStepper } from "@/components/reports/report-wizard-stepper"
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApiError } from "@/lib/api/errors";
-import { getReportBuilder, getReportExcelTemplate } from "@/lib/api/reports";
+import { useReportBuilderDraft } from "@/hooks/use-report-builder-draft";
+import { useReportReadiness } from "@/hooks/use-report-readiness";
+import { useReportTemplateInspection } from "@/hooks/use-report-template-inspection";
+import { getReportExcelTemplate } from "@/lib/api/reports";
 import {
   reportWizardStepFromOrder,
   reportWizardStepOrder,
@@ -23,8 +26,8 @@ import type { ReportAdminDefinition, ReportExcelTemplate } from "@/types/api";
 
 const STEP_DESCRIPTIONS: Record<ReportWizardStepId, string> = {
   information: "Nombre, código y descripción — sin configuración técnica todavía.",
-  source: "De dónde vienen los datos y qué necesita capturar el usuario para generarlos.",
-  data: "Columnas, renglones repetibles, fórmulas y resumen del reporte.",
+  source: "De dónde vienen los datos y todo lo que captura el usuario para generarlos, incluidos los productos por renglón.",
+  data: "Columnas, fórmulas, resumen y formato Excel del reporte.",
   template: "El archivo Excel que se usará como diseño final del documento.",
   mapping: "Asocia cada dato del reporte a su celda en la plantilla, sin escribir placeholders.",
   preview: "Genera el documento con datos de prueba antes de habilitar el reporte.",
@@ -42,6 +45,22 @@ const STEP_DESCRIPTIONS: Record<ReportWizardStepId, string> = {
  * Información *and* Fuente y entradas are saved together (`data_source_id` is
  * required to create a report at all) — so creating redirects to this same
  * wizard at the new code, exactly like editing one that already exists.
+ *
+ * The builder has one owner (Frontend #41A): `useReportBuilderDraft` loads it
+ * once here, and every step reads that same copy — the workspace edits its
+ * draft, the template, mapper and finalize steps read what was last saved,
+ * and the resume position is computed from it.
+ *
+ * The active template's inspection has one owner too (Frontend #43):
+ * `useReportTemplateInspection` inspects the version the template card
+ * reports, once, and steps 2, 3 and 5 share it — "Fuente y entradas" and
+ * "Datos del reporte" use it to warn before removing something the template
+ * still reads; Backend #37 stays the authority on save.
+ *
+ * Whether the report can be enabled is the backend's readiness (Backend #38,
+ * Frontend #44): `useReportReadiness` is asked only while Finalizar is
+ * visible, and every save that can change it bumps `readinessRevision`, so
+ * Finalizar never shows an answer older than the last change.
  */
 export function ReportConfigurationWizard({
   report: initialReport,
@@ -63,32 +82,64 @@ export function ReportConfigurationWizard({
   /** Whether `ReportExcelTemplateCard` has reported back at least once — `templateState == null` is ambiguous otherwise. */
   const [templateChecked, setTemplateChecked] = useState(false);
   const [templateSkipped, setTemplateSkipped] = useState(false);
-  const [previewGenerated, setPreviewGenerated] = useState(false);
+  const [readinessRevision, setReadinessRevision] = useState(0);
   const mounted = useRef(false);
   const [mappingsDirty, setMappingsDirty] = useState(false);
   const [savedRevision, setSavedRevision] = useState(0);
+  const builder = useReportBuilderDraft(report?.code ?? null);
+  /**
+   * What the read-only steps receive: `null` while the builder loads (they
+   * wait), or `undefined` if it could not be loaded (they fall back to reading
+   * it themselves, as they did before #41A).
+   */
+  const savedBuilder = builder.loading ? null : builder.persisted ?? undefined;
+  const resumeBuilder = builder.persisted;
+  const resumeFailed = !builder.loading && builder.loadError != null;
+  const templateInspection = useReportTemplateInspection(
+    report?.code ?? null,
+    templateChecked ? templateState : "pending",
+  );
+  const readiness = useReportReadiness(report?.code ?? null, {
+    active: step === "finalize",
+    revision: readinessRevision,
+  });
+  /** A save that can change readiness happened: the answer held so far is stale. */
+  function invalidateReadiness() {
+    setReadinessRevision((revision) => revision + 1);
+  }
+  /** Something may have changed the active template behind this session: re-read its metadata and inspection. */
+  function refreshTemplate() {
+    setSavedRevision((revision) => revision + 1);
+    templateInspection.reload();
+    invalidateReadiness();
+  }
 
   useEffect(() => {
     if (resumed || report == null) return;
+    if (resumeFailed) {
+      // Best-effort: if the builder cannot be read, the wizard simply opens on Información.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reacting to the shared builder load failing
+      setResumed(true);
+      return;
+    }
+    if (resumeBuilder == null) return;
     const controller = new AbortController();
-    Promise.all([
-      getReportBuilder(report.code, { signal: controller.signal }),
-      getReportExcelTemplate(report.code, { signal: controller.signal }).catch((error: unknown) => {
+    getReportExcelTemplate(report.code, { signal: controller.signal })
+      .catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 404) return null;
         throw error;
-      }),
-    ])
-      .then(([builder, template]) => {
+      })
+      .then((template) => {
         if (controller.signal.aborted) return;
         setTemplateState(template);
         setTemplateChecked(true);
-        setStep(resumeReportWizardStep({ builder, template }));
+        setStep(resumeReportWizardStep({ builder: resumeBuilder, template }));
         setResumed(true);
       })
       // Best-effort: if this fails, the wizard simply opens on Información.
       .catch(() => { if (!controller.signal.aborted) setResumed(true); });
     return () => controller.abort();
-  }, [resumed, report]);
+  }, [resumed, report, resumeBuilder, resumeFailed]);
 
   useEffect(() => {
     if (!mounted.current) {
@@ -139,6 +190,17 @@ export function ReportConfigurationWizard({
           report={report}
           section={step === "information" ? "information" : "source"}
           createRedirectPath={(code) => `/administracion/reportes/${encodeURIComponent(code)}/configurar?step=3`}
+          builder={builder}
+          onGoToData={() => goTo("data")}
+          templateDependencies={templateInspection.dependencies}
+          onGoToMapping={templateState != null ? () => goTo("mapping") : undefined}
+          onTemplateMayHaveChanged={refreshTemplate}
+          onDefinitionSaved={(saved) => {
+            if (report != null) {
+              setReport(saved);
+              invalidateReadiness();
+            }
+          }}
           onSaved={(saved) => {
             if (report != null) {
               setReport(saved);
@@ -155,9 +217,15 @@ export function ReportConfigurationWizard({
           <div className={step === "data" ? "contents" : "hidden"}>
             <ReportBuilderWorkspace
               code={report.code}
+              builder={builder}
               parameters={report.parameters}
-              dataSourceCapabilities={report.data_source.capabilities}
-              onSaved={() => setSavedRevision((revision) => revision + 1)}
+              onSaved={() => {
+                setSavedRevision((revision) => revision + 1);
+                invalidateReadiness();
+              }}
+              templateDependencies={templateInspection.dependencies}
+              onGoToMapping={templateState != null ? () => goTo("mapping") : undefined}
+              onTemplateMayHaveChanged={refreshTemplate}
             />
           </div>
           {step === "data" && (
@@ -168,9 +236,15 @@ export function ReportConfigurationWizard({
             <ReportExcelTemplateCard
               code={report.code}
               parameters={report.parameters}
+              builder={savedBuilder}
               refreshToken={savedRevision}
               hasUnsavedMappings={mappingsDirty}
               onTemplateChange={(template) => {
+                // The card's first report only describes what the backend already
+                // had; a later different version (upload, restore, delete) is new.
+                const changed = templateChecked
+                  && `${templateState?.version}:${templateState?.checksum}` !== `${template?.version}:${template?.checksum}`;
+                if (changed) invalidateReadiness();
                 setTemplateState(template);
                 setTemplateChecked(true);
                 if (template != null) setTemplateSkipped(false);
@@ -210,13 +284,15 @@ export function ReportConfigurationWizard({
               <CardContent>
                 <ReportExcelTemplateInspector
                   code={report.code}
+                  builder={savedBuilder}
                   mode={templateMode}
-                  refreshToken={`${savedRevision}:${templateState?.version ?? "none"}`}
+                  templateInspection={templateInspection}
                   onModeChange={handleTemplateModeChange}
-                  onPreviewReady={() => setPreviewGenerated(true)}
-                  onPreviewInvalidated={() => setPreviewGenerated(false)}
                   onDirtyChange={setMappingsDirty}
-                  onTemplateSaved={() => setSavedRevision((revision) => revision + 1)}
+                  onTemplateSaved={() => {
+                    setSavedRevision((revision) => revision + 1);
+                    invalidateReadiness();
+                  }}
                 />
               </CardContent>
             </Card>
@@ -234,9 +310,9 @@ export function ReportConfigurationWizard({
               <CardContent>
                 <ReportWizardFinalizeStep
                   report={report}
-                  active={step === "finalize"}
-                  previewGeneratedThisSession={previewGenerated}
+                  readiness={readiness}
                   onReportChange={setReport}
+                  onGoTo={goTo}
                 />
               </CardContent>
             </Card>

@@ -10,21 +10,24 @@ import { resolveReportProductOption } from "@/lib/api/reports";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { formatCurrency } from "@/lib/format/decimal";
 import {
+  estimateDiscountedUnitPrice,
+  estimateLineAmount,
+} from "@/lib/reports/report-line-estimate";
+import {
   createRuntimeGroupRow,
-  estimateLineTotal,
   orderedGroupFields,
   orderedParameterGroups,
   productSearchField,
-  QUOTATION_DISCOUNT_FIELD,
-  QUOTATION_QUANTITY_FIELD,
   type RuntimeGroupValues,
   type RuntimeParameterValues,
 } from "@/lib/reports/report-runtime";
 import type {
+  ReportColumn,
   ReportNumericConfiguration,
   ReportParameterGroup,
   ReportParameterGroupField,
   ReportProductOption,
+  ReportSummaryConfiguration,
 } from "@/types/api";
 
 /** Selected product per row, keyed by `${group.name}:${row.id}`. */
@@ -45,6 +48,11 @@ function isPercentField(field: ReportParameterGroupField): boolean {
     && Number(constraints.maximum) === 100;
 }
 
+function isDiscountField(field: ReportParameterGroupField): boolean {
+  const identity = `${field.name} ${field.label}`.toLocaleLowerCase("es-MX");
+  return isPercentField(field) && (identity.includes("discount") || identity.includes("descuento"));
+}
+
 /**
  * Line items as a compact table (Frontend #22).
  *
@@ -63,6 +71,7 @@ export function ReportRepeatableParameters({
   groupErrors = {},
   onOptionsStateChange,
   onChange,
+  lineAmount,
 }: {
   code: string;
   groups: ReportParameterGroup[];
@@ -73,6 +82,11 @@ export function ReportRepeatableParameters({
   groupErrors?: Record<string, string>;
   onOptionsStateChange?: (state: { loading: boolean; ready: boolean }) => void;
   onChange: (values: RuntimeGroupValues) => void;
+  /**
+   * The report's saved columns and summaries: the line "Total" evaluates the
+   * report's own amount formula (Frontend #45). Without them it stays "—".
+   */
+  lineAmount?: { columns: ReportColumn[]; summaries: ReportSummaryConfiguration[] };
 }) {
   const [products, setProducts] = useState<SelectedProducts>({});
   const [revalidating, setRevalidating] = useState(false);
@@ -179,9 +193,10 @@ export function ReportRepeatableParameters({
         const fields = orderedGroupFields(group.fields);
         const product = productSearchField(group);
         const editableFields = fields.filter((field) => field !== product);
+        const discountField = editableFields.find(isDiscountField);
         const context = String(scalarValues[group.context_parameter] ?? "").trim();
         const atMaximum = group.max_items != null && rows.length >= group.max_items;
-        const columnCount = 2 + (product ? 4 : 0) + editableFields.length;
+        const columnCount = 2 + (product ? 4 : 0) + editableFields.length + (discountField ? 1 : 0);
         return (
           <section key={group.name} className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -220,6 +235,7 @@ export function ReportRepeatableParameters({
                         {field.label}{isPercentField(field) ? " (%)" : ""}{field.required ? " *" : ""}
                       </TableHead>
                     ))}
+                    {discountField && <TableHead className="text-right">P. con descuento</TableHead>}
                     {product && <TableHead className="text-right">Total</TableHead>}
                     <TableHead className="w-10"><span className="sr-only">Acciones</span></TableHead>
                   </TableRow>
@@ -234,12 +250,18 @@ export function ReportRepeatableParameters({
                   ) : rows.map((row, rowIndex) => {
                     const selected = product ? products[productKey(group.name, row.id)] ?? null : null;
                     const productError = product ? errors[group.name]?.[rowIndex]?.[product.name] : undefined;
-                    const lineTotal = product
-                      ? estimateLineTotal(
-                        selected?.unit_price,
-                        row.values[QUOTATION_QUANTITY_FIELD],
-                        row.values[QUOTATION_DISCOUNT_FIELD],
-                      )
+                    const lineTotal = product && lineAmount
+                      ? estimateLineAmount({
+                        columns: lineAmount.columns,
+                        summaries: lineAmount.summaries,
+                        groupName: group.name,
+                        row: row.values,
+                        scalars: scalarValues,
+                        product: selected,
+                      })
+                      : null;
+                    const discountedUnitPrice = discountField
+                      ? estimateDiscountedUnitPrice(selected, row.values[discountField.name])
                       : null;
                     return (
                       <TableRow key={row.id}>
@@ -315,9 +337,16 @@ export function ReportRepeatableParameters({
                             </TableCell>
                           );
                         })}
+                        {discountField && (
+                          <TableCell className="text-right tabular-nums">
+                            {discountedUnitPrice == null
+                              ? "—"
+                              : formatCurrency(String(discountedUnitPrice), selected?.currency)}
+                          </TableCell>
+                        )}
                         {product && (
                           <TableCell className="text-right tabular-nums">
-                            {lineTotal == null ? "—" : formatCurrency(lineTotal, selected?.currency)}
+                            {lineTotal == null ? "—" : formatCurrency(String(lineTotal), selected?.currency)}
                           </TableCell>
                         )}
                         <TableCell>

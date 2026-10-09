@@ -1,3 +1,8 @@
+# AREFIL deployment: HTTPS (Caddy) -> Next.js -> FastAPI.
+#
+# Only Caddy publishes ports. The frontend and the backend live on private
+# networks; the backend has no host port at all, so the browser can only reach
+# it through /backend-api. Local development over HTTP is `make compose_up`.
 services:
   backend:
     build:
@@ -12,15 +17,62 @@ services:
       UPLOADS_DIR: /app/data/uploads
       BACKUPS_DIR: /app/data/backups
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3001","http://127.0.0.1:3001"]}'
+      REPORT_EXECUTION_CLEANUP_ENABLED: ${REPORT_EXECUTION_CLEANUP_ENABLED:-true}
+      REPORT_EXECUTION_CLEANUP_INTERVAL_SECONDS: ${REPORT_EXECUTION_CLEANUP_INTERVAL_SECONDS:-3600}
+      REPORT_EXECUTION_CLEANUP_BATCH_SIZE: ${REPORT_EXECUTION_CLEANUP_BATCH_SIZE:-500}
+      REPORT_EXECUTION_CLEANUP_MAX_RECORDS: ${REPORT_EXECUTION_CLEANUP_MAX_RECORDS:-5000}
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      CORS_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:-https://localhost}"]'
+      TRUSTED_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:-https://localhost}"]'
+      # Only the frontend's fixed private address may report the browser's address
+      # (not the whole subnet: the Docker host's gateway address lives there too).
+      TRUSTED_PROXIES: '["${AREFIL_FRONTEND_INTERNAL_IP:-172.31.240.10}/32"]'
     volumes:
       - type: bind
         source: ${BACKEND_DATA_DIR:-../Arefil_backend/backend/data}
         target: /app/data
         bind:
           create_host_path: false
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
+    expose:
+      - "8000"
+    networks:
+      - internal
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+  report-execution-cleanup:
+    build:
+      context: ../Arefil_backend
+      dockerfile: Dockerfile
+      args:
+        APP_UID: ${AREFIL_UID:-1000}
+        APP_GID: ${AREFIL_GID:-1000}
+    command: ["python", "-m", "app.cli.report_executions", "worker"]
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite:////app/data/arefil.db
+      UPLOADS_DIR: /app/data/uploads
+      BACKUPS_DIR: /app/data/backups
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SESSION_COOKIE_SECURE: "true"
+      CORS_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:-https://localhost}"]'
+      TRUSTED_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:-https://localhost}"]'
+      REPORT_EXECUTION_CLEANUP_ENABLED: ${REPORT_EXECUTION_CLEANUP_ENABLED:-true}
+      REPORT_EXECUTION_CLEANUP_INTERVAL_SECONDS: ${REPORT_EXECUTION_CLEANUP_INTERVAL_SECONDS:-3600}
+      REPORT_EXECUTION_CLEANUP_BATCH_SIZE: ${REPORT_EXECUTION_CLEANUP_BATCH_SIZE:-500}
+      REPORT_EXECUTION_CLEANUP_MAX_RECORDS: ${REPORT_EXECUTION_CLEANUP_MAX_RECORDS:-5000}
+    volumes:
+      - type: bind
+        source: ${BACKEND_DATA_DIR:-../Arefil_backend/backend/data}
+        target: /app/data
+        bind:
+          create_host_path: false
+    networks:
+      - internal
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     stop_grace_period: 15s
 
@@ -32,10 +84,52 @@ services:
         NEXT_PUBLIC_API_URL: /backend-api
     environment:
       API_INTERNAL_URL: http://backend:8000/api
-    ports:
-      - "${FRONTEND_PORT:-3001}:3000"
+      # Caddy is the only way in and overwrites X-Forwarded-For.
+      TRUST_PROXY_FORWARDED_FOR: "true"
+    expose:
+      - "3000"
+    networks:
+      internal:
+        ipv4_address: ${AREFIL_FRONTEND_INTERNAL_IP:-172.31.240.10}
+      edge: {}
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
     stop_grace_period: 15s
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      AREFIL_HOSTNAME: ${AREFIL_HOSTNAME:-localhost}
+      AREFIL_TLS: ${AREFIL_TLS:-internal}
+    ports:
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+    depends_on:
+      frontend:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+networks:
+  # Frontend <-> backend only; no route to the outside world.
+  internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${AREFIL_INTERNAL_SUBNET:-172.31.240.0/24}
+  # Caddy <-> frontend.
+  edge: {}
+
+volumes:
+  # Caddy's certificates (including its internal CA when AREFIL_TLS=internal).
+  caddy_data: {}
+  caddy_config: {}

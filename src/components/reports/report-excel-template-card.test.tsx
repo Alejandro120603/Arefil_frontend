@@ -121,6 +121,18 @@ describe("ReportExcelTemplateCard", () => {
     expect(screen.getByText(/será utilizada como fila plantilla/)).toBeTruthy();
   });
 
+  it("lists placeholders from a builder its parent already owns, without reading it again", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<ReportExcelTemplateCard code="COTIZACION" parameters={PARAMETERS} builder={null} />);
+    expect(await screen.findByText("Sin plantilla")).toBeTruthy();
+
+    rerender(<ReportExcelTemplateCard code="COTIZACION" parameters={PARAMETERS} builder={BUILDER} />);
+    await user.click(await screen.findByRole("button", { name: /Campos disponibles para la plantilla/ }));
+    expect(screen.getByText("{{rows.line_total}}")).toBeTruthy();
+    expect(screen.getByText("{{summary.subtotal}}")).toBeTruthy();
+    expect(getReportBuilder).not.toHaveBeenCalled();
+  });
+
   it("uploads an .xlsx file and shows the metadata the backend answered with", async () => {
     uploadReportExcelTemplate.mockResolvedValue(UPLOAD);
     const user = userEvent.setup();

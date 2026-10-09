@@ -224,6 +224,7 @@ export interface PriceListComparisonItem {
 }
 
 export interface PriceListComparisonResponse {
+  execution_id: string;
   report: ComparisonReportMetadata;
   supplier: ComparisonSupplier;
   list_a: ComparisonPriceList;
@@ -238,9 +239,8 @@ export interface ReportDefinition {
   description: string | null;
   category: string | null;
   /**
-   * Pattern for the final XLSX document name (Backend #26). `null` keeps the
-   * backend's generic fallback (`<code>-document.xlsx`). Only
-   * `{{parameters.*}}`, `{{report.code}}` and `{{report.name}}` are supported.
+   * @deprecated Backend response compatibility only. The frontend must not
+   * read, edit, validate, or use this value to name downloads.
    */
   filename_template: string | null;
   enabled: boolean;
@@ -250,6 +250,21 @@ export interface ReportDefinition {
   parameter_groups: ReportParameterGroup[];
   created_at: string;
   updated_at: string;
+}
+
+/** Minimal backend-authoritative entry returned by the end-user catalog. */
+export interface ReportRuntimeCatalogItem {
+  code: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  enabled: boolean;
+  ready: boolean;
+}
+
+/** Full definition rechecked when an end user opens a report directly. */
+export interface ReportRuntimeDefinition extends ReportDefinition {
+  ready: boolean;
 }
 
 export type ReportParameterDataType = "integer" | "string" | "decimal" | "boolean" | "date" | "datetime";
@@ -331,13 +346,47 @@ export interface ReportCreateRequest {
   name: string;
   description: string | null;
   category: string | null;
-  filename_template: string | null;
   data_source_id: number;
   enabled: boolean;
   parameters: ReportParameter[];
 }
 
-export type ReportUpdateRequest = Omit<ReportCreateRequest, "code">;
+/** `PATCH /reports/{code}`: every field is optional; only the ones sent change. */
+export type ReportUpdateRequest = Partial<Omit<ReportCreateRequest, "code">>;
+
+/** Atomic body of `PUT /reports/{code}/inputs` for an existing report. */
+export type ReportInputsUpdateRequest =
+  Required<Pick<ReportUpdateRequest, "data_source_id" | "parameters">>
+  & Partial<Omit<ReportUpdateRequest, "data_source_id" | "parameters">>
+  & { parameter_groups: ReportParameterGroup[] };
+
+/**
+ * Report readiness (Backend #38, `app/schemas/report_readiness.py`): whether a
+ * report can be operated by end users right now. Computed by the backend on
+ * every request and never stored; `enabled` stays the administrator's intent.
+ * `code` and `step` are open strings on purpose — a code or step this build
+ * does not know must still render its `message`.
+ */
+export type ReportReadinessSeverity = "blocker" | "warning";
+
+/** Known values: information, source, data, template, mapping. */
+export type ReportReadinessStep = string;
+
+export interface ReportReadinessIssue {
+  /** Stable machine code, e.g. `BUILDER_MISSING`, `TEMPLATE_MISSING`. */
+  code: string;
+  severity: ReportReadinessSeverity;
+  step: ReportReadinessStep;
+  message: string;
+}
+
+export interface ReportReadiness {
+  report_code: string;
+  enabled: boolean;
+  /** True iff there is no `blocker` issue. */
+  ready: boolean;
+  issues: ReportReadinessIssue[];
+}
 
 export interface ReportPreviewResponse {
   columns: string[];
@@ -725,6 +774,8 @@ export interface ReportBuilderPreviewResponse {
    * parameters again; it is absent for datasets the backend cannot persist.
    */
   execution_id?: string | null;
+  /** Whether this execution pinned an Excel template when it was created. */
+  document_available?: boolean;
   columns: ReportBuilderPreviewColumn[];
   /** Normalized scalar parameters the backend actually ran with (no groups). */
   parameters?: Record<string, unknown>;

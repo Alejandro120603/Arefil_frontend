@@ -1,22 +1,21 @@
+import {
+  PARAMETER_NAME_PATTERN,
+  uniqueParameterName,
+  withParameterShape,
+  type ReportParameterKind,
+} from "@/lib/reports/report-parameter-kinds";
+import { toParameterGroupsRequest } from "@/lib/reports/report-builder";
 import type {
   ReportAdminDefinition,
   ReportCreateRequest,
   ReportDataSource,
+  ReportInputsUpdateRequest,
   ReportParameter,
+  ReportParameterGroup,
   ReportParameterDataType,
   ReportParameterInputType,
   ReportUpdateRequest,
 } from "@/types/api";
-import { validateFilenameTemplate } from "@/lib/reports/report-filename-template";
-
-export const DATA_TYPES: ReportParameterDataType[] = [
-  "string",
-  "integer",
-  "decimal",
-  "boolean",
-  "date",
-  "datetime",
-];
 
 export const INPUTS_BY_DATA_TYPE: Record<ReportParameterDataType, ReportParameterInputType[]> = {
   string: ["text", "select"],
@@ -27,13 +26,12 @@ export const INPUTS_BY_DATA_TYPE: Record<ReportParameterDataType, ReportParamete
   datetime: ["datetime", "select"],
 };
 
+/** XLSX naming is deliberately absent: the backend owns download filenames. */
 export interface ReportFormValue {
   code: string;
   name: string;
   description: string;
   category: string;
-  /** Empty string means "no pattern": the backend keeps its generic fallback. */
-  filename_template: string;
   data_source_id: number | null;
   enabled: boolean;
   parameters: ReportParameter[];
@@ -49,11 +47,10 @@ export function parametersFromDataSource(source: ReportDataSource): ReportParame
 }
 
 /**
- * Names the data source owns. Backend #20 stopped demanding an exact match
- * between the report and the source contract: the report must declare *at
- * least* these (with the same data type, and required when the source says
- * so), and is free to declare its own on top — that split is what lets a
- * quotation ask for Cliente or IVA % beside `price_list_id`.
+ * Names the data source owns. Backend #33 is authoritative for their technical
+ * contract (name, data/input type, requiredness and options source), while the
+ * report remains free to declare manual parameters on top — that split is what
+ * lets a quotation ask for Cliente or IVA % beside `price_list_id`.
  */
 export function sourceParameterNames(source: ReportDataSource | null): string[] {
   return source ? source.parameters.map((parameter) => parameter.name) : [];
@@ -83,7 +80,9 @@ export function mergeSourceParameters(
 /**
  * Ready-made general parameters for a quotation-shaped report. They are plain
  * report parameters with no backend meaning: the admin can rename, reorder or
- * delete any of them, and nothing here binds the builder to one customer.
+ * delete any of them, and nothing here binds the builder to one customer. Their
+ * technical shape comes from the same kind mapping the editor uses, and their
+ * well-known internal names never follow a label edit.
  */
 export interface ReportParameterPreset {
   key: string;
@@ -94,32 +93,33 @@ export interface ReportParameterPreset {
 function preset(
   name: string,
   label: string,
-  data_type: ReportParameterDataType,
-  input_type: ReportParameterInputType,
+  kind: ReportParameterKind,
+  decimals = false,
 ): ReportParameterPreset {
+  const shaped = withParameterShape({ ...emptyParameter(0), name, label }, kind, decimals);
   return {
     key: name,
     label,
     parameter: {
       name,
       label,
-      data_type,
-      input_type,
+      data_type: shaped.data_type,
+      input_type: shaped.input_type,
       required: false,
       default_value: null,
-      configuration_json: null,
+      configuration_json: shaped.configuration_json,
     },
   };
 }
 
 export const REPORT_PARAMETER_PRESETS: ReportParameterPreset[] = [
-  preset("customer_name", "Cliente", "string", "text"),
-  preset("customer_email", "Email", "string", "text"),
-  preset("attention_to", "Atención", "string", "text"),
-  preset("requisition", "Requisición", "string", "text"),
-  preset("quotation_date", "Fecha", "date", "date"),
-  preset("commercial_conditions", "Condiciones", "string", "text"),
-  preset("tax_rate", "IVA %", "decimal", "number"),
+  preset("customer_name", "Cliente", "text"),
+  preset("customer_email", "Email", "text"),
+  preset("attention_to", "Atención", "text"),
+  preset("requisition", "Requisición", "text"),
+  preset("quotation_date", "Fecha", "date"),
+  preset("commercial_conditions", "Condiciones", "text"),
+  preset("tax_rate", "IVA %", "number", true),
 ];
 
 /** Appends a preset under a name no other parameter is using. */
@@ -129,14 +129,11 @@ export function appendPresetParameter(
 ): ReportParameter[] {
   const found = REPORT_PARAMETER_PRESETS.find((candidate) => candidate.key === presetKey);
   if (!found) return parameters;
-  const taken = new Set(parameters.map((parameter) => parameter.name.toLocaleLowerCase()));
-  let name = found.parameter.name;
-  for (let suffix = 2; taken.has(name.toLocaleLowerCase()); suffix += 1) {
-    name = `${found.parameter.name}_${suffix}`;
-  }
+  const name = uniqueParameterName(found.parameter.name, parameters.map((parameter) => parameter.name));
   return [...parameters, { ...found.parameter, name, display_order: parameters.length }];
 }
 
+/** A new "Texto" input; its internal name is generated once the admin types a visible name. */
 export function emptyParameter(displayOrder: number): ReportParameter {
   return {
     name: "",
@@ -156,9 +153,10 @@ export function emptyReportForm(): ReportFormValue {
     name: "",
     description: "",
     category: "",
-    filename_template: "",
     data_source_id: null,
-    enabled: true,
+    // A new report is published from Finalizar once the backend says it is
+    // ready (Backend #38); creation never asks to publish it.
+    enabled: false,
     parameters: [],
   };
 }
@@ -169,7 +167,6 @@ export function reportFormFromDefinition(report: ReportAdminDefinition): ReportF
     name: report.name,
     description: report.description ?? "",
     category: report.category ?? "",
-    filename_template: report.filename_template ?? "",
     data_source_id: report.data_source_id,
     enabled: report.enabled,
     parameters: report.parameters.map((parameter) => ({ ...parameter })),
@@ -198,29 +195,26 @@ export function validateReportForm(
   const names = new Set<string>();
   for (const [index, parameter] of value.parameters.entries()) {
     const position = index + 1;
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(parameter.name)) {
-      errors.push(`El nombre del parámetro ${position} no es válido.`);
+    const label = parameter.label.trim();
+    const display = label || parameter.name || String(position);
+    if (!label) {
+      errors.push(`El dato ${position} necesita un nombre visible.`);
+    } else if (!PARAMETER_NAME_PATTERN.test(parameter.name)) {
+      errors.push(`El nombre interno del dato '${display}' no es válido.`);
     }
     const folded = parameter.name.toLocaleLowerCase();
-    if (folded && names.has(folded)) errors.push(`El parámetro '${parameter.name}' está duplicado.`);
+    if (folded && names.has(folded)) errors.push(`El dato '${display}' está duplicado.`);
     names.add(folded);
-    if (!parameter.label.trim()) errors.push(`La etiqueta del parámetro ${position} es requerida.`);
     if (!INPUTS_BY_DATA_TYPE[parameter.data_type].includes(parameter.input_type)) {
-      errors.push(`El control de '${parameter.name || position}' no es compatible con su tipo.`);
+      errors.push(`El tipo de entrada de '${display}' no es compatible con su tipo de dato.`);
     }
     if (parameter.input_type === "select" && parameter.configuration_json == null) {
-      errors.push(`El select '${parameter.name || position}' requiere una fuente de opciones.`);
+      errors.push(`La lista de '${display}' no tiene un origen de opciones.`);
     }
   }
 
-  errors.push(
-    ...validateFilenameTemplate(
-      value.filename_template,
-      value.parameters.map((parameter) => parameter.name.trim()),
-    ),
-  );
-
-  // The source contract is a floor, not a ceiling: only its absence is an error.
+  // Source-owned technical metadata must remain exactly as the backend sent it;
+  // manual parameters are still allowed in addition to this contract.
   for (const expected of source?.parameters ?? []) {
     const declared = value.parameters.find((parameter) => parameter.name === expected.name);
     if (!declared) {
@@ -230,8 +224,17 @@ export function validateReportForm(
     if (declared.data_type !== expected.data_type) {
       errors.push(`El tipo de '${expected.name}' no coincide con el contrato de la fuente.`);
     }
-    if (expected.required && !declared.required) {
-      errors.push(`El parámetro '${expected.name}' es requerido por la fuente de datos.`);
+    if (declared.input_type !== expected.input_type) {
+      errors.push(`El control de '${expected.name}' no coincide con el contrato de la fuente.`);
+    }
+    if (declared.required !== expected.required) {
+      errors.push(`La obligatoriedad de '${expected.name}' no coincide con el contrato de la fuente.`);
+    }
+    if (
+      declared.configuration_json?.options_source
+      !== expected.configuration_json?.options_source
+    ) {
+      errors.push(`La fuente de opciones de '${expected.name}' no coincide con el contrato de la fuente.`);
     }
   }
   return errors;
@@ -253,8 +256,6 @@ export function toReportRequest(value: ReportFormValue): ReportCreateRequest {
     name: value.name.trim(),
     description: value.description.trim() || null,
     category: value.category.trim() || null,
-    // An empty pattern is `null`, never "": the backend rejects a blank string.
-    filename_template: value.filename_template.trim() || null,
     data_source_id: value.data_source_id as number,
     enabled: value.enabled,
     parameters: normalizedParameters(value.parameters),
@@ -267,10 +268,29 @@ export function toReportUpdate(value: ReportFormValue): ReportUpdateRequest {
     name: request.name,
     description: request.description,
     category: request.category,
-    filename_template: request.filename_template,
     data_source_id: request.data_source_id,
     enabled: value.enabled,
     parameters: request.parameters,
+  };
+}
+
+/**
+ * Source, inputs and metadata — never `enabled`: publishing belongs to
+ * Finalizar, and leaving it out keeps an inputs save from reverting a report
+ * enabled there meanwhile (the form holds the value it was opened with).
+ */
+export function toReportInputsUpdate(
+  value: ReportFormValue,
+  parameterGroups: ReportParameterGroup[],
+): ReportInputsUpdateRequest {
+  const request = toReportRequest(value);
+  return {
+    name: request.name,
+    description: request.description,
+    category: request.category,
+    data_source_id: request.data_source_id,
+    parameters: request.parameters,
+    parameter_groups: toParameterGroupsRequest(parameterGroups),
   };
 }
 

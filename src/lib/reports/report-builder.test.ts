@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   allowedFormulaReferences,
+  applyFieldSource,
+  applyGroupParameterSource,
+  applyParameterSource,
   builderFormFromDefinition,
   emptyExcelLayout,
   formatsForDataType,
@@ -14,13 +17,11 @@ import {
   newParameterColumn,
   pruneTotals,
   removeColumn,
-  retypeColumn,
   suggestedKeyFromField,
   summableColumns,
   newFormulaSummary,
   newSumSummary,
   normalizeSummaries,
-  retypeSummary,
   toBuilderRequest,
   validateBuilderForm,
   withDisplayOrder,
@@ -133,9 +134,58 @@ describe("column construction", () => {
     });
   });
 
-  it("clears the stale source when a column changes type", () => {
-    const retyped = retypeColumn(column({ source_field: "product.part_number" }), "FORMULA");
-    expect(retyped).toMatchObject({ source_field: null, source_parameter: null, data_type: "decimal" });
+  it("never generates a key that collides with a report parameter", () => {
+    const field = { ...FIELDS[0], key: "line.quantity", data_type: "integer" as const };
+    expect(newFieldColumn(field, [], ["quantity"]).key).toBe("quantity_2");
+    expect(newFormulaColumn([], ["Calculo"]).key).toBe("calculo_2");
+    const reference = groupParameterReferences([ITEMS_GROUP])[1];
+    expect(newGroupParameterColumn(reference, [], ["line_quantity"]).key).toBe("line_quantity_2");
+  });
+
+  it("de-duplicates generated keys across every kind of column", () => {
+    const first = newFormulaColumn([]);
+    const second = newFormulaColumn([first]);
+    const third = newFormulaColumn([first, second]);
+    expect([first.key, second.key, third.key]).toEqual(["calculo", "calculo_2", "calculo_3"]);
+  });
+});
+
+describe("column sources", () => {
+  it("re-points a FIELD column and re-syncs its type while keeping its key", () => {
+    const saved = column({ key: "sku", label: "SKU", source_field: "product.part_number", format_type: "text" });
+    expect(applyFieldSource(saved, FIELDS[3])).toMatchObject({
+      key: "sku", label: "SKU", column_type: "FIELD", source_field: "price_list_item.unit_price",
+      source_parameter: null, formula_definition: null, data_type: "decimal", format_type: "text",
+    });
+  });
+
+  it("keys a scalar PARAMETER column by the parameter's name, as the backend requires", () => {
+    const saved = newParameterColumn(QUANTITY, []);
+    expect(applyParameterSource(saved, DISCOUNT)).toMatchObject({
+      key: "discount", source_parameter: "discount", data_type: "decimal",
+    });
+  });
+
+  it("keeps the key of a repeatable column when it reads another subfield", () => {
+    const [product, lineQuantity] = groupParameterReferences([ITEMS_GROUP]);
+    const saved = { ...newGroupParameterColumn(lineQuantity, []), key: "qty" };
+    expect(applyGroupParameterSource(saved, product, [saved], ["quantity"])).toMatchObject({
+      key: "qty", source_parameter: "items.product_id",
+    });
+  });
+
+  it("releases a scalar parameter's name when the column moves to a repeatable subfield", () => {
+    const scalar = newParameterColumn(QUANTITY, []);
+    const lineQuantity = groupParameterReferences([ITEMS_GROUP])[1];
+    expect(applyGroupParameterSource(scalar, lineQuantity, [scalar], ["quantity"])).toMatchObject({
+      key: "line_quantity", source_parameter: "items.line_quantity",
+    });
+  });
+
+  it("names repeatable subfields with human labels only", () => {
+    expect(groupParameterReferences([ITEMS_GROUP]).map((item) => item.label)).toEqual([
+      "Productos → Producto", "Productos → Cantidad",
+    ]);
   });
 });
 
@@ -222,6 +272,26 @@ describe("builder validation", () => {
     };
     expect(validateBuilderForm(value, [QUANTITY], FIELDS)).toEqual([]);
     expect(toBuilderRequest(value).parameter_groups[0].fields[1].name).toBe("line_quantity");
+  });
+
+  it("explains repeatable-row problems by visible name, never by internal identifier", () => {
+    const broken: ReportParameterGroup = {
+      ...ITEMS_GROUP,
+      context_parameter: "missing",
+      fields: [
+        { ...ITEMS_GROUP.fields[0], configuration_json: { options_source: "products_by_price_list", context_parameter: "missing" } },
+        { ...ITEMS_GROUP.fields[1], label: "", configuration_json: { minimum: "0.5" } },
+      ],
+    };
+    const errors = validateBuilderForm(
+      { columns: [column({})], parameterGroups: [broken], layout: emptyExcelLayout() }, [QUANTITY], FIELDS,
+    );
+    expect(errors).toEqual(expect.arrayContaining([
+      "Para usar productos por renglón, la fuente necesita una lista de precios.",
+      "El dato 2 de cada renglón requiere un nombre visible.",
+      "Los límites de 'dato 2' deben ser enteros, o permite decimales.",
+    ]));
+    expect(errors.join(" ")).not.toMatch(/line_quantity|items|nombre interno|subcampo|select/);
   });
 
   it("requires at least one column", () => {
@@ -419,13 +489,13 @@ describe("summaries", () => {
     }]);
   });
 
-  it("clears the half the chosen operation forbids", () => {
-    const summary = newSumSummary(lineTotal, []);
-    const asFormula = retypeSummary(summary, "FORMULA", [lineTotal]);
-    expect(asFormula).toMatchObject({ column_key: null, formula_definition: "" });
-    expect(retypeSummary(asFormula, "SUM", [lineTotal])).toMatchObject({
-      column_key: "line_total", formula_definition: null,
-    });
+  it("generates unique summary keys that never collide with a parameter", () => {
+    const sum = newSumSummary({ ...lineTotal, key: "quantity" }, [], ["quantity"]);
+    expect(sum).toMatchObject({ key: "quantity_2", column_key: "quantity", operation: "SUM", formula_definition: null });
+    const first = newFormulaSummary([sum]);
+    const second = newFormulaSummary([sum, first]);
+    expect([first.key, second.key]).toEqual(["resumen", "resumen_2"]);
+    expect(first).toMatchObject({ operation: "FORMULA", column_key: null });
   });
 });
 
@@ -502,6 +572,38 @@ describe("serialization", () => {
       key: "tax", label: "IVA", column_key: null,
       operation: "FORMULA", formula_definition: "subtotal * 0.16", format_type: "currency",
     });
+  });
+
+  it("round-trips a saved builder with every operational identifier intact", () => {
+    const columns: ReportColumn[] = [
+      column({ key: "price", label: "Precio", source_field: "price_list_item.unit_price", data_type: "decimal", format_type: "currency", display_order: 0 }),
+      { ...column({}), key: "customer", label: "Cliente", column_type: "PARAMETER", source_field: null, source_parameter: "customer_name", data_type: "string", format_type: "text", display_order: 1 },
+      { ...column({}), key: "subtotal", label: "Subtotal", column_type: "FORMULA", source_field: null, formula_definition: "price * 2", data_type: "decimal", format_type: "currency", display_order: 2 },
+    ];
+    const totals: ReportSummaryConfiguration[] = [
+      { key: "sum_price", label: "Suma", column_key: "price", operation: "SUM", formula_definition: null, format_type: "currency" },
+      { key: "tax", label: "IVA", column_key: null, operation: "FORMULA", formula_definition: "sum_price * 0.16", format_type: "currency" },
+    ];
+    const value = builderFormFromDefinition({
+      report: {
+        code: "LEGACY", name: "Legacy", description: null, category: null, filename_template: null, enabled: true,
+        data_source_id: 1,
+        data_source: { id: 1, code: "PRODUCT_CATALOG", name: "Catálogo", description: null, enabled: true, capabilities: [] },
+        parameters: [], parameter_groups: [],
+        created_at: "2026-08-26T00:00:00Z", updated_at: "2026-08-26T00:00:00Z",
+      },
+      columns, parameter_groups: [], excel_layout: { ...emptyExcelLayout(), totals },
+    });
+
+    // Only labels change — what the admin can now edit — and nothing else moves.
+    const edited: ReportBuilderFormValue = {
+      ...value,
+      columns: value.columns.map((item) => ({ ...item, label: `${item.label} editado` })),
+      layout: { ...value.layout, totals: value.layout.totals.map((total) => ({ ...total, label: `${total.label} editado` })) },
+    };
+    const request = toBuilderRequest(edited);
+    expect(request.columns).toEqual(columns.map((item) => ({ ...item, label: `${item.label} editado` })));
+    expect(request.excel_layout.totals).toEqual(totals.map((total) => ({ ...total, label: `${total.label} editado` })));
   });
 
   it("upgrades a saved legacy layout when the builder loads", () => {

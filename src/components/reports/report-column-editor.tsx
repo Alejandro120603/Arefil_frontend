@@ -2,6 +2,7 @@
 
 import { ArrowDown, ArrowUp, Calculator, Database, Sigma, SlidersHorizontal, Trash2 } from "lucide-react";
 import { ReportFormulaInput } from "@/components/reports/report-formula-input";
+import { TemplateUsageBadge } from "@/components/reports/report-template-dependency-alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,9 +24,10 @@ import {
   newGroupParameterColumn,
   newParameterColumn,
   removeColumn,
-  retypeColumn,
   withDisplayOrder,
+  type GroupParameterReference,
 } from "@/lib/reports/report-builder";
+import type { TemplatePlaceholderLocation } from "@/lib/reports/report-template-dependencies";
 import type {
   ReportColumn,
   ReportColumnType,
@@ -44,14 +46,43 @@ const TYPE_ICONS: Record<ReportColumnType, typeof Database> = {
   FORMULA: Sigma,
 };
 
+/** "Item de lista → Precio unitario": the catalog's own group and label. */
+function fieldLabel(field: ReportFieldDescriptor): string {
+  return `${field.group} → ${field.label}`;
+}
+
+/**
+ * The human name of whatever a PARAMETER column reads. The technical name is
+ * only a last resort, for a source the report no longer declares.
+ */
+function parameterLabel(
+  source: string | null,
+  parameters: ReportParameter[],
+  groupedParameters: GroupParameterReference[],
+): string | null {
+  if (!source) return null;
+  const parameter = parameters.find((candidate) => candidate.name === source);
+  if (parameter) return parameter.label || parameter.name;
+  return groupedParameters.find((candidate) => candidate.source === source)?.label ?? null;
+}
+
 /** Secondary line under the title: what this column actually reads. */
-function sourceSummary(column: ReportColumn, fields: ReportFieldDescriptor[]): string {
+function sourceSummary(
+  column: ReportColumn,
+  fields: ReportFieldDescriptor[],
+  parameters: ReportParameter[],
+  groupedParameters: GroupParameterReference[],
+): string {
   if (column.column_type === "FIELD") {
     const descriptor = fields.find((field) => field.key === column.source_field);
-    if (!descriptor) return column.source_field ?? "Sin campo seleccionado";
-    return `${descriptor.group} → ${descriptor.label}`;
+    if (!descriptor) return column.source_field ?? "Sin dato seleccionado";
+    return fieldLabel(descriptor);
   }
-  if (column.column_type === "PARAMETER") return column.source_parameter ?? "Sin parámetro seleccionado";
+  if (column.column_type === "PARAMETER") {
+    return parameterLabel(column.source_parameter, parameters, groupedParameters)
+      ?? column.source_parameter
+      ?? "Sin dato seleccionado";
+  }
   return column.formula_definition?.trim() || "Sin fórmula";
 }
 
@@ -61,6 +92,7 @@ export function ReportColumnEditor({
   parameters,
   parameterGroups,
   disabled = false,
+  templateUsage,
   onChange,
 }: {
   columns: ReportColumn[];
@@ -68,6 +100,8 @@ export function ReportColumnEditor({
   parameters: ReportParameter[];
   parameterGroups: ReportParameterGroup[];
   disabled?: boolean;
+  /** `column.key` → where the active Excel template reads it as `{{rows.<key>}}` (#43). */
+  templateUsage?: ReadonlyMap<string, TemplatePlaceholderLocation[]>;
   onChange: (columns: ReportColumn[]) => void;
 }) {
   const groups = groupFieldCatalog(fields);
@@ -77,6 +111,8 @@ export function ReportColumnEditor({
   const availableParameters = parameters.filter((parameter) => !usedParameters.has(parameter.name));
   const groupedParameters = groupParameterReferences(parameterGroups);
   const availableGroupedParameters = groupedParameters.filter((parameter) => !usedParameters.has(parameter.source));
+  // Generated keys must never take a parameter's name (see `takenKeys`).
+  const reserved = parameters.map((parameter) => parameter.name);
 
   function replace(index: number, next: ReportColumn) {
     onChange(columns.map((column, current) => (current === index ? next : column)));
@@ -85,7 +121,7 @@ export function ReportColumnEditor({
   function addField(key: string) {
     const descriptor = fields.find((field) => field.key === key);
     if (!descriptor) return;
-    onChange(withDisplayOrder([...columns, newFieldColumn(descriptor, columns)]));
+    onChange(withDisplayOrder([...columns, newFieldColumn(descriptor, columns, reserved)]));
   }
 
   function addParameter(name: string) {
@@ -95,14 +131,14 @@ export function ReportColumnEditor({
       return;
     }
     const grouped = groupedParameters.find((candidate) => candidate.source === name);
-    if (grouped) onChange(withDisplayOrder([...columns, newGroupParameterColumn(grouped, columns)]));
+    if (grouped) onChange(withDisplayOrder([...columns, newGroupParameterColumn(grouped, columns, reserved)]));
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-dashed p-4">
         <div className="grid min-w-64 flex-1 gap-1.5">
-          <Label htmlFor="builder-add-field">Agregar columna de campo</Label>
+          <Label htmlFor="builder-add-field">Agregar dato de la fuente</Label>
           <select
             id="builder-add-field"
             className={CONTROL_CLASS}
@@ -110,18 +146,18 @@ export function ReportColumnEditor({
             disabled={disabled || fields.length === 0}
             onChange={(event) => { addField(event.target.value); event.target.value = ""; }}
           >
-            <option value="">Selecciona un campo…</option>
+            <option value="">¿Qué dato quieres mostrar?</option>
             {groups.map((group) => (
               <optgroup key={group.group} label={group.group}>
                 {group.fields.map((field) => (
-                  <option key={field.key} value={field.key}>{field.label} · {field.key}</option>
+                  <option key={field.key} value={field.key}>{field.label}</option>
                 ))}
               </optgroup>
             ))}
           </select>
         </div>
         <div className="grid min-w-56 flex-1 gap-1.5">
-          <Label htmlFor="builder-add-parameter">Agregar columna de parámetro</Label>
+          <Label htmlFor="builder-add-parameter">Agregar dato capturado</Label>
           <select
             id="builder-add-parameter"
             className={CONTROL_CLASS}
@@ -130,16 +166,16 @@ export function ReportColumnEditor({
             onChange={(event) => { addParameter(event.target.value); event.target.value = ""; }}
           >
             <option value="">
-              {availableParameters.length === 0 && availableGroupedParameters.length === 0 ? "Sin parámetros disponibles" : "Selecciona un parámetro…"}
+              {availableParameters.length === 0 && availableGroupedParameters.length === 0 ? "Sin datos capturados disponibles" : "¿Qué dato capturado quieres mostrar?"}
             </option>
-            {availableParameters.length > 0 && <optgroup label="Parámetros escalares">
+            {availableParameters.length > 0 && <optgroup label="Datos del reporte">
               {availableParameters.map((parameter) => (
-                <option key={parameter.name} value={parameter.name}>{parameter.label} · {parameter.name}</option>
+                <option key={parameter.name} value={parameter.name}>{parameter.label || parameter.name}</option>
               ))}
             </optgroup>}
-            {availableGroupedParameters.length > 0 && <optgroup label="Campos repetibles">
+            {availableGroupedParameters.length > 0 && <optgroup label="Datos por renglón">
               {availableGroupedParameters.map((parameter) => (
-                <option key={parameter.source} value={parameter.source}>{parameter.label} · {parameter.source}</option>
+                <option key={parameter.source} value={parameter.source}>{parameter.label}</option>
               ))}
             </optgroup>}
           </select>
@@ -148,45 +184,55 @@ export function ReportColumnEditor({
           type="button"
           variant="outline"
           disabled={disabled}
-          onClick={() => onChange(withDisplayOrder([...columns, newFormulaColumn(columns)]))}
+          onClick={() => onChange(withDisplayOrder([...columns, newFormulaColumn(columns, reserved)]))}
         >
-          <Calculator /> Agregar columna calculada
+          <Calculator /> Agregar cálculo
         </Button>
       </div>
 
       {columns.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Este reporte todavía no tiene columnas. Agrega una desde el catálogo de campos.
+          Este reporte todavía no tiene columnas. Agrega un dato de la fuente, un dato capturado o un cálculo.
         </div>
       ) : (
         <ul className="flex list-none flex-col gap-4 p-0">
           {columns.map((column, index) => {
             const Icon = TYPE_ICONS[column.column_type];
             const formats = formatsForDataType(column.data_type);
+            const title = column.label || `Columna ${index + 1}`;
+            // Other columns already show these parameters; offering them again
+            // would only produce a duplicated key the admin cannot see.
+            const takenElsewhere = new Set(
+              columns.filter((other, current) => current !== index && other.column_type === "PARAMETER")
+                .map((other) => other.source_parameter),
+            );
+            const knownField = fields.some((field) => field.key === column.source_field);
+            const currentParameterLabel = parameterLabel(column.source_parameter, parameters, groupedParameters);
             return (
               <li key={index} className="rounded-xl border p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="flex items-center gap-2 font-medium">
                       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="truncate">{column.label || column.key || `Columna ${index + 1}`}</span>
+                      <span className="truncate">{title}</span>
                       {!column.visible && <Badge variant="secondary">Oculta</Badge>}
+                      <TemplateUsageBadge locations={templateUsage?.get(column.key)} />
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {COLUMN_TYPE_LABELS[column.column_type]} · {sourceSummary(column, fields)}
+                      {COLUMN_TYPE_LABELS[column.column_type]} · {sourceSummary(column, fields, parameters, groupedParameters)}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
-                      type="button" size="icon-sm" variant="outline" aria-label={`Mover ${column.key || index + 1} arriba`}
+                      type="button" size="icon-sm" variant="outline" aria-label={`Mover ${title} arriba`}
                       disabled={disabled || index === 0} onClick={() => onChange(moveColumn(columns, index, -1))}
                     ><ArrowUp /></Button>
                     <Button
-                      type="button" size="icon-sm" variant="outline" aria-label={`Mover ${column.key || index + 1} abajo`}
+                      type="button" size="icon-sm" variant="outline" aria-label={`Mover ${title} abajo`}
                       disabled={disabled || index === columns.length - 1} onClick={() => onChange(moveColumn(columns, index, 1))}
                     ><ArrowDown /></Button>
                     <Button
-                      type="button" size="icon-sm" variant="destructive" aria-label={`Eliminar ${column.key || index + 1}`}
+                      type="button" size="icon-sm" variant="destructive" aria-label={`Eliminar ${title}`}
                       disabled={disabled} onClick={() => onChange(removeColumn(columns, index))}
                     ><Trash2 /></Button>
                   </div>
@@ -194,39 +240,13 @@ export function ReportColumnEditor({
 
                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <div className="grid gap-1.5">
-                    <Label htmlFor={`column-label-${index}`}>Etiqueta</Label>
+                    <Label htmlFor={`column-label-${index}`}>Título de columna</Label>
                     <Input
                       id={`column-label-${index}`}
                       value={column.label}
                       disabled={disabled}
                       onChange={(event) => replace(index, { ...column, label: event.target.value })}
                     />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor={`column-key-${index}`}>Nombre interno</Label>
-                    <Input
-                      id={`column-key-${index}`}
-                      className="font-mono"
-                      value={column.key}
-                      // A PARAMETER column must keep the parameter's own name;
-                      // any other key is rejected as a parameter conflict.
-                      disabled={disabled || (column.column_type === "PARAMETER" && !column.source_parameter?.includes("."))}
-                      onChange={(event) => replace(index, { ...column, key: event.target.value })}
-                    />
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor={`column-type-${index}`}>Origen</Label>
-                    <select
-                      id={`column-type-${index}`}
-                      className={CONTROL_CLASS}
-                      value={column.column_type}
-                      disabled={disabled}
-                      onChange={(event) => replace(index, retypeColumn(column, event.target.value as ReportColumnType))}
-                    >
-                      {(Object.keys(COLUMN_TYPE_LABELS) as ReportColumnType[]).map((type) => (
-                        <option key={type} value={type}>{COLUMN_TYPE_LABELS[type]}</option>
-                      ))}
-                    </select>
                   </div>
                   <div className="grid gap-1.5">
                     <Label htmlFor={`column-format-${index}`}>Formato</Label>
@@ -249,7 +269,7 @@ export function ReportColumnEditor({
 
                   {column.column_type === "FIELD" && (
                     <div className="grid gap-1.5 md:col-span-2">
-                      <Label htmlFor={`column-field-${index}`}>Campo</Label>
+                      <Label htmlFor={`column-field-${index}`}>Dato que muestra</Label>
                       <select
                         id={`column-field-${index}`}
                         className={CONTROL_CLASS}
@@ -260,13 +280,14 @@ export function ReportColumnEditor({
                           if (descriptor) replace(index, applyFieldSource(column, descriptor));
                         }}
                       >
-                        <option value="">Selecciona un campo…</option>
-                        {groups.map((group) => (
-                          <optgroup key={group.group} label={group.group}>
-                            {group.fields.map((field) => (
-                              <option key={field.key} value={field.key}>{field.label} · {field.key}</option>
-                            ))}
-                          </optgroup>
+                        <option value="">Selecciona un dato…</option>
+                        {column.source_field && !knownField && (
+                          // A saved source the catalog no longer exposes: show it
+                          // as-is instead of silently displaying "Selecciona…".
+                          <option value={column.source_field} disabled>{column.source_field} (no disponible)</option>
+                        )}
+                        {fields.map((field) => (
+                          <option key={field.key} value={field.key}>{fieldLabel(field)}</option>
                         ))}
                       </select>
                     </div>
@@ -274,7 +295,7 @@ export function ReportColumnEditor({
 
                   {column.column_type === "PARAMETER" && (
                     <div className="grid gap-1.5 md:col-span-2">
-                      <Label htmlFor={`column-parameter-${index}`}>Parámetro</Label>
+                      <Label htmlFor={`column-parameter-${index}`}>Dato capturado que muestra</Label>
                       <select
                         id={`column-parameter-${index}`}
                         className={CONTROL_CLASS}
@@ -287,17 +308,20 @@ export function ReportColumnEditor({
                             return;
                           }
                           const grouped = groupedParameters.find((candidate) => candidate.source === event.target.value);
-                          if (grouped) replace(index, applyGroupParameterSource(column, grouped, columns));
+                          if (grouped) replace(index, applyGroupParameterSource(column, grouped, columns, reserved));
                         }}
                       >
                         <option value="">
-                          {parameters.length === 0 && groupedParameters.length === 0 ? "El reporte no declara parámetros" : "Selecciona un parámetro…"}
+                          {parameters.length === 0 && groupedParameters.length === 0 ? "El reporte no pide datos capturados" : "Selecciona un dato capturado…"}
                         </option>
-                        {parameters.map((parameter) => (
-                          <option key={parameter.name} value={parameter.name}>{parameter.label} · {parameter.name}</option>
+                        {column.source_parameter && currentParameterLabel == null && (
+                          <option value={column.source_parameter} disabled>{column.source_parameter} (no disponible)</option>
+                        )}
+                        {parameters.filter((parameter) => !takenElsewhere.has(parameter.name)).map((parameter) => (
+                          <option key={parameter.name} value={parameter.name}>{parameter.label || parameter.name}</option>
                         ))}
-                        {groupedParameters.map((parameter) => (
-                          <option key={parameter.source} value={parameter.source}>{parameter.label} · {parameter.source}</option>
+                        {groupedParameters.filter((parameter) => !takenElsewhere.has(parameter.source)).map((parameter) => (
+                          <option key={parameter.source} value={parameter.source}>{parameter.label}</option>
                         ))}
                       </select>
                     </div>

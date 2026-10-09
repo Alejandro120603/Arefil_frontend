@@ -1,9 +1,11 @@
 import type { NextRequest } from "next/server";
+import { isCrossOriginWrite, trustedClientAddress } from "@/lib/api/proxy-security";
 import { getServerApiBaseUrl } from "@/lib/api/server-client";
 
 type ProxyContext = { params: Promise<{ path: string[] }> };
 
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const CROSS_ORIGIN_REJECTED = { detail: "Origen no permitido." };
 const REQUEST_HEADERS_TO_FORWARD = [
   "accept",
   "accept-language",
@@ -34,6 +36,8 @@ function createUpstreamHeaders(request: Request): Headers {
     if (value !== null) headers.set(name, value);
   }
   headers.set("accept-encoding", "identity");
+  const client = trustedClientAddress(request);
+  if (client) headers.set("x-forwarded-for", client);
   return headers;
 }
 
@@ -44,6 +48,9 @@ function createDownstreamHeaders(upstream: Response): Headers {
 }
 
 export async function proxyRequest(request: NextRequest, { params }: ProxyContext): Promise<Response> {
+  if (isCrossOriginWrite(request)) {
+    return Response.json(CROSS_ORIGIN_REJECTED, { status: 403 });
+  }
   try {
     const { path } = await params;
     const encodedPath = path.map(encodeURIComponent).join("/");

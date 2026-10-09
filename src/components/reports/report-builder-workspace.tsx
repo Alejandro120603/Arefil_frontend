@@ -1,34 +1,31 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { CircleCheck, Loader2, Play, Save } from "lucide-react";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { ReportBuilderPreviewTable } from "@/components/reports/report-builder-preview-table";
 import { ReportColumnEditor } from "@/components/reports/report-column-editor";
 import { ReportExcelLayoutEditor } from "@/components/reports/report-excel-layout-editor";
-import { ReportParameterGroupEditor } from "@/components/reports/report-parameter-group-editor";
 import { ReportRepeatableParameters } from "@/components/reports/report-repeatable-parameters";
 import { ReportSummaryEditor } from "@/components/reports/report-summary-editor";
 import { ReportRuntimeParameters } from "@/components/reports/report-runtime-parameters";
+import { ReportSaveFailureAlert, TemplateDependencyAlert } from "@/components/reports/report-template-dependency-alert";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getUserErrorMessage } from "@/lib/api/errors";
+import { previewReportBuilder } from "@/lib/api/reports";
+import type { ReportBuilderDraft } from "@/hooks/use-report-builder-draft";
+import { normalizeSummaries, pruneTotals, validateBuilderForm } from "@/lib/reports/report-builder";
+import { placeholderLabelResolver, reportSaveFailure, type ReportSaveFailure } from "@/lib/reports/report-save-errors";
 import {
-  getReportBuilder,
-  getReportFieldCatalog,
-  previewReportBuilder,
-  saveReportBuilder,
-} from "@/lib/api/reports";
-import {
-  builderFormFromDefinition,
-  emptyExcelLayout,
-  pruneTotals,
-  toBuilderRequest,
-  validateBuilderForm,
-  type ReportBuilderFormValue,
-} from "@/lib/reports/report-builder";
+  NO_TEMPLATE_DEPENDENCIES,
+  templateDependencyBlocks,
+  type TemplateContractState,
+  type TemplateDependencies,
+  type TemplateDependencyBlock,
+} from "@/lib/reports/report-template-dependencies";
 import {
   initialRuntimeValues,
   initialRuntimeGroupValues,
@@ -40,11 +37,12 @@ import type {
   ReportBuilderPreviewResponse,
   ReportColumn,
   ReportExcelLayout,
-  ReportFieldDescriptor,
   ReportParameter,
   ReportParameterGroup,
   ReportSummaryConfiguration,
 } from "@/types/api";
+
+const EMPTY_GROUPS: ReportParameterGroup[] = [];
 
 /**
  * The Report Builder: configures the *logical shell* of a report — columns,
@@ -56,31 +54,57 @@ import type {
  */
 export function ReportBuilderWorkspace({
   code,
+  builder,
   parameters,
-  dataSourceCapabilities,
   onSaved,
+  templateDependencies = NO_TEMPLATE_DEPENDENCIES,
+  onGoToMapping,
+  onTemplateMayHaveChanged,
 }: {
   code: string;
+  /**
+   * The wizard-owned builder (`useReportBuilderDraft`): this component never
+   * loads or saves the builder itself, it edits `builder.draft` and asks
+   * `builder.save()` to persist it.
+   */
+  builder: ReportBuilderDraft;
   parameters: ReportParameter[];
-  dataSourceCapabilities: string[];
   onSaved?: () => void;
+  /**
+   * What the active Excel template uses (Frontend #43). Removing or hiding a
+   * column, or removing a summary, that it uses is refused locally; label,
+   * source, format and formula changes that keep the key never are.
+   */
+  templateDependencies?: TemplateDependencies;
+  onGoToMapping?: () => void;
+  /** A save was refused for template reasons or a conflict: the shared inspection may be stale. */
+  onTemplateMayHaveChanged?: () => void;
 }) {
-  const [value, setValue] = useState<ReportBuilderFormValue | null>(null);
-  const [fields, setFields] = useState<ReportFieldDescriptor[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const { draft: value, fields, loadError, catalogError, dirty, saving, updateDraft } = builder;
+  /**
+   * The repeatable groups are edited in "Fuente y entradas" (Frontend #41B);
+   * here they only feed the columns ("Dato capturado") and the preview rows.
+   */
+  const groups = value?.parameterGroups ?? EMPTY_GROUPS;
 
-  const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<ReportSaveFailure | null>(null);
+  const [templateBlock, setTemplateBlock] = useState<TemplateDependencyBlock[] | null>(null);
   const [saved, setSaved] = useState(false);
 
   const [runtimeValues, setRuntimeValues] = useState<RuntimeParameterValues>(
     () => initialRuntimeValues(parameters),
   );
-  const [runtimeGroupValues, setRuntimeGroupValues] = useState<RuntimeGroupValues>({});
+  const [runtimeGroupValues, setRuntimeGroupValues] = useState<RuntimeGroupValues>(
+    () => initialRuntimeGroupValues(groups),
+  );
+  // Whenever the groups change (loaded, saved, or edited in "Fuente y
+  // entradas"), the preview rows restart from them, as they always did.
+  const [runtimeSeed, setRuntimeSeed] = useState(groups);
+  if (runtimeSeed !== groups) {
+    setRuntimeSeed(groups);
+    setRuntimeGroupValues(initialRuntimeGroupValues(groups));
+  }
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({});
   const [runtimeGroupErrors, setRuntimeGroupErrors] = useState<Record<string, string>>({});
   const [runtimeRowErrors, setRuntimeRowErrors] = useState<Record<string, Record<number, Record<string, string>>>>({});
@@ -92,36 +116,6 @@ export function ReportBuilderWorkspace({
   const [preview, setPreview] = useState<ReportBuilderPreviewResponse | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void getReportBuilder(code, { signal: controller.signal })
-      .then((builder) => {
-        if (controller.signal.aborted) return;
-        setValue(builderFormFromDefinition(builder));
-        setRuntimeGroupValues(initialRuntimeGroupValues(builder.parameter_groups));
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) return;
-        // Without a builder there is nothing to edit *and* nothing to lose, so
-        // fall back to an empty shell rather than blocking the whole screen.
-        setValue({ columns: [], parameterGroups: [], layout: emptyExcelLayout() });
-        setLoadError(getUserErrorMessage(error, "No se pudo cargar la configuración del constructor."));
-      });
-    return () => controller.abort();
-  }, [code]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void getReportFieldCatalog(code, { signal: controller.signal })
-      .then((catalog) => { if (!controller.signal.aborted) setFields(catalog); })
-      .catch((error) => {
-        if (controller.signal.aborted) return;
-        setFields([]);
-        setCatalogError(getUserErrorMessage(error, "No se pudo cargar el catálogo de campos."));
-      });
-    return () => controller.abort();
-  }, [code]);
 
   const changeRuntime = useCallback((name: string, next: string | boolean) => {
     setRuntimeValues((current) => ({ ...current, [name]: next }));
@@ -135,60 +129,71 @@ export function ReportBuilderWorkspace({
     setPreviewError(null);
   }, []);
 
-  function changeColumns(columns: ReportColumn[]) {
-    setValue((current) => current && { ...current, columns, layout: pruneTotals(current.layout, columns) });
-    setDirty(true);
+  function edited() {
     setSaved(false);
     setPreview(null);
   }
 
-  function changeParameterGroups(parameterGroups: ReportParameterGroup[]) {
-    setValue((current) => current && { ...current, parameterGroups });
-    setRuntimeGroupValues(initialRuntimeGroupValues(parameterGroups));
-    setDirty(true);
-    setSaved(false);
-    setPreview(null);
+  /** Refuses an edit that would take away an identity the active template reads. */
+  function blockedByTemplate(after: TemplateContractState): boolean {
+    if (value == null) return false;
+    const blocks = templateDependencyBlocks(templateDependencies, { columns: value.columns, summaries: value.layout.totals }, after);
+    setTemplateBlock(blocks.length > 0 ? blocks : null);
+    return blocks.length > 0;
+  }
+
+  function changeColumns(columns: ReportColumn[]) {
+    if (value == null) return;
+    // Removing a column can also prune the totals that summed it.
+    const layout = pruneTotals(value.layout, columns);
+    if (blockedByTemplate({ columns, summaries: layout.totals })) return;
+    updateDraft((current) => ({ ...current, columns, layout: pruneTotals(current.layout, columns) }));
+    edited();
   }
 
   function changeSummaries(totals: ReportSummaryConfiguration[]) {
-    setValue((current) => current && { ...current, layout: { ...current.layout, totals } });
-    setDirty(true);
-    setSaved(false);
-    setPreview(null);
+    if (blockedByTemplate({ columns: value?.columns, summaries: totals })) return;
+    updateDraft((current) => ({ ...current, layout: { ...current.layout, totals } }));
+    edited();
   }
 
   function changeLayout(layout: ReportExcelLayout) {
-    setValue((current) => current && { ...current, layout });
-    setDirty(true);
-    setSaved(false);
-    setPreview(null);
+    updateDraft((current) => ({ ...current, layout }));
+    edited();
   }
 
   async function handleSave() {
-    if (value == null || savingRef.current) return;
+    if (value == null || saving) return;
     const validationErrors = validateBuilderForm(value, parameters, fields ?? []);
     setErrors(validationErrors);
     setSaveError(null);
     setSaved(false);
     if (validationErrors.length > 0) return;
+    // The inspection may have arrived after the draft was edited: compare the
+    // whole draft with what the backend last confirmed before sending it.
+    const persisted = builder.persisted;
+    if (persisted != null) {
+      const blocks = templateDependencyBlocks(
+        templateDependencies,
+        { columns: persisted.columns, summaries: normalizeSummaries(persisted.excel_layout?.totals ?? [], persisted.columns) },
+        { columns: value.columns, summaries: value.layout.totals },
+      );
+      if (blocks.length > 0) {
+        setTemplateBlock(blocks);
+        return;
+      }
+    }
 
-    savingRef.current = true;
-    setSaving(true);
     try {
-      const builder = await saveReportBuilder(code, toBuilderRequest(value));
-      // Re-seed from the persisted response, so what stays on screen is what
-      // the backend actually stored (normalized keys, ordering, totals).
-      setValue(builderFormFromDefinition(builder));
-      setRuntimeGroupValues(initialRuntimeGroupValues(builder.parameter_groups));
-      setDirty(false);
+      const confirmed = await builder.save();
+      if (confirmed == null) return;
       setSaved(true);
       onSaved?.();
     } catch (error) {
       // The edited state is intentionally preserved on failure.
-      setSaveError(getUserErrorMessage(error, "No se pudo guardar el constructor. Tus cambios siguen en pantalla."));
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
+      const failure = reportSaveFailure(error, "No se pudo guardar el constructor. Tus cambios siguen en pantalla.");
+      setSaveError(failure);
+      if (failure.kind === "template" || failure.kind === "conflict") onTemplateMayHaveChanged?.();
     }
   }
 
@@ -235,7 +240,24 @@ export function ReportBuilderWorkspace({
           <AlertDescription><ul className="list-disc pl-5">{errors.map((error) => <li key={error}>{error}</li>)}</ul></AlertDescription>
         </Alert>
       )}
-      {saveError && <ErrorAlert title="No se guardó el constructor" message={saveError} />}
+      {saveError && (
+        <ReportSaveFailureAlert
+          title="No se guardó el constructor"
+          failure={saveError}
+          resolveLabel={placeholderLabelResolver({
+            parameters,
+            columns: [...(builder.persisted?.columns ?? []), ...value.columns],
+            summaries: [
+              ...normalizeSummaries(builder.persisted?.excel_layout?.totals ?? [], builder.persisted?.columns ?? []),
+              ...value.layout.totals,
+            ],
+          })}
+          onGoToMapping={onGoToMapping}
+        />
+      )}
+      {templateBlock && (
+        <TemplateDependencyAlert blocks={templateBlock} onGoToMapping={onGoToMapping} onCancel={() => setTemplateBlock(null)} />
+      )}
       {saved && (
         <Alert>
           <CircleCheck />
@@ -245,22 +267,12 @@ export function ReportBuilderWorkspace({
       )}
 
 
-      {dataSourceCapabilities.includes("REPEATABLE_ROWS") && (
-        <Card>
-          <CardHeader><CardTitle>Renglones repetibles</CardTitle></CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <p className="text-sm text-muted-foreground">Define los datos que el usuario capturará una vez por producto. El backend resolverá producto, lista y precio.</p>
-            <ReportParameterGroupEditor groups={value.parameterGroups} parameters={parameters} disabled={saving} onChange={changeParameterGroups} />
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
         <CardHeader><CardTitle>Columnas del reporte</CardTitle></CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Cada columna toma su valor de un campo del catálogo, de un parámetro del reporte o de una fórmula
-            calculada por el backend.
+            Cada columna muestra un dato de la fuente, un dato capturado al generar el reporte o un cálculo
+            hecho a partir de otras columnas.
           </p>
           {catalogError && <ErrorAlert title="No se pudo cargar el catálogo de campos" message={catalogError} />}
           {fields == null ? (
@@ -281,6 +293,7 @@ export function ReportBuilderWorkspace({
                 parameters={parameters}
                 parameterGroups={value.parameterGroups}
                 disabled={saving}
+                templateUsage={templateDependencies.rows}
                 onChange={changeColumns}
               />
             </>
@@ -292,14 +305,15 @@ export function ReportBuilderWorkspace({
         <CardHeader><CardTitle>Resumen y totales</CardTitle></CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Valores calculados una sola vez para todo el reporte: Subtotal suma una columna, IVA y Total se derivan
-            de otros resúmenes y de los parámetros numéricos del reporte.
+            Valores calculados una sola vez para todo el reporte: Subtotal totaliza una columna, IVA y Total se
+            calculan a partir de otros totales y de los datos capturados numéricos.
           </p>
           <ReportSummaryEditor
             summaries={value.layout.totals}
             columns={value.columns}
             parameters={parameters}
             disabled={saving}
+            templateUsage={templateDependencies.summary}
             onChange={changeSummaries}
           />
         </CardContent>
@@ -347,6 +361,7 @@ export function ReportBuilderWorkspace({
             code={code}
             groups={value.parameterGroups}
             scalarValues={runtimeValues}
+            lineAmount={{ columns: value.columns, summaries: value.layout.totals }}
             values={runtimeGroupValues}
             disabled={previewing}
             errors={runtimeRowErrors}

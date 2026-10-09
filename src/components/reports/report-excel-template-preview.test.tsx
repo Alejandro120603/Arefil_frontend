@@ -194,9 +194,23 @@ describe("ReportExcelTemplatePreview", () => {
 
     await fillRequiredAndGenerate(user);
     await screen.findByText("Vista previa basada en plantilla v4");
-    await user.click(screen.getByRole("button", { name: /Descargar cotización Excel/ }));
+    await user.click(screen.getByRole("button", { name: /Descargar documento Excel/ }));
 
     await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledWith("COTIZACION", "exec-1", expect.anything()));
+  });
+
+  it("shows a truncated preview but never offers it for download", async () => {
+    previewReportBuilder.mockResolvedValue(executionPayload({ execution_id: "exec-cut", row_count: 100, truncated: true }));
+    renderReportExcelTemplatePreview.mockResolvedValue(renderPreview({ execution_id: "exec-cut" }));
+    const user = userEvent.setup();
+    render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} />);
+
+    await fillRequiredAndGenerate(user);
+    await screen.findByText("Vista previa basada en plantilla v4");
+    expect((screen.getByRole("button", { name: /Descargar documento Excel/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/solo las primeras filas/)).toBeTruthy();
+    expect(screen.queryByText(/corresponde exactamente a esta vista previa/)).toBeNull();
+    expect(downloadReportDocumentXlsx).not.toHaveBeenCalled();
   });
 
   it("invalidates the previous preview as soon as a parameter changes", async () => {
