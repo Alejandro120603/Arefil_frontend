@@ -15,7 +15,7 @@ import type { BlobDownload } from "@/lib/api/client";
 type DownloadKind = "xlsx" | "csv" | "source";
 
 const DOWNLOAD_LABELS: Record<DownloadKind, string> = {
-  xlsx: "Exportar XLSX",
+  xlsx: "Exportar lista de precios",
   csv: "Exportar CSV",
   source: "Descargar original",
 };

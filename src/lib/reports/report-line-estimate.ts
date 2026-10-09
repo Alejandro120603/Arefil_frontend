@@ -155,6 +155,22 @@ export interface LineEstimateInput {
   product: ReportProductOption | null;
 }
 
+/** Display-only discounted unit price; the backend Decimal result remains authoritative. */
+export function estimateDiscountedUnitPrice(
+  product: ReportProductOption | null,
+  rawDiscount: RuntimeParameterValue | undefined,
+): number | null {
+  if (product == null || typeof rawDiscount === "boolean" || rawDiscount == null || rawDiscount === "") {
+    return null;
+  }
+  const price = Number(product.unit_price);
+  const discount = Number(rawDiscount);
+  if (!Number.isFinite(price) || !Number.isFinite(discount) || discount < 0 || discount > 100) {
+    return null;
+  }
+  return roundHalfUp(price * (1 - discount / 100), 2);
+}
+
 /** The estimated amount of one line, or `null` when it cannot be known yet. */
 export function estimateLineAmount(input: LineEstimateInput): number | null {
   const target = lineAmountColumn(input.columns, input.summaries);

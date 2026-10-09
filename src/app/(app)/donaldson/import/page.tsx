@@ -1,11 +1,13 @@
 "use client";
 
-import { useReducer, useRef } from "react";
+import { useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import { Loader2, TriangleAlert } from "lucide-react";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { ImportDropzone } from "@/components/donaldson/import-dropzone";
 import { ImportIssuesPanel } from "@/components/donaldson/import-issues-panel";
 import { ImportPreviewSummary } from "@/components/donaldson/import-preview-summary";
@@ -13,7 +15,12 @@ import { ImportProductsSampleTable } from "@/components/donaldson/import-product
 import { ImportResult } from "@/components/donaldson/import-result";
 import { SelectedFileCard } from "@/components/donaldson/selected-file-card";
 import { getErrorMessage } from "@/lib/api/errors";
-import { confirmImport, getDuplicateImportDetail, previewDonaldsonImport } from "@/lib/api/imports";
+import {
+  confirmImport,
+  getDuplicateImportDetail,
+  previewPriceListImport,
+  type PriceListImportSupplier,
+} from "@/lib/api/imports";
 import type { ImportConfirmResult, ImportPreviewResponse } from "@/types/api";
 
 type Phase =
@@ -102,6 +109,7 @@ function describeError(error: unknown): { message: string; duplicateImportId: nu
 
 export default function ImportDonaldsonPage() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [supplier, setSupplier] = useState<PriceListImportSupplier>("DONALDSON");
   const submittingRef = useRef(false);
 
   async function handleAnalyze(file: File) {
@@ -109,7 +117,7 @@ export default function ImportDonaldsonPage() {
     submittingRef.current = true;
     dispatch({ type: "ANALYZE_START" });
     try {
-      const preview = await previewDonaldsonImport(file);
+      const preview = await previewPriceListImport(supplier, file);
       dispatch({ type: "ANALYZE_SUCCESS", preview });
     } catch (error) {
       const { message, duplicateImportId } = describeError(error);
@@ -142,11 +150,11 @@ export default function ImportDonaldsonPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Breadcrumbs items={[{ label: "Dashboard", href: "/" }, { label: "Donaldson" }, { label: "Importar lista" }]} />
+      <Breadcrumbs items={[{ label: "Dashboard", href: "/" }, { label: "Catálogo" }, { label: "Importar lista" }]} />
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Importar lista Donaldson</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Importar lista de precios</h1>
         <p className="text-sm text-muted-foreground">
-          Sube el Excel de Donaldson, revisa el análisis del backend y confirma para crear la lista de precios.
+          Selecciona Fleetguard o Donaldson, revisa el análisis del backend y confirma la lista.
         </p>
       </div>
 
@@ -154,6 +162,23 @@ export default function ImportDonaldsonPage() {
         <ImportResult result={state.result} onImportAnother={() => dispatch({ type: "RESET" })} />
       ) : (
         <>
+          {!state.preview && (
+            <div className="grid max-w-sm gap-1.5">
+              <Label htmlFor="import-supplier">Proveedor</Label>
+              <NativeSelect
+                id="import-supplier"
+                value={supplier}
+                disabled={isAnalyzing || isConfirming}
+                onChange={(event) => {
+                  setSupplier(event.target.value as PriceListImportSupplier);
+                  dispatch({ type: "RESET" });
+                }}
+              >
+                <option value="DONALDSON">Donaldson</option>
+                <option value="FLEETGUARD">Fleetguard</option>
+              </NativeSelect>
+            </div>
+          )}
           {!state.file && <ImportDropzone onFileSelected={(file) => dispatch({ type: "SELECT_FILE", file })} />}
 
           {showFileCard && state.file && (

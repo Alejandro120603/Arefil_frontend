@@ -117,13 +117,14 @@ describe("ReportRepeatableParameters", () => {
     await user.click(await screen.findByRole("option", { name: /P550202/ }));
 
     expect(await screen.findByText("Filtro Donaldson")).toBeTruthy();
-    // Unit price cell plus the 1-unit line total (discount defaults to 0).
-    expect(screen.getAllByText("$574.13")).toHaveLength(2);
+    // Original price, discounted price (0% by default), and one-unit total.
+    expect(screen.getAllByText("$574.13")).toHaveLength(3);
     // The report's own formula: ROUND(574.13 × 4 × (1 − 5/100), 2) = 2181.69
     await user.clear(screen.getByLabelText("Cantidad * 1"));
     await user.type(screen.getByLabelText("Cantidad * 1"), "4");
     await user.clear(screen.getByLabelText("Descuento (%) 1"));
     await user.type(screen.getByLabelText("Descuento (%) 1"), "5");
+    expect(screen.getByText("$545.42")).toBeTruthy();
     expect(screen.getByText("$2,181.69")).toBeTruthy();
   });
 
@@ -142,7 +143,7 @@ describe("ReportRepeatableParameters", () => {
   it("L: without a product, a quantity, or the report's columns the total stays —", async () => {
     const user = userEvent.setup();
     const view = render(<Harness />);
-    const totalCell = () => screen.getAllByRole("row")[1].querySelectorAll("td")[7];
+    const totalCell = () => screen.getAllByRole("row")[1].querySelectorAll("td")[8];
     expect(totalCell().textContent).toBe("—");
     await pickFilter(user);
     await user.clear(screen.getByLabelText("Cantidad * 1"));
@@ -150,7 +151,8 @@ describe("ReportRepeatableParameters", () => {
     view.unmount();
     render(<Harness lineAmount={{ columns: [], summaries: [] }} />);
     await pickFilter(user);
-    expect(screen.getAllByText("$574.13")).toHaveLength(1);
+    // Original and 0%-discounted unit price remain available without a total formula.
+    expect(screen.getAllByText("$574.13")).toHaveLength(2);
   });
 
   it("A: the suggestions render in a portal outside the scrolling table", async () => {

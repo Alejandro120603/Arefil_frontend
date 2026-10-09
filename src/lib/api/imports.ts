@@ -2,10 +2,22 @@ import { browserApiClient } from "./browser-client";
 import { ApiError } from "./errors";
 import type { ImportConfirmResult, ImportJob, ImportPreviewResponse } from "@/types/api";
 
-export function previewDonaldsonImport(file: File): Promise<ImportPreviewResponse> {
+export type PriceListImportSupplier = "DONALDSON" | "FLEETGUARD";
+
+export function previewPriceListImport(
+  supplier: PriceListImportSupplier,
+  file: File,
+): Promise<ImportPreviewResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  return browserApiClient.apiUpload<ImportPreviewResponse>("/imports/donaldson/preview", formData);
+  return browserApiClient.apiUpload<ImportPreviewResponse>(
+    `/imports/${supplier.toLowerCase()}/preview`,
+    formData,
+  );
+}
+
+export function previewDonaldsonImport(file: File): Promise<ImportPreviewResponse> {
+  return previewPriceListImport("DONALDSON", file);
 }
 
 export function getImportJob(importId: number): Promise<ImportJob> {
@@ -17,7 +29,7 @@ export function confirmImport(importId: number): Promise<ImportConfirmResult> {
 }
 
 /**
- * `POST /imports/donaldson/preview` responds 409 with this shape when the
+ * `POST /imports/{supplier}/preview` responds 409 with this shape when the
  * same file was already imported. `existing_import_id` points at the
  * ImportJob, not a PriceList — there is no endpoint to resolve one from the
  * other, so callers must not link/navigate to a PriceList from it.
