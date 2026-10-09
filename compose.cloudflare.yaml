@@ -1,0 +1,36 @@
+# Cloudflare Tunnel edge for compose.yaml. Enable with, in .env:
+#   COMPOSE_FILE=compose.yaml:compose.cloudflare.yaml
+#
+# Browser --HTTPS--> Cloudflare --tunnel--> cloudflared (host service)
+#   --> http://127.0.0.1:${FRONTEND_PORT} --> frontend --internal--> backend
+#
+# TLS ends at Cloudflare; the tunnel is an outbound encrypted connection and
+# the last hop is the host's loopback, so no port is opened to the network and
+# Caddy is not started. The public hostname and its ingress rule live in the
+# Cloudflare dashboard (remotely managed tunnel), not here.
+services:
+  backend:
+    environment:
+      CORS_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:?AREFIL_PUBLIC_ORIGIN es obligatorio (https://<hostname público>)}"]'
+      TRUSTED_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:?AREFIL_PUBLIC_ORIGIN es obligatorio (https://<hostname público>)}"]'
+
+  report-execution-cleanup:
+    environment:
+      CORS_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:?AREFIL_PUBLIC_ORIGIN es obligatorio (https://<hostname público>)}"]'
+      TRUSTED_ORIGINS: '["${AREFIL_PUBLIC_ORIGIN:?AREFIL_PUBLIC_ORIGIN es obligatorio (https://<hostname público>)}"]'
+
+  frontend:
+    # Loopback only: reachable by cloudflared on this host, never from the LAN.
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3001}:3000"
+    environment:
+      # Cloudflare appends to a client-sent X-Forwarded-For instead of
+      # replacing it; CF-Connecting-IP is always set by Cloudflare itself.
+      TRUST_PROXY_FORWARDED_FOR: "false"
+      CLIENT_IP_HEADER: cf-connecting-ip
+      # Target of the http:// -> https:// redirect (src/proxy.ts).
+      PUBLIC_ORIGIN: ${AREFIL_PUBLIC_ORIGIN:?AREFIL_PUBLIC_ORIGIN es obligatorio (https://<hostname público>)}
+
+  caddy:
+    # Not part of the Cloudflare topology (would also claim 80/443).
+    profiles: ["caddy"]

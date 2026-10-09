@@ -1,8 +1,16 @@
-# AREFIL deployment: HTTPS (Caddy) -> Next.js -> FastAPI.
+# AREFIL deployment: HTTPS edge -> Next.js -> FastAPI -> SQLite.
 #
-# Only Caddy publishes ports. The frontend and the backend live on private
-# networks; the backend has no host port at all, so the browser can only reach
-# it through /backend-api. Local development over HTTP is `make compose_up`.
+# Default edge: Caddy (this file alone), the only service publishing ports.
+# Cloudflare Tunnel edge: add compose.cloudflare.yaml (COMPOSE_FILE in .env);
+# Caddy is then not started and only the frontend listens, on loopback, for
+# the host's cloudflared. Either way the backend has no host port at all and
+# the browser reaches it only through /backend-api. Local development over
+# HTTP is `make compose_up`.
+
+# Fixed so that a checkout in another directory never starts a second stack
+# on the same data directory. COMPOSE_PROJECT_NAME still overrides it.
+name: arefil
+
 services:
   backend:
     build:
@@ -28,6 +36,8 @@ services:
       # Only the frontend's fixed private address may report the browser's address
       # (not the whole subnet: the Docker host's gateway address lives there too).
       TRUSTED_PROXIES: '["${AREFIL_FRONTEND_INTERNAL_IP:-172.31.240.10}/32"]'
+      # true only for the very first start of a new installation (app/db/guard.py).
+      AREFIL_ALLOW_NEW_DATABASE: ${AREFIL_ALLOW_NEW_DATABASE:-false}
     volumes:
       - type: bind
         source: ${BACKEND_DATA_DIR:-../Arefil_backend/backend/data}
@@ -49,6 +59,15 @@ services:
         APP_UID: ${AREFIL_UID:-1000}
         APP_GID: ${AREFIL_GID:-1000}
     command: ["python", "-m", "app.cli.report_executions", "worker"]
+    # The image's healthcheck probes the backend's HTTP port, which this worker
+    # does not serve (always "unhealthy", failing `up --wait`), and Compose also
+    # fails `--wait` on a service without one. Liveness of the worker (PID 1).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
     environment:
       APP_ENV: production
       DATABASE_URL: sqlite:////app/data/arefil.db
