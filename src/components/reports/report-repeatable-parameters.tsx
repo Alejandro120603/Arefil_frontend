@@ -9,7 +9,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { resolveReportProductOption } from "@/lib/api/reports";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { formatCurrency } from "@/lib/format/decimal";
-import { estimateLineAmount } from "@/lib/reports/report-line-estimate";
+import {
+  estimateDiscountedUnitPrice,
+  estimateLineAmount,
+} from "@/lib/reports/report-line-estimate";
 import {
   createRuntimeGroupRow,
   orderedGroupFields,
@@ -43,6 +46,11 @@ function isPercentField(field: ReportParameterGroupField): boolean {
   return field.input_type === "number"
     && Number(constraints.minimum) === 0
     && Number(constraints.maximum) === 100;
+}
+
+function isDiscountField(field: ReportParameterGroupField): boolean {
+  const identity = `${field.name} ${field.label}`.toLocaleLowerCase("es-MX");
+  return isPercentField(field) && (identity.includes("discount") || identity.includes("descuento"));
 }
 
 /**
@@ -185,9 +193,10 @@ export function ReportRepeatableParameters({
         const fields = orderedGroupFields(group.fields);
         const product = productSearchField(group);
         const editableFields = fields.filter((field) => field !== product);
+        const discountField = editableFields.find(isDiscountField);
         const context = String(scalarValues[group.context_parameter] ?? "").trim();
         const atMaximum = group.max_items != null && rows.length >= group.max_items;
-        const columnCount = 2 + (product ? 4 : 0) + editableFields.length;
+        const columnCount = 2 + (product ? 4 : 0) + editableFields.length + (discountField ? 1 : 0);
         return (
           <section key={group.name} className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -226,6 +235,7 @@ export function ReportRepeatableParameters({
                         {field.label}{isPercentField(field) ? " (%)" : ""}{field.required ? " *" : ""}
                       </TableHead>
                     ))}
+                    {discountField && <TableHead className="text-right">P. con descuento</TableHead>}
                     {product && <TableHead className="text-right">Total</TableHead>}
                     <TableHead className="w-10"><span className="sr-only">Acciones</span></TableHead>
                   </TableRow>
@@ -249,6 +259,9 @@ export function ReportRepeatableParameters({
                         scalars: scalarValues,
                         product: selected,
                       })
+                      : null;
+                    const discountedUnitPrice = discountField
+                      ? estimateDiscountedUnitPrice(selected, row.values[discountField.name])
                       : null;
                     return (
                       <TableRow key={row.id}>
@@ -324,6 +337,13 @@ export function ReportRepeatableParameters({
                             </TableCell>
                           );
                         })}
+                        {discountField && (
+                          <TableCell className="text-right tabular-nums">
+                            {discountedUnitPrice == null
+                              ? "—"
+                              : formatCurrency(String(discountedUnitPrice), selected?.currency)}
+                          </TableCell>
+                        )}
                         {product && (
                           <TableCell className="text-right tabular-nums">
                             {lineTotal == null ? "—" : formatCurrency(String(lineTotal), selected?.currency)}

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { estimateLineAmount, evaluateFormula, lineAmountColumn } from "@/lib/reports/report-line-estimate";
+import {
+  estimateDiscountedUnitPrice,
+  estimateLineAmount,
+  evaluateFormula,
+  lineAmountColumn,
+} from "@/lib/reports/report-line-estimate";
 import type { ReportColumn, ReportProductOption, ReportSummaryConfiguration } from "@/types/api";
 
 function column(key: string, overrides: Partial<ReportColumn>): ReportColumn {
@@ -92,5 +97,25 @@ describe("estimateLineAmount", () => {
   it("refuses a formula cycle instead of recursing forever", () => {
     const cyclic = [column("x", { column_type: "FORMULA", formula_definition: "y" }), column("y", { column_type: "FORMULA", formula_definition: "x" })];
     expect(estimate({}, { columns: cyclic, summaries: [SUM("x")] })).toBeNull();
+  });
+});
+
+describe("estimateDiscountedUnitPrice", () => {
+  it.each([
+    ["0", 125],
+    ["5", 118.75],
+    ["10", 112.5],
+    ["50", 62.5],
+    ["100", 0],
+  ])("applies an individual %s%% discount", (discount, expected) => {
+    expect(estimateDiscountedUnitPrice(PRODUCT, discount)).toBe(expected);
+  });
+
+  it("returns null for missing, negative, over-100 or invalid discounts", () => {
+    expect(estimateDiscountedUnitPrice(null, "10")).toBeNull();
+    expect(estimateDiscountedUnitPrice(PRODUCT, "")).toBeNull();
+    expect(estimateDiscountedUnitPrice(PRODUCT, "-0.01")).toBeNull();
+    expect(estimateDiscountedUnitPrice(PRODUCT, "100.01")).toBeNull();
+    expect(estimateDiscountedUnitPrice(PRODUCT, "invalid")).toBeNull();
   });
 });
