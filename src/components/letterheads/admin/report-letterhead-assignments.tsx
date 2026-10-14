@@ -28,11 +28,27 @@ function editorState(server: ReportLetterheadAssignments): EditorState {
   return { server, rows: buildAssignmentRows(server.assignments, []), defaultId: server.default_letterhead_id };
 }
 
-/** Catalog letterheads the editor does not list yet, appended as "not assigned". */
+/**
+ * Rows refreshed with the latest catalog: name, letterhead state and current
+ * version follow the catalog, while the admin's own choices (availability,
+ * order) and the revision they were made against stay untouched. Catalog
+ * letterheads the editor does not list yet are appended as "not assigned".
+ */
 function withCatalog(rows: AssignmentRow[], catalog: LetterheadAdmin[]): AssignmentRow[] {
+  const byId = new Map(catalog.map((letterhead) => [letterhead.id, letterhead]));
+  const refreshed = rows.map((row) => {
+    const latest = byId.get(row.letterhead_id);
+    if (latest == null) return row;
+    return {
+      ...row,
+      display_name: latest.display_name,
+      letterhead_is_active: latest.is_active,
+      current_version: latest.current_version?.version ?? null,
+    };
+  });
   const known = new Set(rows.map((row) => row.letterhead_id));
   const missing = buildAssignmentRows([], catalog.filter((letterhead) => !known.has(letterhead.id)));
-  return missing.length === 0 ? rows : [...rows, ...missing];
+  return [...refreshed, ...missing];
 }
 
 /** What the PUT would say: rows it sends, in order, and the default. */
@@ -67,6 +83,8 @@ export function ReportLetterheadAssignmentsEditor({
   const [initial, setInitial] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** A background refresh failed while the editor (maybe with a draft) is shown. */
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -74,13 +92,15 @@ export function ReportLetterheadAssignmentsEditor({
   const [manualReload, setManualReload] = useState(0);
   const savingRef = useRef(false);
   const dirtyRef = useRef(false);
+  const hasStateRef = useRef(false);
 
   const rows = useMemo(() => (state != null ? withCatalog(state.rows, catalog) : []), [catalog, state]);
   const dirty = state != null && initial != null && snapshot(rows, state.defaultId) !== initial;
 
   useEffect(() => {
     dirtyRef.current = dirty;
-  }, [dirty]);
+    hasStateRef.current = state != null;
+  }, [dirty, state]);
 
   const apply = useCallback((server: ReportLetterheadAssignments) => {
     const next = editorState(server);
@@ -97,21 +117,25 @@ export function ReportLetterheadAssignmentsEditor({
         // revision they were made against still guards the save.
         if (!dirtyRef.current) apply(server);
         setLoadError(null);
+        setRefreshError(null);
         setLoading(false);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        setLoadError(
-          error instanceof ApiError && error.status === 404
-            ? `El reporte ${code} no existe en este servidor.`
-            : getUserErrorMessage(error, "No se pudieron cargar las asignaciones de membretes."),
-        );
+        const message = error instanceof ApiError && error.status === 404
+          ? `El reporte ${code} no existe en este servidor.`
+          : getUserErrorMessage(error, "No se pudieron cargar las asignaciones de membretes.");
+        // With an editor on screen the failure must not hide (or cost) its draft.
+        if (hasStateRef.current) setRefreshError(message);
+        else setLoadError(message);
         setLoading(false);
       });
     return () => controller.abort();
   }, [apply, code, reloadToken, manualReload]);
 
   const defaultCandidates = useMemo(() => rows.filter(canBeDefault), [rows]);
+  const defaultInvalid = state?.defaultId != null
+    && !defaultCandidates.some((row) => row.letterhead_id === state.defaultId);
 
   function update(nextRows: AssignmentRow[], defaultId: number | null) {
     if (state == null) return;
@@ -139,11 +163,20 @@ export function ReportLetterheadAssignmentsEditor({
     setNotice(null);
   }
 
+  /** Read the server again without discarding the draft (it is applied only if there is none). */
+  function retryRefresh() {
+    setRefreshError(null);
+    setManualReload((value) => value + 1);
+  }
+
+  /** Discard everything local and read the server state (after a conflict, with consent). */
   function reload() {
     setConflict(false);
+    setRefreshError(null);
     setSaveError(null);
     setNotice(null);
     dirtyRef.current = false;
+    hasStateRef.current = false;
     setInitial(null);
     setState(null);
     setLoading(true);
@@ -212,6 +245,17 @@ export function ReportLetterheadAssignmentsEditor({
           />
           <Button type="button" size="sm" onClick={reload}>
             <RefreshCw /> Recargar datos
+          </Button>
+        </div>
+      )}
+      {refreshError && (
+        <div className="flex flex-col items-start gap-2">
+          <ErrorAlert
+            title="No se pudo actualizar el estado de los membretes"
+            message={`${refreshError} Tus cambios sin guardar se conservan.`}
+          />
+          <Button type="button" size="sm" variant="outline" disabled={saving} onClick={retryRefresh}>
+            <RefreshCw /> Reintentar
           </Button>
         </div>
       )}
@@ -291,6 +335,11 @@ export function ReportLetterheadAssignmentsEditor({
         <p className="text-sm text-muted-foreground">
           El usuario siempre puede cambiarla antes de generar. Solo puede ser predeterminado un membrete disponible y activo.
         </p>
+        {defaultInvalid && (
+          <p role="alert" className="text-sm text-destructive">
+            El membrete predeterminado ya no está activo o disponible. Elige otra opción inicial antes de guardar.
+          </p>
+        )}
         <div className="flex flex-col gap-1.5">
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <input

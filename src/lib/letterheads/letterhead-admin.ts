@@ -203,6 +203,16 @@ export function moveRow<T>(rows: T[], index: number, offset: -1 | 1): T[] {
   return next;
 }
 
+/**
+ * Reports where this letterhead is offered today: an active assignment is not
+ * enough, the letterhead itself must be active and have a version (the same
+ * rule as the runtime options). Deactivation keeps assignments on purpose.
+ */
+export function offeredLetterheadReports(letterhead: LetterheadAdmin): LetterheadAdmin["assignments"] {
+  if (!letterhead.is_active || letterhead.current_version == null) return [];
+  return letterhead.assignments.filter((assignment) => assignment.is_active);
+}
+
 /** Route segment `[id]` → a positive integer id, or `null`. */
 export function parseLetterheadId(raw: string): number | null {
   const parsed = Number(raw);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/errors";
@@ -158,5 +158,34 @@ describe("LetterheadDetail", () => {
     api.getLetterhead.mockRejectedValue(new ApiError(404, { code: "letterhead_not_found", message: "No existe." }));
     render(<LetterheadDetail id={99} />);
     expect(await screen.findByText("El membrete solicitado no existe.")).toBeTruthy();
+  });
+
+  it("never lets a slower rename response drop a version uploaded meanwhile", async () => {
+    let finishRename!: (value: LetterheadAdmin) => void;
+    api.updateLetterhead.mockReturnValue(new Promise((resolve) => { finishRename = resolve; }));
+    const V3 = version(3, true);
+    api.uploadLetterheadVersion.mockResolvedValue({ ...V3, created: true });
+    const user = userEvent.setup();
+    render(<LetterheadDetail id={3} />);
+    const input = await screen.findByLabelText("Nombre visible");
+    await user.clear(input);
+    await user.type(input, "Iván V.");
+    await user.click(screen.getByRole("button", { name: "Guardar nombre" }));
+    api.getLetterhead.mockResolvedValue({ ...IVAN, current_version: V3, version_count: 3 });
+    api.listLetterheadVersions.mockResolvedValue([V3, V2, V1]);
+    await user.upload(screen.getByLabelText("Archivo XLSX"), xlsx());
+    await user.click(screen.getByRole("button", { name: "Subir nueva versión" }));
+    expect(await screen.findByRole("heading", { name: "Versión 3" })).toBeTruthy();
+    api.getLetterhead.mockResolvedValue({ ...IVAN, display_name: "Iván V.", current_version: V3, version_count: 3 });
+    await act(async () => finishRename({ ...IVAN, display_name: "Iván V." }));
+    expect(screen.getByRole("heading", { name: "Versión 3" })).toBeTruthy();
+    expect(await screen.findByText("El nombre visible ahora es «Iván V.».")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Versión vigente: 3")).toBeTruthy());
+  });
+
+  it("shows no offered reports while the letterhead is inactive", async () => {
+    api.getLetterhead.mockResolvedValue({ ...IVAN, is_active: false });
+    render(<LetterheadDetail id={3} />);
+    expect(await screen.findByText("Ningún reporte mientras esté inactivo")).toBeTruthy();
   });
 });

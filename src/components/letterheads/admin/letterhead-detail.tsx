@@ -32,6 +32,7 @@ import {
   letterheadNameError,
   letterheadReportLabel,
   letterheadUploadErrors,
+  offeredLetterheadReports,
   shortChecksum,
 } from "@/lib/letterheads/letterhead-admin";
 import { formatFileSize } from "@/lib/reports/report-excel-template";
@@ -101,7 +102,7 @@ export function LetterheadDetail({ id }: { id: number }) {
   const { letterhead, versions } = data;
   const current = letterhead.current_version;
   const thumbnail = letterheadThumbnailAsset(letterhead);
-  const offeredIn = letterhead.assignments.filter((assignment) => assignment.is_active);
+  const offeredIn = offeredLetterheadReports(letterhead);
 
   return (
     <div className="flex flex-col gap-6">
@@ -130,7 +131,7 @@ export function LetterheadDetail({ id }: { id: number }) {
               <dt className="text-muted-foreground">Disponible en</dt>
               <dd>
                 {offeredIn.length === 0
-                  ? "Ningún reporte"
+                  ? letterhead.is_active ? "Ningún reporte" : "Ningún reporte mientras esté inactivo"
                   : offeredIn
                     .map((item) => `${letterheadReportLabel(item.report_code)}${item.is_default ? " (predeterminado)" : ""}`)
                     .join(", ")}
@@ -142,16 +143,26 @@ export function LetterheadDetail({ id }: { id: number }) {
               key={`${letterhead.id}-${letterhead.display_name}`}
               letterhead={letterhead}
               onRenamed={(updated) => {
-                setData({ letterhead: updated, versions });
+                // Only the field this request changed; the history on screen
+                // may already be newer than this response (an upload in flight).
+                setData((current) => current && {
+                  ...current,
+                  letterhead: { ...current.letterhead, display_name: updated.display_name },
+                });
                 setNotice(`El nombre visible ahora es «${updated.display_name}».`);
+                refresh();
               }}
             />
             <div>
               <LetterheadStatusControl
                 letterhead={letterhead}
                 onChanged={(updated, message) => {
-                  setData({ letterhead: updated, versions });
+                  setData((current) => current && {
+                    ...current,
+                    letterhead: { ...current.letterhead, is_active: updated.is_active, assignments: updated.assignments },
+                  });
                   setNotice(message);
+                  refresh();
                 }}
               />
             </div>

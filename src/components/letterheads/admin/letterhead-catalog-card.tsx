@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { letterheadVersionThumbnailPath } from "@/lib/api/letterhead-admin";
-import { letterheadReportLabel } from "@/lib/letterheads/letterhead-admin";
+import { letterheadReportLabel, offeredLetterheadReports } from "@/lib/letterheads/letterhead-admin";
 import type { LetterheadAdmin } from "@/types/letterhead-admin";
 
 export function letterheadThumbnailAsset(letterhead: LetterheadAdmin) {
@@ -25,7 +25,7 @@ export function LetterheadCatalogCard({
 }) {
   const current = letterhead.current_version;
   const thumbnail = letterheadThumbnailAsset(letterhead);
-  const offeredIn = letterhead.assignments.filter((assignment) => assignment.is_active);
+  const offeredIn = offeredLetterheadReports(letterhead);
   const detailHref = `/administracion/membretes/${letterhead.id}`;
 
   return (
@@ -54,7 +54,7 @@ export function LetterheadCatalogCard({
         <div className="text-sm">
           <p className="text-muted-foreground">Disponible en:</p>
           {offeredIn.length === 0 ? (
-            <p>Ningún reporte</p>
+            <p>{letterhead.is_active ? "Ningún reporte" : "Ningún reporte mientras esté inactivo"}</p>
           ) : (
             <ul className="flex flex-col">
               {offeredIn.map((assignment) => (

@@ -359,4 +359,60 @@ describe("report assignments", () => {
     expect(row.className).toContain("flex-col");
     expect(row.className).toContain("sm:flex-row");
   });
+
+  it("keeps an unsaved draft when a background refresh fails, and retries without discarding it", async () => {
+    api.listLetterheads.mockResolvedValue([ASISTENTE, OLIVIA]);
+    api.replaceReportLetterheadAssignments.mockResolvedValue(assignments("PRUEBA_DESCUENTO", { revision: "d2" }));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const cotizacion = await cotizacionPanel();
+    await user.click(await within(cotizacion).findByRole("checkbox", { name: /Olivia Banda/ }));
+    // Saving Descuento refreshes every editor; Cotización's read fails.
+    api.getReportLetterheadAssignments.mockImplementation((code: string) =>
+      code === "PRUEBA_COTIZACION" ? Promise.reject(new ApiError(503, "Servicio no disponible.")) : Promise.resolve(assignments(code)));
+    await user.click(screen.getByRole("tab", { name: "Descuento" }));
+    const descuento = screen.getByRole("tabpanel", { name: "Descuento" });
+    await user.click(await within(descuento).findByRole("checkbox", { name: /Asistente de ventas/ }));
+    await user.click(within(descuento).getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("tab", { name: "Cotización" }));
+    expect(await within(cotizacion).findByText(/Tus cambios sin guardar se conservan/)).toBeTruthy();
+    expect(within(cotizacion).getByRole("checkbox", { name: /Olivia Banda/ })).toHaveProperty("checked", true);
+    api.getReportLetterheadAssignments.mockImplementation((code: string) =>
+      Promise.resolve(code === "PRUEBA_COTIZACION" ? COTIZACION_STATE : assignments(code)));
+    await user.click(within(cotizacion).getByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(within(cotizacion).queryByText(/Tus cambios sin guardar se conservan/)).toBeNull());
+    expect(within(cotizacion).getByRole("checkbox", { name: /Olivia Banda/ })).toHaveProperty("checked", true);
+    expect(within(cotizacion).getByText("Hay cambios sin guardar.")).toBeTruthy();
+  });
+
+  it("follows letterhead state changes in a draft without touching the admin's choices", async () => {
+    const inactive = { ...OLIVIA, is_active: false };
+    api.listLetterheads.mockResolvedValueOnce([ASISTENTE, inactive]).mockResolvedValue([ASISTENTE, OLIVIA]);
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => Promise.resolve(
+      code === "PRUEBA_COTIZACION"
+        ? { ...COTIZACION_STATE, assignments: [...COTIZACION_STATE.assignments, {
+          letterhead_id: 2, slug: "olivia-banda", display_name: "Olivia Banda", letterhead_is_active: false,
+          is_active: false, is_default: false, display_order: 1, current_version: 1, offered: false,
+        }] }
+        : assignments(code)));
+    api.updateLetterhead.mockResolvedValue(OLIVIA);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("checkbox", { name: /Olivia Banda/ }));
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+    expect(within(panel).queryByRole("radio", { name: "Olivia Banda" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Reactivar Olivia Banda" }));
+    expect(await within(panel).findByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
+    expect(within(panel).getByRole("checkbox", { name: /Olivia Banda/ })).toHaveProperty("checked", true);
+  });
+
+  it("does not list reports for an inactive letterhead whose assignments were kept", async () => {
+    api.listLetterheads.mockResolvedValue([{ ...ASISTENTE, is_active: false }]);
+    render(<LetterheadAdminWorkspace />);
+    const card = (await screen.findByRole("heading", { name: "Asistente de ventas" })).closest("[data-slot=card]") as HTMLElement;
+    expect(within(card).getByText("Ningún reporte mientras esté inactivo")).toBeTruthy();
+    expect(within(card).queryByText(/Cotización/)).toBeNull();
+  });
 });
