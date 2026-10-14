@@ -15,12 +15,14 @@ describe("NAV_SECTIONS", () => {
     expect(donaldson?.links.at(-1)?.label).toBe("Reportes");
   });
 
-  it("links the report catalogue from Administración", () => {
+  it("links the report catalogue and the letterheads from Administración", () => {
     const admin = NAV_SECTIONS.find((section) => section.label === "Administración");
     expect(admin?.links.map((link) => link.href)).toEqual([
       "/administracion/respaldos",
       "/administracion/reportes",
+      "/administracion/membretes",
     ]);
+    expect(admin?.links.find((link) => link.href === "/administracion/membretes")?.permission).toBe("reports:admin");
   });
 
   it("filters links by the permissions /auth/me reports, not by role name", () => {
