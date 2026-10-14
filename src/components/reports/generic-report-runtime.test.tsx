@@ -23,6 +23,13 @@ vi.mock("@/lib/api/reports", () => ({
   executeReport,
 }));
 vi.mock("@/lib/download", () => ({ triggerBrowserDownload }));
+// Reports here predate letterheads: the options endpoint answers "not supported".
+vi.mock("@/lib/api/letterhead-runtime", () => ({
+  getReportLetterheadOptions: vi.fn((code: string) => Promise.resolve({
+    report_code: code, supported: false, default_letterhead_version_id: null,
+    options: [{ letterhead_version_id: null, letterhead_id: null, label: "Sin membrete", is_default: true }],
+  })),
+}));
 
 const REPORT: ReportDefinition = {
   code: "NO_PARAMETERS",

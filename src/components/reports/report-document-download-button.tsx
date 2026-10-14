@@ -18,6 +18,12 @@ const MISSING_TEMPLATE_MESSAGE =
 
 export { STALE_EXECUTION_MESSAGE };
 
+function isLetterheadDocumentError(error: unknown): error is ApiError {
+  if (!(error instanceof ApiError) || error.detail == null || typeof error.detail !== "object") return false;
+  const code = (error.detail as Record<string, unknown>).code;
+  return typeof code === "string" && code.startsWith("LETTERHEAD_");
+}
+
 /** A snapshot that can never produce this file: gone, foreign, or a truncated preview. */
 function isUnusableExecution(error: unknown): boolean {
   return executionExportFailure(error) !== "other";
@@ -27,6 +33,9 @@ function documentErrorMessage(error: unknown): string {
   const failure = executionExportFailure(error);
   if (failure === "truncated") return TRUNCATED_EXECUTION_MESSAGE;
   if (failure === "stale") return STALE_EXECUTION_MESSAGE;
+  // A letterhead execution never uses a BONATTI template: its refusals
+  // (integrity, document limits) carry their own message.
+  if (isLetterheadDocumentError(error)) return error.message;
   if (error instanceof ApiError && (error.status === 404 || error.status === 409)) return MISSING_TEMPLATE_MESSAGE;
   return getUserErrorMessage(error, "No se pudo generar el documento Excel.");
 }
@@ -74,6 +83,9 @@ export function ReportDocumentDownloadButton({
     setError(null);
     try {
       const result = await downloadReportDocumentXlsx(code, executionId, { signal: controller.signal });
+      // The execution may have been discarded (an edit, another presentation)
+      // between the response and this line: never save a file for it.
+      if (controller.signal.aborted) return;
       if (result.blob.size === 0) {
         setError("El backend devolvió un documento vacío.");
         return;

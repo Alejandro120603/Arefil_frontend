@@ -136,4 +136,19 @@ describe("ReportDocumentDownloadButton", () => {
     expect(await screen.findByText("El backend devolvió un documento vacío.")).toBeTruthy();
     expect(triggerBrowserDownload).not.toHaveBeenCalled();
   });
+
+  it("shows the letterhead document's own refusal instead of the missing-template hint", async () => {
+    downloadReportDocumentXlsx
+      .mockRejectedValueOnce(new ApiError(409, { code: "LETTERHEAD_INTEGRITY", message: "El membrete guardado no supera la verificación de integridad." }))
+      .mockRejectedValueOnce(new ApiError(422, { code: "LETTERHEAD_DOCUMENT_LIMIT", message: "El documento excede 100 páginas.", limit: "pages" }));
+    const user = userEvent.setup();
+    render(<ReportDocumentDownloadButton code="PRUEBA_COTIZACION" executionId={EXECUTION_ID} />);
+
+    await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
+    expect(await screen.findByText("El membrete guardado no supera la verificación de integridad.")).toBeTruthy();
+    expect(screen.queryByText(/plantilla Excel configurada/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
+    expect(await screen.findByText("El documento excede 100 páginas.")).toBeTruthy();
+    expect(triggerBrowserDownload).not.toHaveBeenCalled();
+  });
 });
