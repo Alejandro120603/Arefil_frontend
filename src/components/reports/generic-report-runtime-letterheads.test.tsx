@@ -272,14 +272,56 @@ describe("Presentación del documento — selection", () => {
     expect(screen.queryByText(/Presentación de esta ejecución/)).toBeNull();
   });
 
-  it("never asks for options for a report without builder columns", async () => {
+  it("asks the backend about support even when the builder columns failed to load", async () => {
+    // The report page renders a runnable report with `columns=[]` when its
+    // separate builder request fails: that must not skip the admin's default.
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION", { default_letterhead_version_id: 11 }));
+    reportsApi.executeReport.mockResolvedValue(execution("e-nocols", frozen(11, "Asistente de ventas", 2)));
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={quotationReport("PRUEBA_COTIZACION")} />);
+    await waitFor(() => expect(radio(/Asistente de ventas/).checked).toBe(true));
+    await fillLine(user);
+    await waitForReady();
+    await user.click(generateButton());
+    await waitFor(() => expect(reportsApi.executeReport).toHaveBeenCalledWith(
+      "PRUEBA_COTIZACION", expect.objectContaining({ presentation: { letterhead_version_id: 11 } }), expect.anything(),
+    ));
+  });
+
+  it("keeps a report the backend does not support exactly as before", async () => {
+    getReportLetterheadOptions.mockResolvedValue({
+      report_code: "SQL_REPORT", supported: false, default_letterhead_version_id: null,
+      options: [{ letterhead_version_id: null, letterhead_id: null, label: "Sin membrete", is_default: true }],
+    });
     reportsApi.executeReport.mockResolvedValue({ columns: [], rows: [], row_count: 0 });
     const report = { ...quotationReport("PRUEBA_COTIZACION"), code: "SQL_REPORT", parameters: [], parameter_groups: [] };
     const user = userEvent.setup();
     render(<GenericReportRuntime report={report} />);
-    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await waitForReady();
+    expect(screen.queryByText("Presentación del documento")).toBeNull();
+    await user.click(generateButton());
     await waitFor(() => expect(reportsApi.executeReport).toHaveBeenCalledWith("SQL_REPORT", {}, expect.anything()));
-    expect(getReportLetterheadOptions).not.toHaveBeenCalled();
+  });
+
+  it("after a failed refresh keeps the loaded selection and does not promise a plain document", async () => {
+    getReportLetterheadOptions
+      .mockResolvedValueOnce(options("PRUEBA_COTIZACION"))
+      .mockRejectedValueOnce(new ApiError(500, "Catálogo no disponible."));
+    reportsApi.executeReport.mockResolvedValue(execution("e-kept", frozen(21, "Olivia Banda", 1)));
+    const user = userEvent.setup();
+    renderReport();
+    await fillLine(user);
+    await waitForReady();
+    await user.click(radio(/Olivia Banda/));
+    await user.click(screen.getByRole("button", { name: "Actualizar opciones" }));
+    expect(await screen.findByText(/Se mantienen las opciones cargadas antes y la selección actual/)).toBeTruthy();
+    expect(screen.queryByText(/el documento usará el formato actual/)).toBeNull();
+    expect(radio(/Olivia Banda/).checked).toBe(true);
+    await waitForReady();
+    await user.click(generateButton());
+    await waitFor(() => expect(reportsApi.executeReport).toHaveBeenCalledWith(
+      "PRUEBA_COTIZACION", expect.objectContaining({ presentation: { letterhead_version_id: 21 } }), expect.anything(),
+    ));
   });
 
   it("waits for the options before generating, so the backend default is never skipped", async () => {

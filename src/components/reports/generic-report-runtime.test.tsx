@@ -60,6 +60,13 @@ const PRODUCTS = [
   { value: 202, label: "P-002 · Aceite", product_id: 202, part_number: "P-002", item_number: null, description: "Aceite", unit_price: "116.00", currency: "MXN", classification: null },
 ];
 
+/** Generation waits for the letterhead options (the backend decides support); then click. */
+async function clickGenerate(user: ReturnType<typeof userEvent.setup>) {
+  // Re-queried: the button moves once the backend answers "not supported".
+  await waitFor(() => expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(false));
+  await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -72,7 +79,7 @@ describe("GenericReportRuntime", () => {
     render(<GenericReportRuntime report={REPORT} />);
     expect(screen.getByText("Este reporte no requiere parámetros.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Descargar Excel de datos" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await clickGenerate(user);
     await waitFor(() => expect(executeReport).toHaveBeenCalledWith("NO_PARAMETERS", {}, expect.anything()));
     expect(await screen.findByText("Vista previa del reporte")).toBeTruthy();
     expect(screen.getByText("La consulta no devolvió filas de muestra.")).toBeTruthy();
@@ -130,7 +137,7 @@ describe("GenericReportRuntime", () => {
     render(<GenericReportRuntime report={report} />);
 
     await waitFor(() => expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(false));
-    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await clickGenerate(user);
     expect(await screen.findByRole("heading", { name: "Comparación de listas · Donaldson" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Descargar Excel de datos" }));
     await waitFor(() => expect(downloadReportData).toHaveBeenLastCalledWith(
@@ -194,7 +201,7 @@ describe("GenericReportRuntime", () => {
     await user.click(await screen.findByRole("option", { name: /P-002/ }));
     await user.clear(screen.getByLabelText("Cantidad * 2"));
     await user.type(screen.getByLabelText("Cantidad * 2"), "5");
-    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await clickGenerate(user);
 
     await waitFor(() => expect(executeReport).toHaveBeenCalledWith("COTIZACION", {
       price_list_id: 7,
@@ -258,7 +265,7 @@ describe("GenericReportRuntime", () => {
     const user = userEvent.setup();
     executeReport.mockResolvedValue({ columns: [], rows: [], row_count: 0 });
     render(<GenericReportRuntime report={REPORT} />);
-    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await clickGenerate(user);
     expect(await screen.findByText("Vista previa del reporte")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Descargar Excel de datos" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Descargar documento Excel" })).toBeNull();
@@ -279,7 +286,7 @@ describe("GenericReportRuntime", () => {
       });
     render(<GenericReportRuntime report={REPORT} />);
 
-    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await clickGenerate(user);
     await screen.findByText("Vista previa del reporte");
     expect(screen.queryByRole("button", { name: "Descargar documento Excel" })).toBeNull();
     expect(screen.getByRole("button", { name: "Descargar Excel de datos" })).toBeTruthy();
@@ -308,7 +315,7 @@ describe("GenericReportRuntime", () => {
     executeReport.mockRejectedValue(new ApiError(422, [{ loc: ["items", 0, "notes"], msg: "valor rechazado" }]));
     const user = userEvent.setup();
     render(<GenericReportRuntime report={report} />);
-    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await clickGenerate(user);
     expect(await screen.findByText("valor rechazado")).toBeTruthy();
     expect(screen.getByText("items.0.notes: valor rechazado")).toBeTruthy();
   });
@@ -364,7 +371,7 @@ describe("GenericReportRuntime", () => {
     // Line total: the report's own `unit_price * cantidad`, in the list's currency.
     expect(screen.getByText("USD 250.00")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await clickGenerate(user);
     await waitFor(() => expect(executeReport).toHaveBeenCalledWith("SMOKE_COT", {
       price_list_id: 1,
       customer_name: "ACME",
@@ -396,7 +403,7 @@ describe("GenericReportRuntime", () => {
     const user = userEvent.setup();
     render(<GenericReportRuntime report={report} />);
     await waitFor(() => expect((screen.getByRole("button", { name: "Generar reporte" }) as HTMLButtonElement).disabled).toBe(false));
-    await user.click(screen.getByRole("button", { name: "Generar reporte" }));
+    await clickGenerate(user);
     expect(await screen.findByText("Donaldson · 2025-10-20", { selector: "dd" })).toBeTruthy();
     await waitFor(() => expect(executeReport).toHaveBeenCalledWith("LISTA", { price_list_id: 7 }, expect.anything()));
   });

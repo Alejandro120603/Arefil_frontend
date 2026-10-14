@@ -29,10 +29,9 @@ export interface LetterheadOptionsState {
  */
 export function useReportLetterheadOptions(
   code: string,
-  enabled: boolean,
   onLoaded: (options: ReportLetterheadOptions) => void,
 ): LetterheadOptionsState & { reload: () => void } {
-  const [state, setState] = useState<LetterheadOptionsState>({ data: null, loading: enabled, error: null });
+  const [state, setState] = useState<LetterheadOptionsState>({ data: null, loading: true, error: null });
   const [token, setToken] = useState(0);
   const onLoadedRef = useRef(onLoaded);
 
@@ -41,7 +40,6 @@ export function useReportLetterheadOptions(
   });
 
   useEffect(() => {
-    if (!enabled) return;
     const controller = new AbortController();
     getReportLetterheadOptions(code, { signal: controller.signal })
       .then((data) => {
@@ -58,7 +56,7 @@ export function useReportLetterheadOptions(
         }));
       });
     return () => controller.abort();
-  }, [code, enabled, token]);
+  }, [code, token]);
 
   const reload = useCallback(() => {
     setState((current) => ({ ...current, loading: true, error: null }));
@@ -126,10 +124,19 @@ export function ReportLetterheadSelector({
       <CardContent className="flex flex-col gap-3">
         {state.error && (
           <div className="flex flex-col items-start gap-2">
-            <ErrorAlert
-              title="No se pudieron cargar los membretes"
-              message={`${state.error} Si generas ahora, el documento usará el formato actual (sin membrete).`}
-            />
+            {data == null ? (
+              <ErrorAlert
+                title="No se pudieron cargar los membretes"
+                message={`${state.error} Si generas ahora, el documento usará el formato actual (sin membrete).`}
+              />
+            ) : (
+              // The previous options and the current selection stay in use:
+              // never promise a document without letterhead here.
+              <ErrorAlert
+                title="No se pudieron actualizar los membretes"
+                message={`${state.error} Se mantienen las opciones cargadas antes y la selección actual; el servidor la validará al generar.`}
+              />
+            )}
             <Button type="button" size="sm" variant="outline" disabled={disabled || state.loading} onClick={onReload}>
               <RefreshCw /> Reintentar
             </Button>

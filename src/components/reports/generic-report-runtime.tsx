@@ -90,8 +90,6 @@ export function GenericReportRuntime({
    * selection or older parameters.
    */
   const requestSeqRef = useRef(0);
-  /** Only builder reports can pin a letterhead; the others never ask for options. */
-  const letterheadsEligible = columns.length > 0;
   const [letterhead, setLetterhead] = useState<{
     selection: LetterheadSelection;
     /** The chosen version stopped being offered and the user has not chosen again. */
@@ -109,14 +107,19 @@ export function GenericReportRuntime({
       return { ...current, selection, stale: current.stale || (current.selection !== undefined && selection === undefined) };
     });
   }, []);
-  const letterheadOptions = useReportLetterheadOptions(report.code, letterheadsEligible, handleLetterheadOptions);
+  const letterheadOptions = useReportLetterheadOptions(report.code, handleLetterheadOptions);
   const letterheadsSupported = letterheadOptions.data?.supported === true;
-  /** Shown while loading too: only an explicit `supported: false` hides it. */
-  const selectorVisible = letterheadsEligible && letterheadOptions.data?.supported !== false;
+  /**
+   * The letterhead endpoint is the only authority on support: whether the
+   * builder columns loaded says nothing about it (the page renders a
+   * runnable report with no columns when that separate request fails).
+   * Shown while loading and when support is unknown; only an explicit
+   * `supported: false` hides it.
+   */
+  const selectorVisible = letterheadOptions.data?.supported !== false;
   /** Generation waits for the options: sending nothing would silently skip the admin's default. */
-  const letterheadPending = letterheadsEligible && (
-    letterheadOptions.loading || (letterheadsSupported && letterheadSelection === undefined)
-  );
+  const letterheadPending =
+    letterheadOptions.loading || (letterheadsSupported && letterheadSelection === undefined);
   const [generatedOnce, setGeneratedOnce] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
