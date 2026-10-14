@@ -20,23 +20,32 @@ import type { LetterheadAdmin, ReportLetterheadAssignments } from "@/types/lette
 
 interface EditorState {
   server: ReportLetterheadAssignments;
+  /** When `server` was read (same clock as the catalog's `catalogLoadedAt`). */
+  loadedAt: number;
   rows: AssignmentRow[];
   defaultId: number | null;
 }
 
 function editorState(server: ReportLetterheadAssignments): EditorState {
-  return { server, rows: buildAssignmentRows(server.assignments, []), defaultId: server.default_letterhead_id };
+  return {
+    server,
+    loadedAt: performance.now(),
+    rows: buildAssignmentRows(server.assignments, []),
+    defaultId: server.default_letterhead_id,
+  };
 }
 
 /**
- * Rows refreshed with the latest catalog: name, letterhead state and current
- * version follow the catalog, while the admin's own choices (availability,
- * order) and the revision they were made against stay untouched. Catalog
- * letterheads the editor does not list yet are appended as "not assigned".
+ * Rows completed with the catalog. When the catalog was read after the
+ * assignments (`catalogIsNewer`), name, letterhead state and current version
+ * follow it — the admin's own choices (availability, order) and the revision
+ * they were made against stay untouched. An older catalog never overrides a
+ * fresher assignment read. Catalog letterheads the editor does not list yet
+ * are appended as "not assigned".
  */
-function withCatalog(rows: AssignmentRow[], catalog: LetterheadAdmin[]): AssignmentRow[] {
+function withCatalog(rows: AssignmentRow[], catalog: LetterheadAdmin[], catalogIsNewer: boolean): AssignmentRow[] {
   const byId = new Map(catalog.map((letterhead) => [letterhead.id, letterhead]));
-  const refreshed = rows.map((row) => {
+  const refreshed = !catalogIsNewer ? rows : rows.map((row) => {
     const latest = byId.get(row.letterhead_id);
     if (latest == null) return row;
     return {
@@ -68,12 +77,14 @@ export function ReportLetterheadAssignmentsEditor({
   code,
   label,
   catalog,
+  catalogLoadedAt = 0,
   reloadToken,
   onSaved,
 }: {
   code: string;
   label: string;
   catalog: LetterheadAdmin[];
+  catalogLoadedAt?: number;
   /** Changes when the catalog changed elsewhere on the page (state or new letterhead). */
   reloadToken: number;
   onSaved?: () => void;
@@ -94,7 +105,10 @@ export function ReportLetterheadAssignmentsEditor({
   const dirtyRef = useRef(false);
   const hasStateRef = useRef(false);
 
-  const rows = useMemo(() => (state != null ? withCatalog(state.rows, catalog) : []), [catalog, state]);
+  const rows = useMemo(
+    () => (state != null ? withCatalog(state.rows, catalog, catalogLoadedAt > state.loadedAt) : []),
+    [catalog, catalogLoadedAt, state],
+  );
   const dirty = state != null && initial != null && snapshot(rows, state.defaultId) !== initial;
 
   useEffect(() => {

@@ -27,6 +27,8 @@ const FORBIDDEN_MESSAGE = "No tienes permisos para administrar membretes.";
  */
 export function LetterheadAdminWorkspace() {
   const [catalog, setCatalog] = useState<LetterheadAdmin[] | null>(null);
+  /** When `catalog` was read; editors only trust it over their own, newer reads. */
+  const [catalogLoadedAt, setCatalogLoadedAt] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -38,6 +40,7 @@ export function LetterheadAdminWorkspace() {
       .then((items) => {
         if (controller.signal.aborted) return;
         setCatalog(items);
+        setCatalogLoadedAt(performance.now());
         setLoadError(null);
       })
       .catch((error: unknown) => {
@@ -143,6 +146,7 @@ export function LetterheadAdminWorkspace() {
                     code={report.code}
                     label={report.label}
                     catalog={catalog}
+                    catalogLoadedAt={catalogLoadedAt}
                     reloadToken={reloadToken}
                     onSaved={refresh}
                   />

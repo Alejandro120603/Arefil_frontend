@@ -51,7 +51,14 @@ interface DetailData {
 export function LetterheadDetail({ id }: { id: number }) {
   const [data, setData] = useState<DetailData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** A background re-read failed: the page (and any unsaved form) stays mounted. */
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const hasDataRef = useRef(false);
+
+  useEffect(() => {
+    hasDataRef.current = data != null;
+  }, [data]);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -64,9 +71,14 @@ export function LetterheadDetail({ id }: { id: number }) {
         if (controller.signal.aborted) return;
         setData({ letterhead, versions });
         setLoadError(null);
+        setRefreshError(null);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
+        if (hasDataRef.current) {
+          setRefreshError(getUserErrorMessage(error, "No se pudo actualizar el membrete."));
+          return;
+        }
         setLoadError(
           error instanceof ApiError && error.status === 404
             ? "El membrete solicitado no existe."
@@ -107,6 +119,17 @@ export function LetterheadDetail({ id }: { id: number }) {
   return (
     <div className="flex flex-col gap-6">
       {notice && <LetterheadNotice message={notice} />}
+      {refreshError && (
+        <div className="flex flex-col items-start gap-2">
+          <ErrorAlert
+            title="No se pudo actualizar el membrete"
+            message={`${refreshError} Lo que ves puede estar desactualizado; tus formularios sin enviar se conservan.`}
+          />
+          <Button type="button" size="sm" variant="outline" onClick={refresh}>
+            <RefreshCw /> Reintentar
+          </Button>
+        </div>
+      )}
 
       <Card>
         <CardContent className="flex flex-col gap-6 md:flex-row">

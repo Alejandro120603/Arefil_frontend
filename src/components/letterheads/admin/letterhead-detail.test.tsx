@@ -188,4 +188,22 @@ describe("LetterheadDetail", () => {
     render(<LetterheadDetail id={3} />);
     expect(await screen.findByText("Ningún reporte mientras esté inactivo")).toBeTruthy();
   });
+
+  it("keeps the page and unsent forms when a background re-read fails", async () => {
+    api.updateLetterhead.mockResolvedValue({ ...IVAN, is_active: false });
+    const user = userEvent.setup({ applyAccept: false });
+    render(<LetterheadDetail id={3} />);
+    await user.upload(await screen.findByLabelText("Archivo XLSX"), xlsx("pendiente.xlsx"));
+    const name = screen.getByLabelText("Nombre visible");
+    await user.clear(name);
+    await user.type(name, "Borrador sin guardar");
+    api.getLetterhead.mockRejectedValue(new ApiError(503, "Servicio no disponible."));
+    await user.click(screen.getByRole("button", { name: "Desactivar Iván Vázquez" }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Desactivar membrete" }));
+    expect(await screen.findByText(/tus formularios sin enviar se conservan/)).toBeTruthy();
+    expect((screen.getByLabelText("Archivo XLSX") as HTMLInputElement).files?.[0]?.name).toBe("pendiente.xlsx");
+    expect((screen.getByRole("button", { name: "Subir nueva versión" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByLabelText("Nombre visible") as HTMLInputElement).value).toBe("Borrador sin guardar");
+    expect(screen.getByRole("heading", { name: "Historial de versiones" })).toBeTruthy();
+  });
 });

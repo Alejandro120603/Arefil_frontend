@@ -415,4 +415,28 @@ describe("report assignments", () => {
     expect(within(card).getByText("Ningún reporte mientras esté inactivo")).toBeTruthy();
     expect(within(card).queryByText(/Cotización/)).toBeNull();
   });
+
+  it("after a conflict reload trusts the fresher assignment read over an older catalog", async () => {
+    // The catalog on screen still says Olivia is inactive; another admin reactivated it.
+    api.listLetterheads.mockResolvedValue([ASISTENTE, { ...OLIVIA, is_active: false }]);
+    const olivia = (active: boolean) => ({
+      letterhead_id: 2, slug: "olivia-banda", display_name: "Olivia Banda", letterhead_is_active: active,
+      is_active: true, is_default: false, display_order: 1, current_version: 1, offered: active,
+    });
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => Promise.resolve(code === "PRUEBA_COTIZACION"
+      ? { ...COTIZACION_STATE, assignments: [...COTIZACION_STATE.assignments, olivia(false)] }
+      : assignments(code)));
+    api.replaceReportLetterheadAssignments.mockRejectedValue(new ApiError(409, { code: "letterhead_conflict", message: "Cambió." }));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("button", { name: "Bajar Asistente de ventas" }));
+    await user.click(within(panel).getByRole("button", { name: "Guardar cambios" }));
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => Promise.resolve(code === "PRUEBA_COTIZACION"
+      ? { ...COTIZACION_STATE, revision: "r9", assignments: [...COTIZACION_STATE.assignments, olivia(true)] }
+      : assignments(code)));
+    await user.click(await within(panel).findByRole("button", { name: "Recargar datos" }));
+    expect(await within(panel).findByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
+  });
 });
