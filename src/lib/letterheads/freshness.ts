@@ -27,7 +27,17 @@ export interface CatalogSnapshot {
   stamps: Record<number, number>;
 }
 
-/** Merges a catalog read issued at `issuedAt`: an entry already confirmed by a later request is kept. */
+/** The backend's catalog order (`ORDER BY display_name, id`, binary collation). */
+function catalogOrder(a: LetterheadAdmin, b: LetterheadAdmin): number {
+  if (a.display_name !== b.display_name) return a.display_name < b.display_name ? -1 : 1;
+  return a.id - b.id;
+}
+
+/**
+ * Merges a catalog read issued at `issuedAt`: an entry already confirmed by
+ * a later request is kept — including one this read does not list yet (a
+ * creation confirmed after it was issued).
+ */
 export function mergeCatalogRead(
   current: CatalogSnapshot | null,
   items: LetterheadAdmin[],
@@ -44,13 +54,20 @@ export function mergeCatalogRead(
     stamps[item.id] = issuedAt;
     return item;
   });
-  return { items: merged, stamps };
+  const listed = new Set(items.map((item) => item.id));
+  const newer = (current?.items ?? []).filter(
+    (item) => !listed.has(item.id) && (current?.stamps[item.id] ?? -Infinity) > issuedAt,
+  );
+  for (const item of newer) stamps[item.id] = current!.stamps[item.id];
+  return { items: newer.length === 0 ? merged : [...merged, ...newer].sort(catalogOrder), stamps };
 }
 
 /**
- * Records one letterhead returned by a successful mutation, stamped at its
- * confirmation (`confirmedAt`, never an optimistic value). Only data from a
- * read issued after that confirmation is kept instead.
+ * Records one letterhead returned by a successful write (status change or
+ * creation), stamped at its confirmation (`confirmedAt`, never an
+ * optimistic value). A new id is inserted in catalog order, an existing one
+ * replaced — never duplicated. Only data from a read issued after that
+ * confirmation is kept instead.
  */
 export function mergeConfirmedLetterhead(
   current: CatalogSnapshot | null,
@@ -60,8 +77,11 @@ export function mergeConfirmedLetterhead(
   if (current == null) return current;
   const previousStamp = current.stamps[confirmed.id];
   if (previousStamp != null && previousStamp > confirmedAt) return current;
+  const known = current.items.some((item) => item.id === confirmed.id);
   return {
-    items: current.items.map((item) => (item.id === confirmed.id ? confirmed : item)),
+    items: known
+      ? current.items.map((item) => (item.id === confirmed.id ? confirmed : item))
+      : [...current.items, confirmed].sort(catalogOrder),
     stamps: { ...current.stamps, [confirmed.id]: confirmedAt },
   };
 }

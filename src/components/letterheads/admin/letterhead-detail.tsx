@@ -31,12 +31,14 @@ import {
   letterheadFileError,
   letterheadNameError,
   letterheadReportLabel,
+  applyUploadedVersion,
   letterheadUploadErrors,
   offeredLetterheadReports,
   shortChecksum,
 } from "@/lib/letterheads/letterhead-admin";
 import { formatFileSize } from "@/lib/reports/report-excel-template";
-import type { LetterheadAdmin, LetterheadVersion } from "@/types/letterhead-admin";
+import { freshnessClock } from "@/lib/letterheads/freshness";
+import type { LetterheadAdmin, LetterheadVersion, LetterheadVersionUpload } from "@/types/letterhead-admin";
 
 interface DetailData {
   letterhead: LetterheadAdmin;
@@ -55,6 +57,12 @@ export function LetterheadDetail({ id }: { id: number }) {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const hasDataRef = useRef(false);
+  /**
+   * When the last write (rename, status, upload) was confirmed
+   * (`freshnessClock`). A re-read issued before it may carry the state from
+   * before that write, so it never replaces what is on screen.
+   */
+  const lastConfirmedRef = useRef(-Infinity);
 
   useEffect(() => {
     hasDataRef.current = data != null;
@@ -63,13 +71,14 @@ export function LetterheadDetail({ id }: { id: number }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    const issuedAt = freshnessClock();
     void Promise.all([
       getLetterhead(id, { signal: controller.signal }),
       listLetterheadVersions(id, { signal: controller.signal }),
     ])
       .then(([letterhead, versions]) => {
         if (controller.signal.aborted) return;
-        setData({ letterhead, versions });
+        if (issuedAt > lastConfirmedRef.current) setData({ letterhead, versions });
         setLoadError(null);
         setRefreshError(null);
       })
@@ -168,6 +177,7 @@ export function LetterheadDetail({ id }: { id: number }) {
               onRenamed={(updated) => {
                 // Only the field this request changed; the history on screen
                 // may already be newer than this response (an upload in flight).
+                lastConfirmedRef.current = freshnessClock();
                 setData((current) => current && {
                   ...current,
                   letterhead: { ...current.letterhead, display_name: updated.display_name },
@@ -179,7 +189,8 @@ export function LetterheadDetail({ id }: { id: number }) {
             <div>
               <LetterheadStatusControl
                 letterhead={letterhead}
-                onChanged={(updated, message) => {
+                onChanged={(updated, message, confirmedAt) => {
+                  lastConfirmedRef.current = Math.max(lastConfirmedRef.current, confirmedAt);
                   setData((current) => current && {
                     ...current,
                     letterhead: { ...current.letterhead, is_active: updated.is_active, assignments: updated.assignments },
@@ -195,7 +206,11 @@ export function LetterheadDetail({ id }: { id: number }) {
 
       <LetterheadVersionUpload
         letterhead={letterhead}
-        onUploaded={(message) => {
+        onUploaded={(uploaded, message) => {
+          // Confirmed by the backend: shown now (and the next upload expects
+          // it); the re-read below only reconciles.
+          lastConfirmedRef.current = freshnessClock();
+          setData((current) => current && applyUploadedVersion(current, uploaded));
           setNotice(message);
           refresh();
         }}
@@ -264,7 +279,7 @@ function LetterheadVersionUpload({
   onReload,
 }: {
   letterhead: LetterheadAdmin;
-  onUploaded: (message: string) => void;
+  onUploaded: (uploaded: LetterheadVersionUpload, message: string) => void;
   onReload: () => void;
 }) {
   const inputId = useId();
@@ -290,6 +305,7 @@ function LetterheadVersionUpload({
       setFile(null);
       if (inputRef.current) inputRef.current.value = "";
       onUploaded(
+        result,
         result.created
           ? `Se creó la versión ${result.version}. Las ejecuciones nuevas la usarán; las anteriores conservan la suya.`
           : `El archivo es idéntico a la versión vigente (${result.version}); no se creó otra versión.`,

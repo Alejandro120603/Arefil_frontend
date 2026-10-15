@@ -937,3 +937,173 @@ describe("report assignments — reads concurrent with a pending status change",
     expect(api.replaceReportLetterheadAssignments.mock.calls.every(([code]) => code === "PRUEBA_DESCUENTO")).toBe(true);
   });
 });
+
+describe("P2-1 — an assignment save never brings back older letterhead details", () => {
+  const oliviaAssignment = (active: boolean) => ({
+    letterhead_id: 2, slug: "olivia-banda", display_name: "Olivia Banda", letterhead_is_active: active,
+    is_active: true, is_default: false, display_order: 1, current_version: 1, offered: active,
+  });
+  const withOlivia = (active: boolean, base: ReportLetterheadAssignments = COTIZACION_STATE): ReportLetterheadAssignments => ({
+    ...base, assignments: [...base.assignments, oliviaAssignment(active)],
+  });
+  /** First reads answer; every later read stays pending (only the writes are under test). */
+  function firstReadsThenPending(catalog: LetterheadAdmin[], cotizacion: ReportLetterheadAssignments) {
+    let catalogServed = false;
+    api.listLetterheads.mockImplementation(() => {
+      if (catalogServed) return new Promise(() => undefined);
+      catalogServed = true;
+      return Promise.resolve(catalog);
+    });
+    let served = false;
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => {
+      if (code !== "PRUEBA_COTIZACION") return Promise.resolve(assignments(code));
+      if (served) return new Promise(() => undefined);
+      served = true;
+      return Promise.resolve(cotizacion);
+    });
+  }
+
+  it("a reactivation confirmed while the PUT is pending survives the PUT's older details", async () => {
+    firstReadsThenPending([ASISTENTE, { ...OLIVIA, is_active: false }], withOlivia(false));
+    const put = deferred<ReportLetterheadAssignments>();
+    const patch = deferred<LetterheadAdmin>();
+    api.replaceReportLetterheadAssignments.mockReturnValue(put.promise);
+    api.updateLetterhead.mockReturnValue(patch.promise);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("button", { name: "Subir Olivia Banda" }));
+    await user.click(within(panel).getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("button", { name: "Reactivar Olivia Banda" }));
+    await act(async () => patch.resolve(OLIVIA));
+    // The server ran the PUT first: its answer carries Olivia as inactive, and it arrives last.
+    const saved = withOlivia(false, { ...COTIZACION_STATE, revision: "r2", assignments: [] });
+    saved.assignments = [{ ...oliviaAssignment(false), display_order: 0 }, { ...COTIZACION_STATE.assignments[0], display_order: 1 }];
+    await act(async () => put.resolve(saved));
+    expect(await within(panel).findByText("Se guardaron los membretes de Cotización.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Desactivar Olivia Banda" })).toBeTruthy();
+    expect(within(panel).getByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
+    // The saved choices themselves are applied: new order, no pending draft.
+    expect((within(panel).getByRole("button", { name: "Subir Olivia Banda" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(panel).queryByText("Hay cambios sin guardar.")).toBeNull();
+    expect(api.replaceReportLetterheadAssignments).toHaveBeenCalledTimes(1);
+  });
+
+  it("a deactivation confirmed while the PUT is pending survives the PUT's older details", async () => {
+    firstReadsThenPending([ASISTENTE, OLIVIA], withOlivia(true));
+    const put = deferred<ReportLetterheadAssignments>();
+    const patch = deferred<LetterheadAdmin>();
+    api.replaceReportLetterheadAssignments.mockReturnValue(put.promise);
+    api.updateLetterhead.mockReturnValue(patch.promise);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("button", { name: "Subir Olivia Banda" }));
+    await user.click(within(panel).getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("button", { name: "Desactivar Olivia Banda" }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Desactivar membrete" }));
+    await act(async () => patch.resolve({ ...OLIVIA, is_active: false }));
+    const saved: ReportLetterheadAssignments = {
+      ...COTIZACION_STATE, revision: "r2",
+      assignments: [{ ...oliviaAssignment(true), display_order: 0 }, { ...COTIZACION_STATE.assignments[0], display_order: 1 }],
+    };
+    await act(async () => put.resolve(saved));
+    expect(await within(panel).findByText("Se guardaron los membretes de Cotización.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reactivar Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByRole("radio", { name: "Olivia Banda" })).toBeNull();
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+    // The default (Asistente) is still a valid choice.
+    expect((within(panel).getByRole("radio", { name: "Asistente de ventas" }) as HTMLInputElement).checked).toBe(true);
+  });
+});
+
+describe("P2-3 — a confirmed creation is in the catalog right away", () => {
+  const IVAN = letterhead(5, "Iván Vázquez");
+
+  async function create(user: ReturnType<typeof userEvent.setup>, name: string) {
+    await user.click(screen.getByRole("button", { name: "Nuevo membrete" }));
+    await user.type(screen.getByLabelText("Nombre visible *"), name);
+    await user.upload(screen.getByLabelText("Archivo XLSX *"), xlsx());
+    await user.click(screen.getByRole("button", { name: "Crear membrete" }));
+  }
+
+  it("shows the new letterhead on an empty catalog even if the follow-up read fails, and it can be opened and assigned", async () => {
+    api.listLetterheads.mockResolvedValueOnce([]).mockRejectedValue(new ApiError(503, "Servicio no disponible."));
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => Promise.resolve(assignments(code)));
+    api.createLetterhead.mockResolvedValue(IVAN);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    await screen.findByText("Todavía no hay membretes");
+    await create(user, "Iván Vázquez");
+    expect(await screen.findByRole("heading", { name: "Iván Vázquez" })).toBeTruthy();
+    expect(screen.queryByText("Todavía no hay membretes")).toBeNull();
+    expect(screen.getByRole("link", { name: "Versiones y detalle de Iván Vázquez" }).getAttribute("href")).toBe("/administracion/membretes/5");
+    const panel = await cotizacionPanel();
+    expect(await within(panel).findByRole("checkbox", { name: /Iván Vázquez/ })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { name: "Iván Vázquez" })).toHaveLength(1);
+  });
+
+  it("keeps the backend order with existing letterheads while the follow-up read is pending, without duplicates", async () => {
+    let calls = 0;
+    api.listLetterheads.mockImplementation(() => {
+      calls += 1;
+      return calls === 1 ? Promise.resolve([ASISTENTE, OLIVIA]) : new Promise(() => undefined);
+    });
+    api.createLetterhead.mockResolvedValue(IVAN);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    await screen.findByRole("heading", { name: "Olivia Banda" });
+    await create(user, "Iván Vázquez");
+    await screen.findByRole("heading", { name: "Iván Vázquez" });
+    const catalogRegion = screen.getByRole("region", { name: "Catálogo" });
+    const names = within(catalogRegion).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent);
+    expect(names).toEqual(["Asistente de ventas", "Iván Vázquez", "Olivia Banda"]);
+  });
+
+  it("an older read that answers after the creation does not remove it; a later read reconciles once", async () => {
+    const older = deferred<LetterheadAdmin[]>();
+    let calls = 0;
+    api.listLetterheads.mockImplementation(() => {
+      calls += 1;
+      if (calls === 1) return Promise.resolve([ASISTENTE]);
+      if (calls === 2) return older.promise;
+      if (calls === 3) return Promise.reject(new ApiError(503, "Servicio no disponible."));
+      return Promise.resolve([ASISTENTE, IVAN]);
+    });
+    api.replaceReportLetterheadAssignments.mockResolvedValue(assignments("PRUEBA_DESCUENTO", { revision: "d2" }));
+    api.createLetterhead.mockResolvedValue(IVAN);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    await screen.findByRole("heading", { name: "Asistente de ventas" });
+    // A catalog read is started (saving Descuento) and stays in flight…
+    await user.click(screen.getByRole("tab", { name: "Descuento" }));
+    const descuento = screen.getByRole("tabpanel", { name: "Descuento" });
+    await user.click(await within(descuento).findByRole("checkbox", { name: /Asistente de ventas/ }));
+    await user.click(within(descuento).getByRole("button", { name: "Guardar cambios" }));
+    await waitFor(() => expect(calls).toBe(2));
+    // …the creation is confirmed (its own follow-up read fails)…
+    await create(user, "Iván Vázquez");
+    expect(await screen.findByRole("heading", { name: "Iván Vázquez" })).toBeTruthy();
+    // …and the older read answers last, without the new letterhead.
+    await act(async () => older.resolve([ASISTENTE]));
+    expect(screen.getByRole("heading", { name: "Iván Vázquez" })).toBeTruthy();
+    // A later, successful read reconciles without duplicating it.
+    await user.click(await screen.findByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(calls).toBe(4));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull());
+    expect(screen.getAllByRole("heading", { name: "Iván Vázquez" })).toHaveLength(1);
+  });
+
+  it("adds nothing when the creation fails", async () => {
+    api.listLetterheads.mockResolvedValue([ASISTENTE]);
+    api.createLetterhead.mockRejectedValue(new ApiError(422, { code: "invalid_source", message: "El archivo no es un XLSX válido." }));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    await screen.findByRole("heading", { name: "Asistente de ventas" });
+    await create(user, "Iván Vázquez");
+    expect(await screen.findByText("El archivo no es un XLSX válido.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Iván Vázquez" })).toBeNull();
+    expect(api.listLetterheads).toHaveBeenCalledTimes(1);
+  });
+});

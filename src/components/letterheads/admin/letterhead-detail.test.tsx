@@ -208,3 +208,90 @@ describe("LetterheadDetail", () => {
     expect(screen.getByRole("heading", { name: "Historial de versiones" })).toBeTruthy();
   });
 });
+
+describe("P2-2 — a confirmed upload is shown right away", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => { resolve = res; });
+    return { promise, resolve };
+  }
+  async function upload(user: ReturnType<typeof userEvent.setup>, name = "ivan-v3.xlsx") {
+    await user.upload(screen.getByLabelText("Archivo XLSX"), xlsx(name));
+    await user.click(screen.getByRole("button", { name: "Subir nueva versión" }));
+  }
+  function historyVersions() {
+    const history = screen.getByRole("heading", { name: "Historial de versiones" }).closest("[data-slot=card]") as HTMLElement;
+    return within(history).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent);
+  }
+
+  it("reflects the new version while the follow-up reads are pending, and the next upload expects it", async () => {
+    const V3 = version(3, true);
+    api.uploadLetterheadVersion.mockResolvedValueOnce({ ...V3, created: true });
+    const user = userEvent.setup();
+    render(<LetterheadDetail id={3} />);
+    await screen.findByText("Versión vigente: 2");
+    api.getLetterhead.mockReturnValue(new Promise(() => undefined));
+    api.listLetterheadVersions.mockReturnValue(new Promise(() => undefined));
+    await upload(user);
+    expect(await screen.findByText("Versión vigente: 3")).toBeTruthy();
+    expect(screen.getByText("3 versiones")).toBeTruthy();
+    expect(historyVersions()).toEqual(["Versión 3", "Versión 2", "Versión 1"]);
+    expect(screen.getByText(/Crea la versión 4/)).toBeTruthy();
+    api.uploadLetterheadVersion.mockResolvedValueOnce({ ...version(4, true), created: true });
+    await upload(user, "ivan-v4.xlsx");
+    await waitFor(() => expect(api.uploadLetterheadVersion).toHaveBeenLastCalledWith(3, expect.any(File), 3));
+    expect(await screen.findByText("Versión vigente: 4")).toBeTruthy();
+    expect(historyVersions()).toEqual(["Versión 4", "Versión 3", "Versión 2", "Versión 1"]);
+  });
+
+  it("keeps the confirmed version when the follow-up reads fail", async () => {
+    api.uploadLetterheadVersion.mockResolvedValue({ ...version(3, true), created: true });
+    const user = userEvent.setup();
+    render(<LetterheadDetail id={3} />);
+    await screen.findByText("Versión vigente: 2");
+    api.getLetterhead.mockRejectedValue(new ApiError(503, "Servicio no disponible."));
+    await upload(user);
+    expect(await screen.findByText(/tus formularios sin enviar se conservan/)).toBeTruthy();
+    expect(screen.getByText("Versión vigente: 3")).toBeTruthy();
+    expect(historyVersions()).toEqual(["Versión 3", "Versión 2", "Versión 1"]);
+  });
+
+  it("an identical upload changes nothing", async () => {
+    api.uploadLetterheadVersion.mockResolvedValue({ ...V2, created: false });
+    const user = userEvent.setup();
+    render(<LetterheadDetail id={3} />);
+    await screen.findByText("Versión vigente: 2");
+    api.getLetterhead.mockReturnValue(new Promise(() => undefined));
+    await upload(user, "ivan-v2.xlsx");
+    expect(await screen.findByText(/no se creó otra versión/)).toBeTruthy();
+    expect(screen.getByText("Versión vigente: 2")).toBeTruthy();
+    expect(historyVersions()).toEqual(["Versión 2", "Versión 1"]);
+  });
+
+  it("an older read answering after the upload does not bring back the previous version", async () => {
+    const older = deferred<LetterheadAdmin>();
+    const olderVersions = deferred<LetterheadVersion[]>();
+    api.updateLetterhead.mockResolvedValue({ ...IVAN, display_name: "Iván V." });
+    api.uploadLetterheadVersion.mockResolvedValue({ ...version(3, true), created: true });
+    const user = userEvent.setup();
+    render(<LetterheadDetail id={3} />);
+    await screen.findByText("Versión vigente: 2");
+    // A rename starts a re-read that stays in flight…
+    api.getLetterhead.mockReturnValueOnce(older.promise).mockReturnValue(new Promise(() => undefined));
+    api.listLetterheadVersions.mockReturnValueOnce(olderVersions.promise).mockReturnValue(new Promise(() => undefined));
+    const name = screen.getByLabelText("Nombre visible");
+    await user.clear(name);
+    await user.type(name, "Iván V.");
+    await user.click(screen.getByRole("button", { name: "Guardar nombre" }));
+    // …the upload is confirmed…
+    await upload(user);
+    expect(await screen.findByText("Versión vigente: 3")).toBeTruthy();
+    // …and the older read answers last, still at version 2.
+    await act(async () => {
+      older.resolve({ ...IVAN, display_name: "Iván V." });
+      olderVersions.resolve([V2, V1]);
+    });
+    expect(screen.getByText("Versión vigente: 3")).toBeTruthy();
+    expect(historyVersions()).toEqual(["Versión 3", "Versión 2", "Versión 1"]);
+  });
+});

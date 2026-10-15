@@ -90,6 +90,9 @@ export function LetterheadAdminWorkspace() {
         <LetterheadCreateForm
           onCancel={() => setCreating(false)}
           onCreated={(created) => {
+            // Confirmed by the backend: shown now, the read below only reconciles.
+            const confirmedAt = freshnessClock();
+            setSnapshot((current) => mergeConfirmedLetterhead(current, created, confirmedAt));
             setCreating(false);
             setNotice(`Se creó «${created.display_name}» con su versión 1. Asígnalo a un reporte para ofrecerlo.`);
             refresh();

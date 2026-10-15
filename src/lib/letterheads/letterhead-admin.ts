@@ -2,6 +2,8 @@ import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { formatFileSize } from "@/lib/reports/report-excel-template";
 import type {
   LetterheadAdmin,
+  LetterheadVersion,
+  LetterheadVersionUpload,
   ReportLetterheadAssignment,
   ReportLetterheadAssignmentsWrite,
 } from "@/types/letterhead-admin";
@@ -211,6 +213,33 @@ export function moveRow<T>(rows: T[], index: number, offset: -1 | 1): T[] {
 export function offeredLetterheadReports(letterhead: LetterheadAdmin): LetterheadAdmin["assignments"] {
   if (!letterhead.is_active || letterhead.current_version == null) return [];
   return letterhead.assignments.filter((assignment) => assignment.is_active);
+}
+
+/**
+ * The detail state after a confirmed upload. A new version becomes the
+ * current one, heads the history once (never duplicated) and bumps the
+ * count; an identical file (`created: false`) changes nothing.
+ */
+export function applyUploadedVersion(
+  current: { letterhead: LetterheadAdmin; versions: LetterheadVersion[] },
+  uploaded: LetterheadVersionUpload,
+): { letterhead: LetterheadAdmin; versions: LetterheadVersion[] } {
+  if (!uploaded.created) return current;
+  const { created: _created, ...stored } = uploaded;
+  void _created;
+  const version: LetterheadVersion = { ...stored, is_current: true };
+  const known = current.versions.some((item) => item.id === version.id);
+  const others = current.versions
+    .filter((item) => item.id !== version.id)
+    .map((item) => ({ ...item, is_current: false }));
+  return {
+    letterhead: {
+      ...current.letterhead,
+      current_version: version,
+      version_count: known ? current.letterhead.version_count : current.letterhead.version_count + 1,
+    },
+    versions: [version, ...others].sort((a, b) => b.version - a.version),
+  };
 }
 
 /** Route segment `[id]` → a positive integer id, or `null`. */

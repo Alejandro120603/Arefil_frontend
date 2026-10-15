@@ -23,19 +23,30 @@ interface EditorState {
   /** Last state confirmed by the backend (a GET or the PUT response). */
   server: ReportLetterheadAssignments;
   /**
-   * Freshness of `server` (`freshnessClock`): when its GET was issued, or
-   * when its PUT was confirmed. It only advances with a real response —
-   * restoring the cached `server` (discard) is not a new read.
+   * Freshness of the assignment *choices* in `server` (availability, order,
+   * default, revision): when its GET was issued, or when its PUT was
+   * confirmed. It only advances with a real response — restoring the cached
+   * `server` (discard) is not a new read.
    */
   serverReadAt: number;
+  /**
+   * Freshness of the *letterhead details* that come along in `server` (name,
+   * active state, current version). A PUT only writes choices, so the details
+   * it returns are no newer than when it was issued: a status change
+   * confirmed meanwhile keeps winning. For a GET it equals `serverReadAt`.
+   */
+  detailsReadAt: number;
   /** The draft: availability and order of each row, plus the default. */
   rows: AssignmentRow[];
   defaultId: number | null;
 }
 
 /** Editor state for a backend response with freshness `stamp` (see `freshnessClock`). */
-function receivedState(server: ReportLetterheadAssignments, stamp: number): EditorState {
-  return { server, serverReadAt: stamp, ...draftFrom(server) };
+function receivedState(
+  server: ReportLetterheadAssignments,
+  stamps: { choices: number; details: number },
+): EditorState {
+  return { server, serverReadAt: stamps.choices, detailsReadAt: stamps.details, ...draftFrom(server) };
 }
 
 /** The draft equal to a confirmed state (no pending edits). */
@@ -133,7 +144,7 @@ export function ReportLetterheadAssignmentsEditor({
 
   const rows = useMemo(
     () => (state != null
-      ? withCatalog(state.rows, catalog, state.server, (id) => (catalogStamps[id] ?? -Infinity) > state.serverReadAt)
+      ? withCatalog(state.rows, catalog, state.server, (id) => (catalogStamps[id] ?? -Infinity) > state.detailsReadAt)
       : []),
     [catalog, catalogStamps, state],
   );
@@ -145,8 +156,8 @@ export function ReportLetterheadAssignmentsEditor({
     serverReadAtRef.current = state?.serverReadAt ?? -Infinity;
   }, [dirty, state]);
 
-  const apply = useCallback((server: ReportLetterheadAssignments, stamp: number) => {
-    const next = receivedState(server, stamp);
+  const apply = useCallback((server: ReportLetterheadAssignments, stamps: { choices: number; details: number }) => {
+    const next = receivedState(server, stamps);
     setState(next);
     setInitial(snapshot(next.rows, next.defaultId));
   }, []);
@@ -160,7 +171,7 @@ export function ReportLetterheadAssignmentsEditor({
         // Pending edits are never thrown away by a background refresh; the
         // revision they were made against still guards the save. A read
         // issued before the state on screen (e.g. before a PUT) is older.
-        if (!dirtyRef.current && issuedAt > serverReadAtRef.current) apply(server, issuedAt);
+        if (!dirtyRef.current && issuedAt > serverReadAtRef.current) apply(server, { choices: issuedAt, details: issuedAt });
         setLoadError(null);
         setRefreshError(null);
         setLoading(false);
@@ -251,11 +262,13 @@ export function ReportLetterheadAssignmentsEditor({
     setSaving(true);
     setSaveError(null);
     setNotice(null);
+    const issuedAt = freshnessClock();
     try {
       const saved = await replaceReportLetterheadAssignments(code, body);
-      // Same policy as any mutation: stamped at confirmation, so an
-      // assignment read issued while the PUT was pending cannot replace it.
-      apply(saved, freshnessClock());
+      // The choices this PUT wrote are confirmed now (a read issued while it
+      // was pending cannot replace them); the letterhead details it echoes
+      // are only as fresh as the moment it was issued.
+      apply(saved, { choices: freshnessClock(), details: issuedAt });
       setNotice(`Se guardaron los membretes de ${label}.`);
       onSaved?.();
     } catch (error) {

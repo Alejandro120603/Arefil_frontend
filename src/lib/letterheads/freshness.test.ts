@@ -33,4 +33,16 @@ describe("letterhead freshness", () => {
     // …but a read issued after the confirmation is newer (another admin's change).
     expect(mergeCatalogRead(confirmed, [item(1, false)], 40).items[0].is_active).toBe(false);
   });
+
+  it("inserts a confirmed creation in catalog order once, and a read issued before it keeps it", () => {
+    const named = (id: number, name: string) => ({ id, is_active: true, display_name: name }) as LetterheadAdmin;
+    const base = mergeCatalogRead(null, [named(1, "Asistente"), named(2, "Olivia")], 10);
+    const created = mergeConfirmedLetterhead(base, named(5, "Iván"), 30);
+    expect(created?.items.map((entry) => entry.id)).toEqual([1, 5, 2]);
+    expect(mergeConfirmedLetterhead(created, named(5, "Iván"), 31)?.items.map((entry) => entry.id)).toEqual([1, 5, 2]);
+    // A read issued before the creation does not list it: it stays.
+    expect(mergeCatalogRead(created, [named(1, "Asistente"), named(2, "Olivia")], 20).items.map((entry) => entry.id)).toEqual([1, 5, 2]);
+    // A read issued after the creation is authoritative.
+    expect(mergeCatalogRead(created, [named(1, "Asistente"), named(2, "Olivia")], 40).items.map((entry) => entry.id)).toEqual([1, 2]);
+  });
 });

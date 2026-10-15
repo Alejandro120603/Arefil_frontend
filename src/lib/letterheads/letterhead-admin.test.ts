@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api/errors";
 import {
+  applyUploadedVersion,
   buildAssignmentRows,
   buildAssignmentsWrite,
   canBeDefault,
@@ -134,5 +135,22 @@ describe("assignment editor rules", () => {
     expect(moveRow([1, 2, 3], 2, -1)).toEqual([1, 3, 2]);
     expect(moveRow([1, 2, 3], 0, -1)).toEqual([1, 2, 3]);
     expect(moveRow([1, 2, 3], 2, 1)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("applyUploadedVersion", () => {
+  const v = (n: number, current: boolean) => ({ ...letterhead(1, "A", n).current_version!, id: n, version: n, is_current: current });
+  const base = { letterhead: { ...letterhead(1, "A", 2), version_count: 2, current_version: v(2, true) }, versions: [v(2, true), v(1, false)] };
+
+  it("makes a created version current, first and counted once", () => {
+    const next = applyUploadedVersion(base, { ...v(3, true), created: true });
+    expect(next.letterhead.current_version?.version).toBe(3);
+    expect(next.letterhead.version_count).toBe(3);
+    expect(next.versions.map((item) => [item.version, item.is_current])).toEqual([[3, true], [2, false], [1, false]]);
+    expect(applyUploadedVersion(next, { ...v(3, true), created: true }).versions).toHaveLength(3);
+  });
+
+  it("changes nothing for an identical file", () => {
+    expect(applyUploadedVersion(base, { ...v(2, true), created: false })).toBe(base);
   });
 });
