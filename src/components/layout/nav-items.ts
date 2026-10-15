@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Archive, FileChartColumn, LayoutDashboard, ListTree, Package, Upload, XCircle } from "lucide-react";
+import { Archive, FileChartColumn, LayoutDashboard, ListTree, Package, Stamp, Upload, XCircle } from "lucide-react";
 import { type CurrentUser, type Permission, hasPermission } from "@/lib/auth/session";
 
 export interface NavLink {
@@ -35,6 +35,7 @@ export const NAV_SECTIONS: NavSection[] = [
     links: [
       { label: "Respaldos", href: "/administracion/respaldos", icon: Archive, permission: "system:backup" },
       { label: "Reportes", href: "/administracion/reportes", icon: FileChartColumn, permission: "reports:admin" },
+      { label: "Membretes", href: "/administracion/membretes", icon: Stamp, permission: "reports:admin" },
     ],
   },
 ];
