@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FileSpreadsheet, Loader2 } from "lucide-react";
+import { FileSpreadsheet, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { downloadReportDocumentXlsx } from "@/lib/api/reports";
@@ -11,12 +11,22 @@ import {
   STALE_EXECUTION_MESSAGE,
   TRUNCATED_EXECUTION_MESSAGE,
 } from "@/lib/reports/report-execution-errors";
+import { XLSX_MEDIA_TYPE } from "@/lib/reports/report-excel-template";
 
 /** A report with no active template is a configuration state, not a failure. */
 const MISSING_TEMPLATE_MESSAGE =
   "Este reporte todavía no tiene una plantilla Excel configurada. Puedes descargar los datos con los botones de abajo.";
 
 export { STALE_EXECUTION_MESSAGE };
+
+/**
+ * Both renderers (BONATTI and letterhead) answer with the XLSX media type.
+ * Anything else — an HTML error page from an intermediary, a JSON body with
+ * a 200 — must never be saved under an `.xlsx` name.
+ */
+function isXlsxBlob(blob: Blob): boolean {
+  return blob.type.split(";")[0].trim().toLowerCase() === XLSX_MEDIA_TYPE;
+}
 
 function isLetterheadDocumentError(error: unknown): error is ApiError {
   if (!(error instanceof ApiError) || error.detail == null || typeof error.detail !== "object") return false;
@@ -90,6 +100,10 @@ export function ReportDocumentDownloadButton({
         setError("El backend devolvió un documento vacío.");
         return;
       }
+      if (!isXlsxBlob(result.blob)) {
+        setError("El backend no devolvió un documento Excel válido. Intenta de nuevo.");
+        return;
+      }
       /*
        * The backend's Content-Disposition is authoritative. The code-based
        * name is only a defensive fallback for a missing or unusable header.
@@ -105,6 +119,13 @@ export function ReportDocumentDownloadButton({
     }
   }
 
+  /** The user gives up on this file: nothing is saved and no error is shown. */
+  function cancel() {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    setDownloading(false);
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-2">
@@ -112,6 +133,11 @@ export function ReportDocumentDownloadButton({
           {downloading ? <Loader2 className="animate-spin" /> : <FileSpreadsheet />}
           {downloading ? "Generando..." : "Descargar documento Excel"}
         </Button>
+        {downloading && (
+          <Button type="button" variant="ghost" onClick={cancel}>
+            <X /> Cancelar
+          </Button>
+        )}
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       {!error && executionId == null && (

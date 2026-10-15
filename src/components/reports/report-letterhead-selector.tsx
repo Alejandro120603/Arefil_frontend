@@ -201,9 +201,13 @@ export function ReportLetterheadSelector({
                 </LetterheadOptionCard>
               ))}
             </div>
-            {choices.length === 0 && (
+            {choices.length === 0 ? (
               <p className="mt-3 text-sm text-muted-foreground">
                 Este reporte todavía no tiene membretes disponibles; se usará el formato actual.
+              </p>
+            ) : (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Las miniaturas son una referencia visual del diseño, no una vista previa de impresión.
               </p>
             )}
           </fieldset>
@@ -260,13 +264,22 @@ function LetterheadOptionCard({
  */
 export function LetterheadPresentationSummary({ letterhead }: { letterhead: FrozenLetterhead | null }) {
   return (
-    <p className="text-sm">
-      <span className="text-muted-foreground">Presentación de esta ejecución: </span>
-      {letterhead == null ? (
-        <span className="font-medium">Sin membrete (formato actual)</span>
-      ) : (
-        <span className="font-medium">{letterhead.display_name} · versión {letterhead.version}</span>
+    <>
+      <p className="text-sm">
+        <span className="text-muted-foreground">Presentación de esta ejecución: </span>
+        {letterhead == null ? (
+          <span className="font-medium">Sin membrete (formato actual)</span>
+        ) : (
+          <span className="font-medium">{letterhead.display_name} · versión {letterhead.version}</span>
+        )}
+      </p>
+      {letterhead != null && (
+        // The composed file carries Excel formulas over the frozen amounts.
+        <p className="text-sm text-muted-foreground">
+          Si editas cantidades, precios o descuentos en el Excel membretado, se recalcula solo ese archivo: la
+          cotización y la ejecución guardadas en AREFIL no cambian.
+        </p>
       )}
-    </p>
+    </>
   );
 }

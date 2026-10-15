@@ -4,6 +4,7 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/errors";
+import { XLSX_MEDIA_TYPE } from "@/lib/reports/report-excel-template";
 import type { ReportColumn, ReportDefinition } from "@/types/api";
 import type { FrozenLetterhead, ReportLetterheadOptions } from "@/types/letterhead-runtime";
 
@@ -188,7 +189,7 @@ describe("Presentación del documento — selection", () => {
     }, expect.anything()));
     expect(await screen.findByText("Sin membrete (formato actual)")).toBeTruthy();
     // The existing document button keeps working from the execution id.
-    reportsApi.downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "cotizacion.xlsx" });
+    reportsApi.downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["xlsx"], { type: XLSX_MEDIA_TYPE }), filename: "cotizacion.xlsx" });
     await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
     await waitFor(() => expect(reportsApi.downloadReportDocumentXlsx).toHaveBeenCalledWith("PRUEBA_COTIZACION", "e-none", expect.anything()));
   });
@@ -210,7 +211,7 @@ describe("Presentación del documento — selection", () => {
       "PRUEBA_COTIZACION", expect.objectContaining({ presentation: { letterhead_version_id: 21 } }), expect.anything(),
     ));
     expect(await screen.findByText("Olivia Banda (congelado) · versión 1")).toBeTruthy();
-    reportsApi.downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["xlsx"]), filename: "membretado.xlsx" });
+    reportsApi.downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["xlsx"], { type: XLSX_MEDIA_TYPE }), filename: "membretado.xlsx" });
     await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
     // Only the execution id: no commercial parameter is sent again.
     await waitFor(() => expect(reportsApi.downloadReportDocumentXlsx).toHaveBeenCalledWith("PRUEBA_COTIZACION", "e-21", expect.anything()));
@@ -451,7 +452,7 @@ describe("Presentación del documento — invalidation and concurrency", () => {
     await user.click(await screen.findByRole("button", { name: "Descargar documento Excel" }));
     await user.click(radio(/Olivia Banda/));
     expect(signal?.aborted).toBe(true);
-    await act(async () => download.resolve({ blob: new Blob(["xlsx"]), filename: "obsoleto.xlsx" }));
+    await act(async () => download.resolve({ blob: new Blob(["xlsx"], { type: XLSX_MEDIA_TYPE }), filename: "obsoleto.xlsx" }));
     expect(triggerBrowserDownload).not.toHaveBeenCalled();
   });
 
@@ -731,10 +732,85 @@ describe("Presentación del documento — navigation between reports in a mounte
     await user.click(await screen.findByRole("button", { name: "Descargar documento Excel" }));
     rerender(view("PRUEBA_DESCUENTO"));
     expect(signal?.aborted).toBe(true);
-    await act(async () => download.resolve({ blob: new Blob(["xlsx"]), filename: "cotizacion.xlsx" }));
+    await act(async () => download.resolve({ blob: new Blob(["xlsx"], { type: XLSX_MEDIA_TYPE }), filename: "cotizacion.xlsx" }));
     expect(triggerBrowserDownload).not.toHaveBeenCalled();
     expect(reportsApi.downloadReportDocumentXlsx).toHaveBeenCalledTimes(1);
     expect(reportsApi.downloadReportDocumentXlsx).toHaveBeenCalledWith("PRUEBA_COTIZACION", "e-cot", expect.anything());
+  });
+});
+
+describe("Excel membretado — descarga del documento (Frontend #41)", () => {
+  async function generateWith(user: User) {
+    await fillLine(user);
+    await waitForReady();
+    await user.click(generateButton());
+  }
+
+  it("downloads the frozen version by execution id alone, even after it was deactivated in the catalog", async () => {
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION", { default_letterhead_version_id: 11 }));
+    reportsApi.executeReport.mockResolvedValue(execution("e-11", frozen(11, "Asistente de ventas", 2)));
+    const user = userEvent.setup();
+    renderReport();
+    await waitFor(() => expect(radio(/Asistente de ventas/).checked).toBe(true));
+    await generateWith(user);
+    expect(await screen.findByText("Asistente de ventas · versión 2")).toBeTruthy();
+    expect(screen.getByText(/se recalcula solo ese archivo/)).toBeTruthy();
+
+    // Deactivated meanwhile: the catalog no longer offers it, but the
+    // execution keeps its pinned version and the screen never re-reads it.
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION", {
+      options: options("PRUEBA_COTIZACION").options.filter((option) => option.letterhead_version_id !== 11),
+    }));
+    reportsApi.downloadReportDocumentXlsx.mockResolvedValue({
+      blob: new Blob(["PK"], { type: XLSX_MEDIA_TYPE }), filename: "PRUEBA_COTIZACION-documento.xlsx",
+    });
+    await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
+    await waitFor(() => expect(triggerBrowserDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: "PRUEBA_COTIZACION-documento.xlsx" }), "PRUEBA_COTIZACION-documento.xlsx",
+    ));
+    expect(reportsApi.downloadReportDocumentXlsx).toHaveBeenCalledWith("PRUEBA_COTIZACION", "e-11", expect.anything());
+    expect(getReportLetterheadOptions).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Asistente de ventas · versión 2")).toBeTruthy();
+  });
+
+  it("«Sin membrete» downloads the current BONATTI document and makes no promise about the letterhead file", async () => {
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION"));
+    reportsApi.executeReport.mockResolvedValue(execution("e-none", null));
+    const user = userEvent.setup();
+    renderReport();
+    await screen.findByRole("group", { name: "Presentación del documento" });
+    expect(screen.getByText(/referencia visual del diseño, no una vista previa de impresión/)).toBeTruthy();
+    await generateWith(user);
+    expect(await screen.findByText("Sin membrete (formato actual)")).toBeTruthy();
+    expect(screen.queryByText(/se recalcula solo ese archivo/)).toBeNull();
+    reportsApi.downloadReportDocumentXlsx.mockResolvedValue({
+      blob: new Blob(["PK"], { type: XLSX_MEDIA_TYPE }), filename: "PRUEBA_COTIZACION-documento.xlsx",
+    });
+    await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
+    await waitFor(() => expect(triggerBrowserDownload).toHaveBeenCalledTimes(1));
+    expect(reportsApi.downloadReportDocumentXlsx).toHaveBeenCalledWith("PRUEBA_COTIZACION", "e-none", expect.anything());
+  });
+
+  it("keeps the tabular exports independent of a failing letterhead document", async () => {
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION", { default_letterhead_version_id: 21 }));
+    reportsApi.executeReport.mockResolvedValue(execution("e-21", frozen(21, "Olivia Banda", 1)));
+    reportsApi.downloadReportDocumentXlsx.mockRejectedValue(new ApiError(422, {
+      code: "LETTERHEAD_DOCUMENT_LIMIT", message: "El documento excede 100 páginas.", limit: "pages",
+    }));
+    reportsApi.downloadReportData.mockResolvedValue({ blob: new Blob(["csv"]), filename: "PRUEBA_COTIZACION-datos.csv" });
+    const user = userEvent.setup();
+    renderReport();
+    await waitFor(() => expect(radio(/Olivia Banda/).checked).toBe(true));
+    await generateWith(user);
+    await user.click(await screen.findByRole("button", { name: "Descargar documento Excel" }));
+    expect(await screen.findByText("El documento excede 100 páginas.")).toBeTruthy();
+    // The preview stays on screen and the data files still export the same snapshot.
+    expect(within(document.getElementById("ejecucion") as HTMLElement).getByText("P550202")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Descargar CSV de datos" }));
+    await waitFor(() => expect(reportsApi.downloadReportData).toHaveBeenCalledWith(
+      "PRUEBA_COTIZACION", "csv", { executionId: "e-21" }, expect.anything(),
+    ));
+    expect(triggerBrowserDownload).toHaveBeenCalledWith(expect.anything(), "PRUEBA_COTIZACION-datos.csv");
   });
 });
 

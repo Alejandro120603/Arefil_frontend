@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReportExcelTemplatePreview } from "./report-excel-template-preview";
 import { ApiError } from "@/lib/api/errors";
+import { XLSX_MEDIA_TYPE } from "@/lib/reports/report-excel-template";
 import type { ReportBuilderPreviewResponse, ReportDefinition, ReportExcelRenderPreview } from "@/types/api";
 
 const {
@@ -188,7 +189,7 @@ describe("ReportExcelTemplatePreview", () => {
   it("the download button reuses the preview's own execution_id, not local state", async () => {
     previewReportBuilder.mockResolvedValue(executionPayload({ execution_id: "exec-1" }));
     renderReportExcelTemplatePreview.mockResolvedValue(renderPreview({ execution_id: "exec-1" }));
-    downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["x"]), filename: "cotizacion.xlsx" });
+    downloadReportDocumentXlsx.mockResolvedValue({ blob: new Blob(["x"], { type: XLSX_MEDIA_TYPE }), filename: "cotizacion.xlsx" });
     const user = userEvent.setup();
     render(<ReportExcelTemplatePreview report={REPORT} hasSummaries={false} templateVersion={4} hasUnsavedChanges={false} />);
 
