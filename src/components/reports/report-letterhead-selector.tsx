@@ -22,16 +22,25 @@ export interface LetterheadOptionsState {
   error: string | null;
 }
 
+/** State of one report's options; never shown for another report. */
+interface OwnedOptionsState extends LetterheadOptionsState {
+  code: string;
+}
+
 /**
  * Reads the letterhead options of a report once (and again on `reload`).
  * `onLoaded` runs with every successful read so the caller can reconcile its
  * selection with what is offered now.
+ *
+ * The state belongs to the `code` it was read for: as soon as `code` changes,
+ * the previous report's options are reported as "loading, nothing loaded" in
+ * that same render, and a late answer for the old code is dropped.
  */
 export function useReportLetterheadOptions(
   code: string,
   onLoaded: (options: ReportLetterheadOptions) => void,
 ): LetterheadOptionsState & { reload: () => void } {
-  const [state, setState] = useState<LetterheadOptionsState>({ data: null, loading: true, error: null });
+  const [state, setState] = useState<OwnedOptionsState>({ code, data: null, loading: true, error: null });
   const [token, setToken] = useState(0);
   const onLoadedRef = useRef(onLoaded);
 
@@ -43,14 +52,15 @@ export function useReportLetterheadOptions(
     const controller = new AbortController();
     getReportLetterheadOptions(code, { signal: controller.signal })
       .then((data) => {
-        if (controller.signal.aborted) return;
-        setState({ data, loading: false, error: null });
+        if (controller.signal.aborted || data.report_code !== code) return;
+        setState({ code, data, loading: false, error: null });
         onLoadedRef.current(data);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setState((current) => ({
-          data: current.data,
+          code,
+          data: current.code === code ? current.data : null,
           loading: false,
           error: getUserErrorMessage(error, "No se pudieron cargar las opciones de membrete."),
         }));
@@ -63,7 +73,10 @@ export function useReportLetterheadOptions(
     setToken((value) => value + 1);
   }, []);
 
-  return { ...state, reload };
+  const owned: LetterheadOptionsState = state.code === code
+    ? state
+    : { data: null, loading: true, error: null };
+  return { data: owned.data, loading: owned.loading, error: owned.error, reload };
 }
 
 function thumbnailPath(option: ReportLetterheadOption): string | null {

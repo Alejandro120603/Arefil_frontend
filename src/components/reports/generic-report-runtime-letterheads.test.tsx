@@ -604,3 +604,136 @@ describe("Presentación del documento — accessibility and layout", () => {
     for (const label of group.querySelectorAll("label")) expect(label.className).toContain("min-w-0");
   });
 });
+
+describe("Presentación del documento — navigation between reports in a mounted runtime", () => {
+  const withDefault = (code: string, versionId: number | null) => {
+    const base = options(code);
+    return {
+      ...base,
+      default_letterhead_version_id: versionId,
+      options: base.options.map((option) => ({ ...option, is_default: option.letterhead_version_id === versionId })),
+    };
+  };
+  function optionsByCode(byCode: Record<string, ReportLetterheadOptions | Promise<ReportLetterheadOptions>>) {
+    getReportLetterheadOptions.mockImplementation((code: string) => Promise.resolve(byCode[code]));
+  }
+  function view(code: "PRUEBA_COTIZACION" | "PRUEBA_DESCUENTO") {
+    return <GenericReportRuntime report={quotationReport(code)} columns={COLUMNS} />;
+  }
+
+  it("Cotización → Descuento: applies only the new report's default, even when both offer the chosen version", async () => {
+    optionsByCode({ PRUEBA_COTIZACION: withDefault("PRUEBA_COTIZACION", 11), PRUEBA_DESCUENTO: withDefault("PRUEBA_DESCUENTO", null) });
+    reportsApi.executeReport.mockResolvedValue(execution("e-desc", null));
+    const user = userEvent.setup();
+    const { rerender } = render(view("PRUEBA_COTIZACION"));
+    await waitFor(() => expect(radio(/Asistente de ventas/).checked).toBe(true));
+    await user.click(radio(/Olivia Banda/));
+    rerender(view("PRUEBA_DESCUENTO"));
+    // Same render: nothing from Cotización can be sent while Descuento loads.
+    expect(screen.queryByRole("group", { name: "Presentación del documento" })).toBeNull();
+    expect(generateButton().disabled).toBe(true);
+    await waitFor(() => expect(radio(/Sin membrete/).checked).toBe(true));
+    expect(radio(/Olivia Banda/).checked).toBe(false);
+    // The commercial form is Descuento's own, fresh.
+    expect(screen.getByLabelText("Descuento (%) * 1")).toBeTruthy();
+    await fillLine(user, { discount: "5" });
+    await waitForReady();
+    await user.click(generateButton());
+    await waitFor(() => expect(reportsApi.executeReport).toHaveBeenCalledWith("PRUEBA_DESCUENTO", {
+      price_list_id: 7,
+      items: [{ product_id: 101, quantity: 3, discount: "5" }],
+      presentation: { letterhead_version_id: null },
+    }, expect.anything()));
+  });
+
+  it("Descuento → Cotización: different defaults per report, manual choice still possible afterwards", async () => {
+    optionsByCode({ PRUEBA_COTIZACION: withDefault("PRUEBA_COTIZACION", 11), PRUEBA_DESCUENTO: withDefault("PRUEBA_DESCUENTO", 21) });
+    const user = userEvent.setup();
+    const { rerender } = render(view("PRUEBA_DESCUENTO"));
+    await waitFor(() => expect(radio(/Olivia Banda/).checked).toBe(true));
+    rerender(view("PRUEBA_COTIZACION"));
+    await waitFor(() => expect(radio(/Asistente de ventas/).checked).toBe(true));
+    expect(radio(/Olivia Banda/).checked).toBe(false);
+    expect(screen.queryByLabelText("Descuento (%) * 1")).toBeNull();
+    await user.click(radio(/Sin membrete/));
+    expect(radio(/Sin membrete/).checked).toBe(true);
+  });
+
+  it("hides the selector for a new report the backend does not support", async () => {
+    const unsupported = { ...options("PRUEBA_DESCUENTO"), supported: false, options: [options("x").options[0]] };
+    optionsByCode({ PRUEBA_COTIZACION: withDefault("PRUEBA_COTIZACION", 11), PRUEBA_DESCUENTO: unsupported });
+    reportsApi.executeReport.mockResolvedValue(execution("e-u", null));
+    const user = userEvent.setup();
+    const { rerender } = render(view("PRUEBA_COTIZACION"));
+    await waitFor(() => expect(radio(/Asistente de ventas/).checked).toBe(true));
+    rerender(view("PRUEBA_DESCUENTO"));
+    await fillLine(user);
+    await waitForReady();
+    expect(screen.queryByText("Presentación del documento")).toBeNull();
+    await user.click(generateButton());
+    await waitFor(() => expect(reportsApi.executeReport).toHaveBeenCalledWith("PRUEBA_DESCUENTO", {
+      price_list_id: 7, items: [{ product_id: 101, quantity: 3, discount: "0" }],
+    }, expect.anything()));
+  });
+
+  it("ignores a late options answer of the previous report and blocks generation until the new one loads", async () => {
+    const lateCotizacion = deferred<ReportLetterheadOptions>();
+    const descuento = deferred<ReportLetterheadOptions>();
+    optionsByCode({ PRUEBA_COTIZACION: lateCotizacion.promise, PRUEBA_DESCUENTO: descuento.promise });
+    const user = userEvent.setup();
+    const { rerender } = render(view("PRUEBA_COTIZACION"));
+    rerender(view("PRUEBA_DESCUENTO"));
+    await fillLine(user);
+    await act(async () => lateCotizacion.resolve(withDefault("PRUEBA_COTIZACION", 11)));
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(generateButton().disabled).toBe(true);
+    await act(async () => descuento.resolve(withDefault("PRUEBA_DESCUENTO", 21)));
+    await waitForReady();
+    expect(radio(/Olivia Banda/).checked).toBe(true);
+    expect(radio(/Asistente de ventas/).checked).toBe(false);
+  });
+
+  it("aborts the previous report's generation and never shows its late result", async () => {
+    optionsByCode({ PRUEBA_COTIZACION: withDefault("PRUEBA_COTIZACION", 11), PRUEBA_DESCUENTO: withDefault("PRUEBA_DESCUENTO", null) });
+    const late = deferred<unknown>();
+    let signal: AbortSignal | undefined;
+    reportsApi.executeReport.mockImplementationOnce((_code: string, _body: unknown, init: { signal: AbortSignal }) => {
+      signal = init.signal;
+      return late.promise;
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(view("PRUEBA_COTIZACION"));
+    await fillLine(user);
+    await waitForReady();
+    await user.click(generateButton());
+    rerender(view("PRUEBA_DESCUENTO"));
+    expect(signal?.aborted).toBe(true);
+    await act(async () => late.resolve(execution("e-cot", frozen(11, "Asistente de ventas", 2))));
+    expect(screen.queryByText("Vista previa del reporte")).toBeNull();
+    expect(screen.queryByText(/Presentación de esta ejecución/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Descargar/ })).toBeNull();
+  });
+
+  it("cancels a document download of the previous report's execution", async () => {
+    optionsByCode({ PRUEBA_COTIZACION: withDefault("PRUEBA_COTIZACION", 11), PRUEBA_DESCUENTO: withDefault("PRUEBA_DESCUENTO", null) });
+    reportsApi.executeReport.mockResolvedValue(execution("e-cot", frozen(11, "Asistente de ventas", 2)));
+    const download = deferred<{ blob: Blob; filename: string }>();
+    let signal: AbortSignal | undefined;
+    reportsApi.downloadReportDocumentXlsx.mockImplementation((_code: string, _id: string, init: { signal: AbortSignal }) => {
+      signal = init.signal;
+      return download.promise;
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(view("PRUEBA_COTIZACION"));
+    await fillLine(user);
+    await waitForReady();
+    await user.click(generateButton());
+    await user.click(await screen.findByRole("button", { name: "Descargar documento Excel" }));
+    rerender(view("PRUEBA_DESCUENTO"));
+    expect(signal?.aborted).toBe(true);
+    await act(async () => download.resolve({ blob: new Blob(["xlsx"]), filename: "cotizacion.xlsx" }));
+    expect(triggerBrowserDownload).not.toHaveBeenCalled();
+    expect(reportsApi.downloadReportDocumentXlsx).toHaveBeenCalledTimes(1);
+    expect(reportsApi.downloadReportDocumentXlsx).toHaveBeenCalledWith("PRUEBA_COTIZACION", "e-cot", expect.anything());
+  });
+});

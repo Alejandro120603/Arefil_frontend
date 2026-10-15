@@ -63,19 +63,33 @@ interface SuccessfulExecution {
   frozenLetterhead: FrozenLetterhead | null | undefined;
 }
 
-export function GenericReportRuntime({
-  report,
-  summaries = [],
-  columns = [],
-  initialParameters = {},
-}: {
+interface GenericReportRuntimeProps {
   report: ReportDefinition;
   /** Saved summary configuration; the dataset only carries their keys. */
   summaries?: ReportSummaryConfiguration[];
   /** Saved builder columns: the line "Total" estimate evaluates their formula (#45). */
   columns?: ReportColumn[];
   initialParameters?: Record<string, unknown>;
-}) {
+}
+
+/**
+ * Everything the runtime holds — commercial form, letterhead selection and
+ * its options, the execution, in-flight generation and downloads — belongs to
+ * one report. Client-side navigation between `[code]` pages can reuse this
+ * component, so the state is keyed by `report.code`: another report gets a
+ * fresh instance in the same render (no intermediate render can send the
+ * previous selection), and unmounting the old one aborts its requests.
+ */
+export function GenericReportRuntime(props: GenericReportRuntimeProps) {
+  return <ReportRuntimeForCode key={props.report.code} {...props} />;
+}
+
+function ReportRuntimeForCode({
+  report,
+  summaries = [],
+  columns = [],
+  initialParameters = {},
+}: GenericReportRuntimeProps) {
   const groups = useMemo(() => report.parameter_groups ?? [], [report.parameter_groups]);
   const [values, setValues] = useState(() => initialRuntimeValues(report.parameters, initialParameters));
   const [groupValues, setGroupValues] = useState<RuntimeGroupValues>(() => initialRuntimeGroupValues(groups));
