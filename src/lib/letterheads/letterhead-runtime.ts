@@ -69,8 +69,11 @@ export function isLetterheadSelectionError(error: unknown): boolean {
   const detail = error.detail;
   if (Array.isArray(detail)) {
     return detail.some((item) => {
-      const loc = (item as { loc?: unknown[] } | null)?.loc;
-      return Array.isArray(loc) && loc[0] === PRESENTATION_KEY;
+      const loc = (item as { loc?: unknown } | null)?.loc;
+      if (!Array.isArray(loc)) return false;
+      // FastAPI prefixes body fields with "body" (as `backendRowErrors` handles).
+      const normalized = loc[0] === "body" ? loc.slice(1) : loc;
+      return normalized[0] === PRESENTATION_KEY;
     });
   }
   if (detail && typeof detail === "object") {

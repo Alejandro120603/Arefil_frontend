@@ -230,6 +230,8 @@ function ReportRuntimeForCode({
         // The catalog changed under the form (deactivated, unassigned, new
         // version...). Nothing was generated; read the options again and let
         // the user choose — never retry with another letterhead by ourselves.
+        // Row errors that came along in the same response stay visible.
+        if (error instanceof ApiError) setBackendErrors(backendRowErrors(error.detail, groups));
         setGenerationError(
           `${getUserErrorMessage(error, "El membrete elegido ya no está disponible.")} Actualizamos las opciones de membrete; revisa la presentación del documento y genera de nuevo.`,
         );

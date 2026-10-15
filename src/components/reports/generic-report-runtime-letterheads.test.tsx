@@ -737,3 +737,44 @@ describe("Presentación del documento — navigation between reports in a mounte
     expect(reportsApi.downloadReportDocumentXlsx).toHaveBeenCalledWith("PRUEBA_COTIZACION", "e-cot", expect.anything());
   });
 });
+
+describe("Presentación del documento — FastAPI validation errors", () => {
+  it("treats a 422 located at body.presentation as a selection error and recovers without retrying", async () => {
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_DESCUENTO"));
+    reportsApi.executeReport.mockRejectedValueOnce(new ApiError(422, [
+      { loc: ["body", "presentation", "letterhead_version_id"], msg: "Input should be a valid integer", type: "int_type" },
+    ]));
+    const user = userEvent.setup();
+    renderReport("PRUEBA_DESCUENTO");
+    await fillLine(user, { quantity: "4", discount: "12.5" });
+    await waitForReady();
+    await user.click(radio(/Olivia Banda/));
+    await user.click(generateButton());
+    expect(await screen.findByText(/Actualizamos las opciones de membrete; revisa la presentación del documento/)).toBeTruthy();
+    await waitFor(() => expect(getReportLetterheadOptions).toHaveBeenCalledTimes(2));
+    // Still offered: kept, never swapped; commercial values untouched.
+    await waitForReady();
+    expect(radio(/Olivia Banda/).checked).toBe(true);
+    expect((screen.getByLabelText("Cantidad * 1") as HTMLInputElement).value).toBe("4");
+    expect((screen.getByLabelText("Descuento (%) * 1") as HTMLInputElement).value).toBe("12.5");
+    expect(screen.queryByText("Vista previa del reporte")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Descargar/ })).toBeNull();
+    expect(reportsApi.executeReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the usual handling for a 422 on a product field", async () => {
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION"));
+    reportsApi.executeReport.mockRejectedValueOnce(new ApiError(422, [
+      { loc: ["body", "items", 0, "quantity"], msg: "valor rechazado", type: "value_error" },
+    ]));
+    const user = userEvent.setup();
+    renderReport();
+    await fillLine(user);
+    await waitForReady();
+    await user.click(generateButton());
+    expect(await screen.findByText("valor rechazado")).toBeTruthy();
+    expect(screen.queryByText(/Actualizamos las opciones de membrete/)).toBeNull();
+    expect(getReportLetterheadOptions).toHaveBeenCalledTimes(1);
+    expect(reportsApi.executeReport).toHaveBeenCalledTimes(1);
+  });
+});

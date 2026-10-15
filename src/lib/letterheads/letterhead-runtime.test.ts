@@ -67,6 +67,21 @@ describe("letterhead runtime rules", () => {
     expect(isLetterheadSelectionError(new Error("x"))).toBe(false);
   });
 
+  it("normalizes FastAPI body locations before matching the presentation", () => {
+    const validation = (loc: unknown, status = 422) => new ApiError(status, [{ loc, msg: "x", type: "int_type" }]);
+    expect(isLetterheadSelectionError(validation(["presentation", "letterhead_version_id"]))).toBe(true);
+    expect(isLetterheadSelectionError(validation(["body", "presentation", "letterhead_version_id"]))).toBe(true);
+    expect(isLetterheadSelectionError(validation(["body", "presentation"]))).toBe(true);
+    expect(isLetterheadSelectionError(validation(["body", "products", 0, "sku"]))).toBe(false);
+    expect(isLetterheadSelectionError(validation(["body", "quantity"]))).toBe(false);
+    expect(isLetterheadSelectionError(validation(["body"]))).toBe(false);
+    expect(isLetterheadSelectionError(validation(undefined))).toBe(false);
+    expect(isLetterheadSelectionError(new ApiError(422, [null, "texto"]))).toBe(false);
+    expect(isLetterheadSelectionError(new ApiError(409, { code: "LETTERHEAD_UNAVAILABLE", message: "x" }))).toBe(true);
+    expect(isLetterheadSelectionError(new ApiError(422, "Error ajeno."))).toBe(false);
+    expect(isLetterheadSelectionError(new TypeError("fetch failed"))).toBe(false);
+  });
+
   it("reads the frozen presentation from the execution itself", () => {
     expect(frozenLetterhead(builder({ letterhead: null }))).toBeNull();
     expect(frozenLetterhead(builder({ letterhead: { letterhead_version_id: 11 } }))).toEqual({ letterhead_version_id: 11 });
