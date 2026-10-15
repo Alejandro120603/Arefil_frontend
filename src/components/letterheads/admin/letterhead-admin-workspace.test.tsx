@@ -440,3 +440,109 @@ describe("report assignments", () => {
     expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
   });
 });
+
+describe("report assignments — discard and catalog sync", () => {
+  const oliviaAssignment = (active: boolean) => ({
+    letterhead_id: 2, slug: "olivia-banda", display_name: "Olivia Banda", letterhead_is_active: active,
+    is_active: true, is_default: false, display_order: 1, current_version: 1, offered: active,
+  });
+  const withOlivia = (active: boolean): ReportLetterheadAssignments => ({
+    ...COTIZACION_STATE, assignments: [...COTIZACION_STATE.assignments, oliviaAssignment(active)],
+  });
+  /** After the first read, assignment reads stay pending: only the restore itself is under test. */
+  function assignmentsOnceThenPending(first: ReportLetterheadAssignments) {
+    let served = false;
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => {
+      if (code !== "PRUEBA_COTIZACION") return Promise.resolve(assignments(code));
+      if (served) return new Promise(() => undefined);
+      served = true;
+      return Promise.resolve(first);
+    });
+  }
+
+  it("discarding after a reactivation keeps the newer catalog state and saves nothing", async () => {
+    api.listLetterheads.mockResolvedValueOnce([ASISTENTE, { ...OLIVIA, is_active: false }]).mockResolvedValue([ASISTENTE, OLIVIA]);
+    assignmentsOnceThenPending(withOlivia(false));
+    api.updateLetterhead.mockResolvedValue(OLIVIA);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("button", { name: "Bajar Asistente de ventas" }));
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Reactivar Olivia Banda" }));
+    expect(await within(panel).findByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    await user.click(within(panel).getByRole("button", { name: "Descartar cambios" }));
+    // The cached confirmed state is restored, but it is not a new read: the catalog still wins.
+    expect(within(panel).getByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
+    // Discarding restores the order and leaves nothing pending.
+    expect(within(panel).queryByText("Hay cambios sin guardar.")).toBeNull();
+    expect((within(panel).getByRole("button", { name: "Subir Asistente de ventas" }) as HTMLButtonElement).disabled).toBe(true);
+    // A valid default stays selected.
+    expect((within(panel).getByRole("radio", { name: "Asistente de ventas" }) as HTMLInputElement).checked).toBe(true);
+    expect(api.replaceReportLetterheadAssignments).not.toHaveBeenCalled();
+  });
+
+  it("discarding after a deactivation never offers the inactive letterhead as default", async () => {
+    api.listLetterheads.mockResolvedValueOnce([ASISTENTE, OLIVIA]).mockResolvedValue([{ ...ASISTENTE, is_active: false }, OLIVIA]);
+    assignmentsOnceThenPending(withOlivia(true));
+    api.updateLetterhead.mockResolvedValue({ ...ASISTENTE, is_active: false });
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("button", { name: "Bajar Asistente de ventas" }));
+    await user.click(screen.getByRole("button", { name: "Desactivar Asistente de ventas" }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Desactivar membrete" }));
+    await waitFor(() => expect(within(panel).queryByRole("radio", { name: "Asistente de ventas" })).toBeNull());
+    await user.click(within(panel).getByRole("button", { name: "Descartar cambios" }));
+    expect(within(panel).queryByRole("radio", { name: "Asistente de ventas" })).toBeNull();
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+    expect(within(panel).getByText(/El membrete predeterminado ya no está activo o disponible/)).toBeTruthy();
+    expect(within(panel).getByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(api.replaceReportLetterheadAssignments).not.toHaveBeenCalled();
+  });
+
+  it("shows a renamed letterhead and its new version in a draft and after discarding", async () => {
+    const renamed = {
+      ...OLIVIA, display_name: "Olivia Banda Ventas",
+      current_version: { ...OLIVIA.current_version!, version: 2 }, version_count: 2,
+    };
+    api.listLetterheads.mockResolvedValueOnce([ASISTENTE, OLIVIA]).mockResolvedValue([ASISTENTE, renamed]);
+    assignmentsOnceThenPending(withOlivia(true));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("button", { name: "Bajar Asistente de ventas" }));
+    // Any catalog refresh brings the new metadata; here, saving another report.
+    await user.click(screen.getByRole("tab", { name: "Descuento" }));
+    const descuento = screen.getByRole("tabpanel", { name: "Descuento" });
+    api.replaceReportLetterheadAssignments.mockResolvedValueOnce(assignments("PRUEBA_DESCUENTO", { revision: "d2" }));
+    await user.click(await within(descuento).findByRole("checkbox", { name: /Asistente de ventas/ }));
+    await user.click(within(descuento).getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("tab", { name: "Cotización" }));
+    const oliviaRow = async () => (await within(panel).findByRole("checkbox", { name: /Olivia Banda Ventas/ })).closest("li") as HTMLElement;
+    expect(within(await oliviaRow()).getByText("Versión 2")).toBeTruthy();
+    expect(within(panel).getByText("Hay cambios sin guardar.")).toBeTruthy();
+    await user.click(within(panel).getByRole("button", { name: "Descartar cambios" }));
+    expect(within(await oliviaRow()).getByText("Versión 2")).toBeTruthy();
+    expect(within(panel).getByRole("radio", { name: "Olivia Banda Ventas" })).toBeTruthy();
+    expect(api.replaceReportLetterheadAssignments).toHaveBeenCalledTimes(1);
+    expect(api.replaceReportLetterheadAssignments).toHaveBeenCalledWith("PRUEBA_DESCUENTO", expect.anything());
+  });
+
+  it("offers no discard without pending changes, and a discard re-reads the server for real", async () => {
+    api.listLetterheads.mockResolvedValue([ASISTENTE, OLIVIA]);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByText("Membretes disponibles y orden");
+    expect((within(panel).getByRole("button", { name: "Descartar cambios" }) as HTMLButtonElement).disabled).toBe(true);
+    const reads = () => api.getReportLetterheadAssignments.mock.calls.filter(([code]) => code === "PRUEBA_COTIZACION").length;
+    const before = reads();
+    await user.click(within(panel).getByRole("checkbox", { name: /Olivia Banda/ }));
+    await user.click(within(panel).getByRole("button", { name: "Descartar cambios" }));
+    expect(within(panel).getByRole("checkbox", { name: /Olivia Banda/ })).toHaveProperty("checked", false);
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    expect(api.replaceReportLetterheadAssignments).not.toHaveBeenCalled();
+  });
+});

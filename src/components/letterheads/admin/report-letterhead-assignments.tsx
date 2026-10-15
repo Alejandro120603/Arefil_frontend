@@ -19,40 +19,63 @@ import {
 import type { LetterheadAdmin, ReportLetterheadAssignments } from "@/types/letterhead-admin";
 
 interface EditorState {
+  /** Last state confirmed by the backend (a GET or the PUT response). */
   server: ReportLetterheadAssignments;
-  /** When `server` was read (same clock as the catalog's `catalogLoadedAt`). */
-  loadedAt: number;
+  /**
+   * When `server` was actually received (same clock as the catalog's
+   * `catalogLoadedAt`). It only advances with a real response — restoring
+   * the cached `server` (discard) is not a new read.
+   */
+  serverReadAt: number;
+  /** The draft: availability and order of each row, plus the default. */
   rows: AssignmentRow[];
   defaultId: number | null;
 }
 
-function editorState(server: ReportLetterheadAssignments): EditorState {
-  return {
-    server,
-    loadedAt: performance.now(),
-    rows: buildAssignmentRows(server.assignments, []),
-    defaultId: server.default_letterhead_id,
-  };
+/** Editor state for a response that has just arrived from the backend. */
+function receivedState(server: ReportLetterheadAssignments): EditorState {
+  return { server, serverReadAt: performance.now(), ...draftFrom(server) };
+}
+
+/** The draft equal to a confirmed state (no pending edits). */
+function draftFrom(server: ReportLetterheadAssignments): Pick<EditorState, "rows" | "defaultId"> {
+  return { rows: buildAssignmentRows(server.assignments, []), defaultId: server.default_letterhead_id };
 }
 
 /**
- * Rows completed with the catalog. When the catalog was read after the
- * assignments (`catalogIsNewer`), name, letterhead state and current version
- * follow it — the admin's own choices (availability, order) and the revision
- * they were made against stay untouched. An older catalog never overrides a
- * fresher assignment read. Catalog letterheads the editor does not list yet
+ * The draft rows with their letterhead metadata (name, state, current
+ * version) taken from the freshest source, recomputed on every render and
+ * never stored in the draft: the catalog when it was read after the last
+ * backend response for these assignments, otherwise that response. The
+ * admin's own choices (availability, order) and the revision they were made
+ * against stay untouched. Catalog letterheads the editor does not list yet
  * are appended as "not assigned".
  */
-function withCatalog(rows: AssignmentRow[], catalog: LetterheadAdmin[], catalogIsNewer: boolean): AssignmentRow[] {
+function withCatalog(
+  rows: AssignmentRow[],
+  catalog: LetterheadAdmin[],
+  server: ReportLetterheadAssignments,
+  catalogIsNewer: boolean,
+): AssignmentRow[] {
   const byId = new Map(catalog.map((letterhead) => [letterhead.id, letterhead]));
-  const refreshed = !catalogIsNewer ? rows : rows.map((row) => {
+  const confirmed = new Map(server.assignments.map((item) => [item.letterhead_id, item]));
+  const refreshed = rows.map((row) => {
     const latest = byId.get(row.letterhead_id);
-    if (latest == null) return row;
+    if (latest != null && (catalogIsNewer || !confirmed.has(row.letterhead_id))) {
+      return {
+        ...row,
+        display_name: latest.display_name,
+        letterhead_is_active: latest.is_active,
+        current_version: latest.current_version?.version ?? null,
+      };
+    }
+    const item = confirmed.get(row.letterhead_id);
+    if (item == null) return row;
     return {
       ...row,
-      display_name: latest.display_name,
-      letterhead_is_active: latest.is_active,
-      current_version: latest.current_version?.version ?? null,
+      display_name: item.display_name,
+      letterhead_is_active: item.letterhead_is_active,
+      current_version: item.current_version,
     };
   });
   const known = new Set(rows.map((row) => row.letterhead_id));
@@ -106,7 +129,7 @@ export function ReportLetterheadAssignmentsEditor({
   const hasStateRef = useRef(false);
 
   const rows = useMemo(
-    () => (state != null ? withCatalog(state.rows, catalog, catalogLoadedAt > state.loadedAt) : []),
+    () => (state != null ? withCatalog(state.rows, catalog, state.server, catalogLoadedAt > state.serverReadAt) : []),
     [catalog, catalogLoadedAt, state],
   );
   const dirty = state != null && initial != null && snapshot(rows, state.defaultId) !== initial;
@@ -117,7 +140,7 @@ export function ReportLetterheadAssignmentsEditor({
   }, [dirty, state]);
 
   const apply = useCallback((server: ReportLetterheadAssignments) => {
-    const next = editorState(server);
+    const next = receivedState(server);
     setState(next);
     setInitial(snapshot(next.rows, next.defaultId));
   }, []);
@@ -170,11 +193,20 @@ export function ReportLetterheadAssignmentsEditor({
     update(nextRows, state.defaultId);
   }
 
+  /**
+   * Drops the pending edits only. The confirmed state and the time it was
+   * read are kept as they are (restoring a cached value is not a new read),
+   * so newer catalog metadata keeps winning; then a real re-read is asked
+   * for, which applies because there is no draft any more. Nothing is saved.
+   */
   function discard() {
     if (state == null) return;
-    apply(state.server);
+    setState({ ...state, ...draftFrom(state.server) });
+    dirtyRef.current = false;
     setSaveError(null);
     setNotice(null);
+    setRefreshError(null);
+    setManualReload((value) => value + 1);
   }
 
   /** Read the server again without discarding the draft (it is applied only if there is none). */
