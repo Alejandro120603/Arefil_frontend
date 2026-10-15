@@ -21,7 +21,7 @@ export function LetterheadCatalogCard({
   onChanged,
 }: {
   letterhead: LetterheadAdmin;
-  onChanged: (updated: LetterheadAdmin, message: string, issuedAt: number) => void;
+  onChanged: (updated: LetterheadAdmin, message: string, confirmedAt: number) => void;
 }) {
   const current = letterhead.current_version;
   const thumbnail = letterheadThumbnailAsset(letterhead);

@@ -78,7 +78,8 @@ describe("LetterheadDetail", () => {
     expect(within(details).getByText("1".repeat(64))).toBeTruthy();
     // History is read-only: no delete or overwrite action anywhere.
     expect(screen.queryByRole("button", { name: /eliminar|borrar|sobrescribir/i })).toBeNull();
-    expect(fetchProtectedImage).toHaveBeenCalledWith("/admin/letterheads/3/versions/1/thumbnail", expect.anything());
+    // Thumbnails load from effects; wait for them instead of racing their flush.
+    await waitFor(() => expect(fetchProtectedImage).toHaveBeenCalledWith("/admin/letterheads/3/versions/1/thumbnail", expect.anything()));
   });
 
   it("downloads the original XLSX of a historical version", async () => {

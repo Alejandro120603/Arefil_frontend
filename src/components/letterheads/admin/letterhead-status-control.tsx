@@ -29,8 +29,8 @@ export function LetterheadStatusControl({
   disabled = false,
 }: {
   letterhead: LetterheadAdmin;
-  /** `issuedAt`: when the confirmed PATCH was issued (see `freshnessClock`). */
-  onChanged: (updated: LetterheadAdmin, message: string, issuedAt: number) => void;
+  /** `confirmedAt`: when the PATCH's success arrived (see `freshnessClock`). */
+  onChanged: (updated: LetterheadAdmin, message: string, confirmedAt: number) => void;
   disabled?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -43,16 +43,17 @@ export function LetterheadStatusControl({
     savingRef.current = true;
     setSaving(true);
     setError(null);
-    const issuedAt = freshnessClock();
     try {
       const updated = await updateLetterhead(letterhead.id, { is_active: active });
+      // Stamped at confirmation: reads issued while it was pending are older.
+      const confirmedAt = freshnessClock();
       setConfirming(false);
       onChanged(
         updated,
         active
           ? `«${updated.display_name}» está activo de nuevo y puede ofrecerse en los reportes donde esté disponible.`
           : `«${updated.display_name}» fue desactivado. Las ejecuciones ya generadas conservan su versión.`,
-        issuedAt,
+        confirmedAt,
       );
     } catch (changeError) {
       setError(getUserErrorMessage(changeError, "No se pudo cambiar el estado del membrete."));

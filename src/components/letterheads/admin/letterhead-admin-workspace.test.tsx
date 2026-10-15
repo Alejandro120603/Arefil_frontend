@@ -734,6 +734,206 @@ describe("report assignments — a confirmed status change is fresh data", () =>
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => { resolve = res; });
-  return { promise, resolve };
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
 }
+
+describe("report assignments — reads concurrent with a pending status change", () => {
+  const oliviaAssignment = (active: boolean) => ({
+    letterhead_id: 2, slug: "olivia-banda", display_name: "Olivia Banda", letterhead_is_active: active,
+    is_active: true, is_default: false, display_order: 1, current_version: 1, offered: active,
+  });
+  const cotizacionWithOlivia = (active: boolean): ReportLetterheadAssignments => ({
+    ...COTIZACION_STATE, assignments: [...COTIZACION_STATE.assignments, oliviaAssignment(active)],
+  });
+
+  /**
+   * Catalog read #1 answers `initial`; read #2 (started while the PATCH is
+   * pending) is `concurrent`; later reads follow `after`. Cotización's
+   * assignment reads: #1 answers `initialAssignments`, later ones follow
+   * `afterAssignments`. Descuento always answers, and saving it is how a
+   * read is started while the PATCH is pending.
+   */
+  function scenario(options: {
+    initial: LetterheadAdmin[];
+    concurrent: Promise<LetterheadAdmin[]>;
+    after: () => Promise<LetterheadAdmin[]>;
+    initialAssignments: ReportLetterheadAssignments;
+    afterAssignments: () => Promise<ReportLetterheadAssignments>;
+  }) {
+    let catalogCalls = 0;
+    api.listLetterheads.mockImplementation(() => {
+      catalogCalls += 1;
+      if (catalogCalls === 1) return Promise.resolve(options.initial);
+      if (catalogCalls === 2) return options.concurrent;
+      return options.after();
+    });
+    let cotizacionCalls = 0;
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => {
+      if (code !== "PRUEBA_COTIZACION") return Promise.resolve(assignments(code));
+      cotizacionCalls += 1;
+      return cotizacionCalls === 1 ? Promise.resolve(options.initialAssignments) : options.afterAssignments();
+    });
+    api.replaceReportLetterheadAssignments.mockImplementation((code: string) =>
+      Promise.resolve(assignments(code, { revision: `${code}-saved` })));
+    return { catalogCalls: () => catalogCalls };
+  }
+
+  /** Saves Descuento, which re-reads the catalog (works behind a modal dialog too). */
+  async function startConcurrentRead(user: ReturnType<typeof userEvent.setup>, calls: () => number) {
+    const before = calls();
+    await user.click(screen.getByRole("tab", { name: "Descuento", hidden: true }));
+    const descuento = screen.getByRole("tabpanel", { name: "Descuento", hidden: true });
+    await user.click(await within(descuento).findByRole("checkbox", { name: /Asistente de ventas/, hidden: true }));
+    await user.click(within(descuento).getByRole("button", { name: "Guardar cambios", hidden: true }));
+    await waitFor(() => expect(calls()).toBe(before + 1));
+    await user.click(screen.getByRole("tab", { name: "Cotización", hidden: true }));
+  }
+
+  const pending = <T,>() => new Promise<T>(() => undefined);
+  const failing = <T,>() => Promise.reject<T>(new ApiError(503, "Servicio no disponible."));
+
+  it("A: a stale read answering before the PATCH confirms does not hide the reactivation", async () => {
+    const concurrent = deferred<LetterheadAdmin[]>();
+    const patch = deferred<LetterheadAdmin>();
+    const { catalogCalls } = scenario({
+      initial: [ASISTENTE, { ...OLIVIA, is_active: false }], concurrent: concurrent.promise, after: failing,
+      initialAssignments: cotizacionWithOlivia(false), afterAssignments: failing,
+    });
+    api.updateLetterhead.mockReturnValue(patch.promise);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByText("Membrete inactivo");
+    await user.click(screen.getByRole("button", { name: "Reactivar Olivia Banda" }));
+    await startConcurrentRead(user, catalogCalls);
+    await act(async () => concurrent.resolve([ASISTENTE, { ...OLIVIA, is_active: false }]));
+    await act(async () => patch.resolve(OLIVIA));
+    // Follow-up reads fail: the confirmed result must still be what is shown.
+    expect(await screen.findByRole("button", { name: "Desactivar Olivia Banda" })).toBeTruthy();
+    expect(await within(panel).findByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
+  });
+
+  it("B: a stale read answering after the PATCH confirms does not undo the reactivation", async () => {
+    const concurrent = deferred<LetterheadAdmin[]>();
+    const patch = deferred<LetterheadAdmin>();
+    const { catalogCalls } = scenario({
+      initial: [ASISTENTE, { ...OLIVIA, is_active: false }], concurrent: concurrent.promise, after: pending,
+      initialAssignments: cotizacionWithOlivia(false), afterAssignments: pending,
+    });
+    api.updateLetterhead.mockReturnValue(patch.promise);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByText("Membrete inactivo");
+    await user.click(screen.getByRole("button", { name: "Reactivar Olivia Banda" }));
+    await startConcurrentRead(user, catalogCalls);
+    await act(async () => patch.resolve(OLIVIA));
+    expect(await within(panel).findByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    await act(async () => concurrent.resolve([ASISTENTE, { ...OLIVIA, is_active: false }]));
+    expect(screen.getByRole("button", { name: "Desactivar Olivia Banda" })).toBeTruthy();
+    expect(within(panel).getByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
+  });
+
+  it("C/G: a read issued after the confirmation applies newer changes, another admin's included", async () => {
+    const concurrent = deferred<LetterheadAdmin[]>();
+    const patch = deferred<LetterheadAdmin>();
+    const otherAdmin = { ...OLIVIA, display_name: "Olivia Banda Ventas" };
+    const { catalogCalls } = scenario({
+      initial: [ASISTENTE, { ...OLIVIA, is_active: false }], concurrent: concurrent.promise,
+      after: () => Promise.resolve([ASISTENTE, otherAdmin]),
+      initialAssignments: cotizacionWithOlivia(false), afterAssignments: pending,
+    });
+    api.updateLetterhead.mockReturnValue(patch.promise);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByText("Membrete inactivo");
+    await user.click(screen.getByRole("button", { name: "Reactivar Olivia Banda" }));
+    await startConcurrentRead(user, catalogCalls);
+    await act(async () => patch.resolve(OLIVIA));
+    // The follow-up read was issued after the confirmation: its newer data wins.
+    expect(await screen.findByRole("heading", { name: "Olivia Banda Ventas" })).toBeTruthy();
+    expect(await within(panel).findByRole("radio", { name: "Olivia Banda Ventas" })).toBeTruthy();
+    // The stale concurrent read answering last changes nothing.
+    await act(async () => concurrent.resolve([ASISTENTE, { ...OLIVIA, is_active: false }]));
+    expect(screen.getByRole("heading", { name: "Olivia Banda Ventas" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Desactivar Olivia Banda Ventas" })).toBeTruthy();
+  });
+
+  it("D: a failed reactivation records nothing, even with reads around it", async () => {
+    const concurrent = deferred<LetterheadAdmin[]>();
+    const patch = deferred<LetterheadAdmin>();
+    const { catalogCalls } = scenario({
+      initial: [ASISTENTE, { ...OLIVIA, is_active: false }], concurrent: concurrent.promise, after: pending,
+      initialAssignments: cotizacionWithOlivia(false), afterAssignments: pending,
+    });
+    api.updateLetterhead.mockReturnValue(patch.promise);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByText("Membrete inactivo");
+    await user.click(screen.getByRole("button", { name: "Reactivar Olivia Banda" }));
+    await startConcurrentRead(user, catalogCalls);
+    await act(async () => patch.reject(new ApiError(409, { code: "letterhead_conflict", message: "No se pudo reactivar." })));
+    expect(await screen.findByText("No se pudo reactivar.")).toBeTruthy();
+    await act(async () => concurrent.resolve([ASISTENTE, { ...OLIVIA, is_active: false }]));
+    expect(screen.getByRole("button", { name: "Reactivar Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByRole("radio", { name: "Olivia Banda" })).toBeNull();
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+  });
+
+  it("E: the same holds for a deactivation (stale read before and after the confirmation)", async () => {
+    const concurrent = deferred<LetterheadAdmin[]>();
+    const patch = deferred<LetterheadAdmin>();
+    const { catalogCalls } = scenario({
+      initial: [ASISTENTE, OLIVIA], concurrent: concurrent.promise, after: failing,
+      initialAssignments: cotizacionWithOlivia(true), afterAssignments: failing,
+    });
+    api.updateLetterhead.mockReturnValue(patch.promise);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    expect(await within(panel).findByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Desactivar Olivia Banda" }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Desactivar membrete" }));
+    await startConcurrentRead(user, catalogCalls);
+    await act(async () => concurrent.resolve([ASISTENTE, OLIVIA]));
+    await act(async () => patch.resolve({ ...OLIVIA, is_active: false }));
+    expect(await screen.findByRole("button", { name: "Reactivar Olivia Banda" })).toBeTruthy();
+    await waitFor(() => expect(within(panel).queryByRole("radio", { name: "Olivia Banda" })).toBeNull());
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+  });
+
+  it("F: keeps the draft through concurrent reads, shows valid defaults, and discards without a PUT", async () => {
+    const concurrent = deferred<LetterheadAdmin[]>();
+    const patch = deferred<LetterheadAdmin>();
+    const { catalogCalls } = scenario({
+      initial: [ASISTENTE, { ...OLIVIA, is_active: false }], concurrent: concurrent.promise, after: failing,
+      initialAssignments: cotizacionWithOlivia(false), afterAssignments: pending,
+    });
+    api.updateLetterhead.mockReturnValue(patch.promise);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("button", { name: "Subir Olivia Banda" }));
+    await user.click(screen.getByRole("button", { name: "Reactivar Olivia Banda" }));
+    await startConcurrentRead(user, catalogCalls);
+    await act(async () => concurrent.resolve([ASISTENTE, { ...OLIVIA, is_active: false }]));
+    await act(async () => patch.resolve(OLIVIA));
+    expect(await within(panel).findByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(within(panel).getByText("Hay cambios sin guardar.")).toBeTruthy();
+    expect((within(panel).getByRole("button", { name: "Subir Olivia Banda" }) as HTMLButtonElement).disabled).toBe(true);
+    const putsBefore = api.replaceReportLetterheadAssignments.mock.calls.length;
+    await user.click(within(panel).getByRole("button", { name: "Descartar cambios" }));
+    expect(within(panel).getByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
+    expect(within(panel).queryByText("Hay cambios sin guardar.")).toBeNull();
+    // Only the explicit Descuento save ever sent a PUT.
+    expect(api.replaceReportLetterheadAssignments.mock.calls.length).toBe(putsBefore);
+    expect(api.replaceReportLetterheadAssignments.mock.calls.every(([code]) => code === "PRUEBA_DESCUENTO")).toBe(true);
+  });
+});

@@ -63,10 +63,10 @@ export function LetterheadAdminWorkspace() {
 
   const refresh = useCallback(() => setReloadToken((value) => value + 1), []);
 
-  const handleChanged = useCallback((updated: LetterheadAdmin, message: string, issuedAt: number) => {
+  const handleChanged = useCallback((updated: LetterheadAdmin, message: string, confirmedAt: number) => {
     // The PATCH response is confirmed data: it is shown (and wins over older
     // reads) right away, whether or not the follow-up reads succeed.
-    setSnapshot((current) => mergeConfirmedLetterhead(current, updated, issuedAt));
+    setSnapshot((current) => mergeConfirmedLetterhead(current, updated, confirmedAt));
     setNotice(message);
     // A deactivation also clears defaults on the server: re-read everything.
     refresh();

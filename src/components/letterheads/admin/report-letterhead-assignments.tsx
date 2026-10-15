@@ -23,9 +23,9 @@ interface EditorState {
   /** Last state confirmed by the backend (a GET or the PUT response). */
   server: ReportLetterheadAssignments;
   /**
-   * When the request that returned `server` was issued (`freshnessClock`).
-   * It only advances with a real response — restoring the cached `server`
-   * (discard) is not a new read.
+   * Freshness of `server` (`freshnessClock`): when its GET was issued, or
+   * when its PUT was confirmed. It only advances with a real response —
+   * restoring the cached `server` (discard) is not a new read.
    */
   serverReadAt: number;
   /** The draft: availability and order of each row, plus the default. */
@@ -33,9 +33,9 @@ interface EditorState {
   defaultId: number | null;
 }
 
-/** Editor state for a backend response to a request issued at `issuedAt`. */
-function receivedState(server: ReportLetterheadAssignments, issuedAt: number): EditorState {
-  return { server, serverReadAt: issuedAt, ...draftFrom(server) };
+/** Editor state for a backend response with freshness `stamp` (see `freshnessClock`). */
+function receivedState(server: ReportLetterheadAssignments, stamp: number): EditorState {
+  return { server, serverReadAt: stamp, ...draftFrom(server) };
 }
 
 /** The draft equal to a confirmed state (no pending edits). */
@@ -108,7 +108,7 @@ export function ReportLetterheadAssignmentsEditor({
   code: string;
   label: string;
   catalog: LetterheadAdmin[];
-  /** Per letterhead, when its catalog data was requested (`freshnessClock`). */
+  /** Per letterhead, freshness of its catalog data (`freshnessClock`: read issued or mutation confirmed). */
   catalogStamps: Record<number, number>;
   /** Changes when the catalog changed elsewhere on the page (state or new letterhead). */
   reloadToken: number;
@@ -145,8 +145,8 @@ export function ReportLetterheadAssignmentsEditor({
     serverReadAtRef.current = state?.serverReadAt ?? -Infinity;
   }, [dirty, state]);
 
-  const apply = useCallback((server: ReportLetterheadAssignments, issuedAt: number) => {
-    const next = receivedState(server, issuedAt);
+  const apply = useCallback((server: ReportLetterheadAssignments, stamp: number) => {
+    const next = receivedState(server, stamp);
     setState(next);
     setInitial(snapshot(next.rows, next.defaultId));
   }, []);
@@ -251,10 +251,11 @@ export function ReportLetterheadAssignmentsEditor({
     setSaving(true);
     setSaveError(null);
     setNotice(null);
-    const issuedAt = freshnessClock();
     try {
       const saved = await replaceReportLetterheadAssignments(code, body);
-      apply(saved, issuedAt);
+      // Same policy as any mutation: stamped at confirmation, so an
+      // assignment read issued while the PUT was pending cannot replace it.
+      apply(saved, freshnessClock());
       setNotice(`Se guardaron los membretes de ${label}.`);
       onSaved?.();
     } catch (error) {

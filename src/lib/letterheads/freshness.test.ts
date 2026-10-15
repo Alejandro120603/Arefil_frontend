@@ -20,4 +20,17 @@ describe("letterhead freshness", () => {
     expect(mergeConfirmedLetterhead(base, item(1, false), 30)).toBe(base);
     expect(mergeConfirmedLetterhead(null, item(1, false), 50)).toBeNull();
   });
+
+  it("a mutation confirmed after a concurrent read wins over that read, a later read wins over it", () => {
+    const base = mergeCatalogRead(null, [item(1, false)], 10);
+    // PATCH issued at 20; a read issued at 25 (while pending) answers with the old state.
+    const concurrent = mergeCatalogRead(base, [item(1, false)], 25);
+    // The PATCH is confirmed at 30: stamped at confirmation, it wins.
+    const confirmed = mergeConfirmedLetterhead(concurrent, item(1, true), 30);
+    expect(confirmed?.items[0].is_active).toBe(true);
+    // The same concurrent read answering again (late) cannot undo it…
+    expect(mergeCatalogRead(confirmed, [item(1, false)], 25).items[0].is_active).toBe(true);
+    // …but a read issued after the confirmation is newer (another admin's change).
+    expect(mergeCatalogRead(confirmed, [item(1, false)], 40).items[0].is_active).toBe(false);
+  });
 });

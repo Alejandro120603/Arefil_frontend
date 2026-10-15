@@ -1,12 +1,21 @@
 import type { LetterheadAdmin } from "@/types/letterhead-admin";
 
 /**
- * One freshness policy for the letterhead administration: every piece of
- * confirmed data is stamped with the moment its request was *issued*, on a
- * single monotonic clock. Data from a request issued later is newer, even if
- * an older request answers after it — so a GET started before a PATCH can
- * never override the PATCH's confirmed result. Restoring cached data or an
- * optimistic guess never gets a new stamp.
+ * One freshness policy for the letterhead administration, on a single
+ * monotonic clock, stamped per letterhead:
+ *
+ * - A **read** (GET) is stamped when it is *issued*. Its data is at least as
+ *   new as that moment, never older.
+ * - A **mutation** (PATCH, PUT) is stamped when its success is *confirmed*
+ *   (the response arrived). A read issued before that moment — before the
+ *   mutation started, or while it was still pending — may have been served
+ *   the pre-mutation state, so it is older than the confirmed result and can
+ *   never override it, whenever it answers. Only a read issued after the
+ *   confirmation is newer, so later changes (another administrator's
+ *   included) are picked up as soon as such a read answers.
+ *
+ * Failed mutations, optimistic guesses and restored cached data never get a
+ * stamp.
  */
 export function freshnessClock(): number {
   return performance.now();
@@ -38,17 +47,21 @@ export function mergeCatalogRead(
   return { items: merged, stamps };
 }
 
-/** Records one letterhead confirmed by a mutation issued at `issuedAt` (never an optimistic value). */
+/**
+ * Records one letterhead returned by a successful mutation, stamped at its
+ * confirmation (`confirmedAt`, never an optimistic value). Only data from a
+ * read issued after that confirmation is kept instead.
+ */
 export function mergeConfirmedLetterhead(
   current: CatalogSnapshot | null,
   confirmed: LetterheadAdmin,
-  issuedAt: number,
+  confirmedAt: number,
 ): CatalogSnapshot | null {
   if (current == null) return current;
   const previousStamp = current.stamps[confirmed.id];
-  if (previousStamp != null && previousStamp > issuedAt) return current;
+  if (previousStamp != null && previousStamp > confirmedAt) return current;
   return {
     items: current.items.map((item) => (item.id === confirmed.id ? confirmed : item)),
-    stamps: { ...current.stamps, [confirmed.id]: issuedAt },
+    stamps: { ...current.stamps, [confirmed.id]: confirmedAt },
   };
 }
