@@ -195,6 +195,9 @@ export function ReportLetterheadAssignmentsEditor({
 
   function update(nextRows: AssignmentRow[], defaultId: number | null) {
     if (state == null) return;
+    // Marked right away, before any in-flight read can answer; the effect
+    // above sets the real value after render (false again if undone).
+    dirtyRef.current = true;
     setState({ ...state, rows: nextRows, defaultId });
     setNotice(null);
     setSaveError(null);

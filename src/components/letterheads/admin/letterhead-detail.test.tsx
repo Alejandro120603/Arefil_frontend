@@ -295,3 +295,33 @@ describe("P2-2 — a confirmed upload is shown right away", () => {
     expect(historyVersions()).toEqual(["Versión 3", "Versión 2", "Versión 1"]);
   });
 });
+
+describe("final round — a late upload response never demotes a newer version", () => {
+  it("keeps version 4 (another admin's) current when our version 3 response arrives last", async () => {
+    let finishUpload!: (value: unknown) => void;
+    api.uploadLetterheadVersion.mockReturnValue(new Promise((resolve) => { finishUpload = resolve; }));
+    api.updateLetterhead.mockResolvedValue({ ...IVAN, display_name: "Iván V." });
+    const V3 = version(3, false);
+    const V4 = version(4, true);
+    const user = userEvent.setup();
+    render(<LetterheadDetail id={3} />);
+    await screen.findByText("Versión vigente: 2");
+    await user.upload(screen.getByLabelText("Archivo XLSX"), xlsx());
+    await user.click(screen.getByRole("button", { name: "Subir nueva versión" }));
+    // While it is pending, a rename re-reads: another admin already uploaded version 4.
+    api.getLetterhead.mockResolvedValue({ ...IVAN, display_name: "Iván V.", current_version: V4, version_count: 4 });
+    api.listLetterheadVersions.mockResolvedValue([V4, V3, V2, V1]);
+    const name = screen.getByLabelText("Nombre visible");
+    await user.clear(name);
+    await user.type(name, "Iván V.");
+    await user.click(screen.getByRole("button", { name: "Guardar nombre" }));
+    expect(await screen.findByText("Versión vigente: 4")).toBeTruthy();
+    api.getLetterhead.mockReturnValue(new Promise(() => undefined));
+    await act(async () => finishUpload({ ...version(3, true), created: true }));
+    expect(screen.getByText("Versión vigente: 4")).toBeTruthy();
+    const history = screen.getByRole("heading", { name: "Historial de versiones" }).closest("[data-slot=card]") as HTMLElement;
+    expect(within(history).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(["Versión 4", "Versión 3", "Versión 2", "Versión 1"]);
+    expect(screen.getByText(/Crea la versión 5/)).toBeTruthy();
+  });
+});

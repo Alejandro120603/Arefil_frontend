@@ -153,4 +153,12 @@ describe("applyUploadedVersion", () => {
   it("changes nothing for an identical file", () => {
     expect(applyUploadedVersion(base, { ...v(2, true), created: false })).toBe(base);
   });
+
+  it("adds an older confirmed version to the history without making it current", () => {
+    const newer = { ...base, letterhead: { ...base.letterhead, current_version: v(4, true), version_count: 3 }, versions: [v(4, true), v(2, false), v(1, false)] };
+    const next = applyUploadedVersion(newer, { ...v(3, true), created: true });
+    expect(next.letterhead.current_version?.version).toBe(4);
+    expect(next.letterhead.version_count).toBe(4);
+    expect(next.versions.map((item) => [item.version, item.is_current])).toEqual([[4, true], [3, false], [2, false], [1, false]]);
+  });
 });

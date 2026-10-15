@@ -78,7 +78,9 @@ export function LetterheadAdminWorkspace() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-end gap-2">
         {!creating && (
-          <Button type="button" disabled={loadError === FORBIDDEN_MESSAGE} onClick={() => { setCreating(true); setNotice(null); }}>
+          // Creation waits for the first successful catalog load, so its
+          // confirmed result always has a catalog to join.
+          <Button type="button" disabled={catalog == null} onClick={() => { setCreating(true); setNotice(null); }}>
             <Plus /> Nuevo membrete
           </Button>
         )}

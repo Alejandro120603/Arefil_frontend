@@ -216,9 +216,11 @@ export function offeredLetterheadReports(letterhead: LetterheadAdmin): Letterhea
 }
 
 /**
- * The detail state after a confirmed upload. A new version becomes the
- * current one, heads the history once (never duplicated) and bumps the
- * count; an identical file (`created: false`) changes nothing.
+ * The detail state after a confirmed upload. A new version joins the
+ * history once (never duplicated) and bumps the count; it becomes the
+ * current one unless a higher version is already shown (another upload
+ * confirmed or read meanwhile), which is never demoted. An identical file
+ * (`created: false`) changes nothing.
  */
 export function applyUploadedVersion(
   current: { letterhead: LetterheadAdmin; versions: LetterheadVersion[] },
@@ -227,15 +229,17 @@ export function applyUploadedVersion(
   if (!uploaded.created) return current;
   const { created: _created, ...stored } = uploaded;
   void _created;
-  const version: LetterheadVersion = { ...stored, is_current: true };
+  const shown = current.letterhead.current_version;
+  const becomesCurrent = shown == null || stored.version >= shown.version;
+  const version: LetterheadVersion = { ...stored, is_current: becomesCurrent };
   const known = current.versions.some((item) => item.id === version.id);
   const others = current.versions
     .filter((item) => item.id !== version.id)
-    .map((item) => ({ ...item, is_current: false }));
+    .map((item) => (becomesCurrent ? { ...item, is_current: false } : item));
   return {
     letterhead: {
       ...current.letterhead,
-      current_version: version,
+      current_version: becomesCurrent ? version : shown,
       version_count: known ? current.letterhead.version_count : current.letterhead.version_count + 1,
     },
     versions: [version, ...others].sort((a, b) => b.version - a.version),

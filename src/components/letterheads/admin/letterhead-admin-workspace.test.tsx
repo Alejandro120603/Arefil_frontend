@@ -1107,3 +1107,94 @@ describe("P2-3 — a confirmed creation is in the catalog right away", () => {
     expect(api.listLetterheads).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("final round — creation waits for the catalog; drafts are marked synchronously", () => {
+  it("keeps «Nuevo membrete» disabled until the first catalog load succeeds, with a retry on failure", async () => {
+    const first = deferred<LetterheadAdmin[]>();
+    // Queued answers left over by earlier tests must not leak into this one.
+    api.listLetterheads.mockReset();
+    api.listLetterheads.mockReturnValueOnce(first.promise)
+      .mockRejectedValueOnce(new ApiError(503, "Servicio no disponible."))
+      .mockResolvedValueOnce([ASISTENTE])
+      // After the creation the server lists it too.
+      .mockResolvedValue([ASISTENTE, letterhead(5, "Iván Vázquez")]);
+    api.createLetterhead.mockResolvedValue(letterhead(5, "Iván Vázquez"));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    expect((screen.getByRole("button", { name: "Nuevo membrete" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => first.reject(new ApiError(503, "Servicio no disponible.")));
+    expect(await screen.findByText("Servicio no disponible.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Nuevo membrete" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Reintentar" }));
+    expect(await screen.findByText("Servicio no disponible.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Nuevo membrete" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Reintentar" }));
+    await screen.findByRole("heading", { name: "Asistente de ventas" });
+    const create = screen.getByRole("button", { name: "Nuevo membrete" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(false);
+    await user.click(create);
+    await user.type(screen.getByLabelText("Nombre visible *"), "Iván Vázquez");
+    await user.upload(screen.getByLabelText("Archivo XLSX *"), xlsx());
+    await user.click(screen.getByRole("button", { name: "Crear membrete" }));
+    expect(await screen.findByRole("heading", { name: "Iván Vázquez" })).toBeTruthy();
+  });
+
+  it("an edit marks the draft before a pending background read can answer", async () => {
+    api.listLetterheads.mockResolvedValue([ASISTENTE, OLIVIA]);
+    const background = deferred<ReportLetterheadAssignments>();
+    let calls = 0;
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => {
+      if (code !== "PRUEBA_COTIZACION") return Promise.resolve(assignments(code, { revision: `${code}-${calls}` }));
+      calls += 1;
+      return calls === 1 ? Promise.resolve(COTIZACION_STATE) : background.promise;
+    });
+    api.replaceReportLetterheadAssignments.mockResolvedValue(assignments("PRUEBA_DESCUENTO", { revision: "d2" }));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByRole("checkbox", { name: /Olivia Banda/ });
+    // Saving Descuento starts a background read of Cotización that stays pending.
+    await user.click(screen.getByRole("tab", { name: "Descuento" }));
+    const descuento = screen.getByRole("tabpanel", { name: "Descuento" });
+    await user.click(await within(descuento).findByRole("checkbox", { name: /Asistente de ventas/ }));
+    await user.click(within(descuento).getByRole("button", { name: "Guardar cambios" }));
+    await waitFor(() => expect(calls).toBe(2));
+    await user.click(screen.getByRole("tab", { name: "Cotización" }));
+    const olivia = within(panel).getByRole("checkbox", { name: /Olivia Banda/ }) as HTMLInputElement;
+    // Edit and let the read answer in the same tick, before React runs its effects.
+    await act(async () => {
+      olivia.click();
+      background.resolve(COTIZACION_STATE);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect((within(panel).getByRole("checkbox", { name: /Olivia Banda/ }) as HTMLInputElement).checked).toBe(true);
+    expect(within(panel).getByText("Hay cambios sin guardar.")).toBeTruthy();
+  });
+
+  it("undoing an edit clears the marker, so later reads apply again", async () => {
+    api.listLetterheads.mockResolvedValue([ASISTENTE, OLIVIA]);
+    let calls = 0;
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => {
+      if (code !== "PRUEBA_COTIZACION") return Promise.resolve(assignments(code));
+      calls += 1;
+      return Promise.resolve(calls === 1 ? COTIZACION_STATE : { ...COTIZACION_STATE, revision: "r-later", default_letterhead_id: null,
+        assignments: [{ ...COTIZACION_STATE.assignments[0], is_default: false }] });
+    });
+    api.replaceReportLetterheadAssignments.mockResolvedValue(assignments("PRUEBA_DESCUENTO", { revision: "d2" }));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    const olivia = await within(panel).findByRole("checkbox", { name: /Olivia Banda/ });
+    await user.click(olivia);
+    await user.click(olivia);
+    expect(within(panel).queryByText("Hay cambios sin guardar.")).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "Descuento" }));
+    const descuento = screen.getByRole("tabpanel", { name: "Descuento" });
+    await user.click(await within(descuento).findByRole("checkbox", { name: /Asistente de ventas/ }));
+    await user.click(within(descuento).getByRole("button", { name: "Guardar cambios" }));
+    await user.click(screen.getByRole("tab", { name: "Cotización" }));
+    // No draft any more: the later read is applied (default back to «Sin membrete»).
+    await waitFor(() => expect((within(panel).getByRole("radio", { name: "Sin membrete — formato actual" }) as HTMLInputElement).checked).toBe(true));
+  });
+});
