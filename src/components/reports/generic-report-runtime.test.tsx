@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GenericReportRuntime } from "./generic-report-runtime";
 import { ApiError } from "@/lib/api/errors";
+import { XLSX_MEDIA_TYPE } from "@/lib/reports/report-excel-template";
 import type { ReportDefinition } from "@/types/api";
 const {
   executeReport, listAllReportParameterOptions, searchReportProductOptions, resolveReportProductOption,
@@ -228,7 +229,7 @@ describe("GenericReportRuntime", () => {
     // The document layer renders from the frozen execution snapshot, never
     // from the parameters the form still holds.
     downloadReportDocumentXlsx.mockResolvedValue({
-      blob: new Blob(["xlsx"]),
+      blob: new Blob(["xlsx"], { type: XLSX_MEDIA_TYPE }),
       filename: "COTIZACION-documento.xlsx",
     });
     await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
