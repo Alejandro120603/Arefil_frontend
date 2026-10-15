@@ -6,6 +6,8 @@
  * Parse them at render/format time (see `src/lib/format`).
  */
 
+import type { ReportExecutionPresentation } from "./letterhead-runtime";
+
 export type DecimalString = string;
 
 export interface PageMeta {
@@ -786,4 +788,9 @@ export interface ReportBuilderPreviewResponse {
   totals: Record<string, DecimalString | null>;
   row_count: number;
   truncated: boolean;
+  /**
+   * Presentation the backend froze in this execution (Backend #39): the
+   * authority for describing it afterwards. `letterhead: null` is «Sin membrete».
+   */
+  presentation?: ReportExecutionPresentation;
 }
