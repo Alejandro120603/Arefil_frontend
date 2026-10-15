@@ -1198,3 +1198,41 @@ describe("final round — creation waits for the catalog; drafts are marked sync
     await waitFor(() => expect((within(panel).getByRole("radio", { name: "Sin membrete — formato actual" }) as HTMLInputElement).checked).toBe(true));
   });
 });
+
+describe("closing — creation follows a later permission refusal", () => {
+  it("disables «Nuevo membrete» when a later refresh answers 403, and re-enables it after a successful one", async () => {
+    api.listLetterheads.mockReset();
+    api.listLetterheads
+      .mockResolvedValueOnce([ASISTENTE])
+      .mockRejectedValueOnce(new ApiError(403, "Permisos insuficientes."))
+      .mockResolvedValue([ASISTENTE]);
+    api.replaceReportLetterheadAssignments.mockImplementation((code: string) =>
+      Promise.resolve(assignments(code, { revision: `${code}-${Math.random()}` })));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    await screen.findByRole("heading", { name: "Asistente de ventas" });
+    expect((screen.getByRole("button", { name: "Nuevo membrete" }) as HTMLButtonElement).disabled).toBe(false);
+
+    async function saveDescuento() {
+      await user.click(screen.getByRole("tab", { name: "Descuento" }));
+      const descuento = screen.getByRole("tabpanel", { name: "Descuento" });
+      await user.click(await within(descuento).findByRole("checkbox", { name: /Asistente de ventas/ }));
+      await user.click(within(descuento).getByRole("button", { name: "Guardar cambios" }));
+    }
+
+    // A later refresh is refused: the catalog stays, creation does not.
+    await saveDescuento();
+    expect(await screen.findByText("No tienes permisos para administrar membretes.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Asistente de ventas" })).toBeTruthy();
+    const create = screen.getByRole("button", { name: "Nuevo membrete" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    await user.click(create);
+    expect(screen.queryByLabelText("Nombre visible *")).toBeNull();
+    expect(api.createLetterhead).not.toHaveBeenCalled();
+
+    // A later successful refresh restores it.
+    await saveDescuento();
+    await waitFor(() => expect(screen.queryByText("No tienes permisos para administrar membretes.")).toBeNull());
+    expect((screen.getByRole("button", { name: "Nuevo membrete" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
