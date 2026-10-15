@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import { updateLetterhead } from "@/lib/api/letterhead-admin";
+import { freshnessClock } from "@/lib/letterheads/freshness";
 import type { LetterheadAdmin } from "@/types/letterhead-admin";
 
 /**
@@ -28,7 +29,8 @@ export function LetterheadStatusControl({
   disabled = false,
 }: {
   letterhead: LetterheadAdmin;
-  onChanged: (updated: LetterheadAdmin, message: string) => void;
+  /** `issuedAt`: when the confirmed PATCH was issued (see `freshnessClock`). */
+  onChanged: (updated: LetterheadAdmin, message: string, issuedAt: number) => void;
   disabled?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -41,6 +43,7 @@ export function LetterheadStatusControl({
     savingRef.current = true;
     setSaving(true);
     setError(null);
+    const issuedAt = freshnessClock();
     try {
       const updated = await updateLetterhead(letterhead.id, { is_active: active });
       setConfirming(false);
@@ -49,6 +52,7 @@ export function LetterheadStatusControl({
         active
           ? `«${updated.display_name}» está activo de nuevo y puede ofrecerse en los reportes donde esté disponible.`
           : `«${updated.display_name}» fue desactivado. Las ejecuciones ya generadas conservan su versión.`,
+        issuedAt,
       );
     } catch (changeError) {
       setError(getUserErrorMessage(changeError, "No se pudo cambiar el estado del membrete."));

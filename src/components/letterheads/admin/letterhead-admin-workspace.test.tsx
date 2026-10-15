@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/errors";
@@ -546,3 +546,194 @@ describe("report assignments — discard and catalog sync", () => {
     expect(api.replaceReportLetterheadAssignments).not.toHaveBeenCalled();
   });
 });
+
+describe("report assignments — a confirmed status change is fresh data", () => {
+  const oliviaAssignment = (active: boolean) => ({
+    letterhead_id: 2, slug: "olivia-banda", display_name: "Olivia Banda", letterhead_is_active: active,
+    is_active: true, is_default: false, display_order: 1, current_version: 1, offered: active,
+  });
+  const cotizacionWithOlivia = (active: boolean): ReportLetterheadAssignments => ({
+    ...COTIZACION_STATE, assignments: [...COTIZACION_STATE.assignments, oliviaAssignment(active)],
+  });
+  /** First reads answer; every later read follows `later` (pending by default). */
+  function firstReadsThen(
+    catalog: LetterheadAdmin[],
+    cotizacion: ReportLetterheadAssignments,
+    later: () => Promise<never> = () => new Promise(() => undefined),
+  ) {
+    let catalogServed = false;
+    api.listLetterheads.mockImplementation(() => {
+      if (catalogServed) return later();
+      catalogServed = true;
+      return Promise.resolve(catalog);
+    });
+    let cotizacionServed = false;
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => {
+      if (code !== "PRUEBA_COTIZACION") return Promise.resolve(assignments(code));
+      if (cotizacionServed) return later();
+      cotizacionServed = true;
+      return Promise.resolve(cotizacion);
+    });
+  }
+  async function deactivate(user: ReturnType<typeof userEvent.setup>, name: string) {
+    await user.click(screen.getByRole("button", { name: `Desactivar ${name}` }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Desactivar membrete" }));
+  }
+
+  it("a confirmed deactivation stops being a default choice while the follow-up reads are pending", async () => {
+    firstReadsThen([ASISTENTE, OLIVIA], cotizacionWithOlivia(true));
+    api.updateLetterhead.mockResolvedValue({ ...ASISTENTE, is_active: false });
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    expect(await within(panel).findByRole("radio", { name: "Asistente de ventas" })).toBeTruthy();
+    await deactivate(user, "Asistente de ventas");
+    await waitFor(() => expect(within(panel).queryByRole("radio", { name: "Asistente de ventas" })).toBeNull());
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+    expect(within(panel).getByText(/El membrete predeterminado ya no está activo o disponible/)).toBeTruthy();
+    expect(within(panel).getByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(api.replaceReportLetterheadAssignments).not.toHaveBeenCalled();
+  });
+
+  it("a confirmed reactivation becomes a default choice while the follow-up reads are pending", async () => {
+    firstReadsThen([ASISTENTE, { ...OLIVIA, is_active: false }], cotizacionWithOlivia(false));
+    api.updateLetterhead.mockResolvedValue(OLIVIA);
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByText("Membrete inactivo");
+    expect(within(panel).queryByRole("radio", { name: "Olivia Banda" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Reactivar Olivia Banda" }));
+    expect(await within(panel).findByRole("radio", { name: "Olivia Banda" })).toBeTruthy();
+    expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
+    expect(api.replaceReportLetterheadAssignments).not.toHaveBeenCalled();
+  });
+
+  it("keeps the confirmed state when the follow-up reads fail", async () => {
+    firstReadsThen([ASISTENTE, OLIVIA], cotizacionWithOlivia(true), () => Promise.reject(new ApiError(503, "Servicio no disponible.")));
+    api.updateLetterhead.mockResolvedValue({ ...ASISTENTE, is_active: false });
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByRole("radio", { name: "Asistente de ventas" });
+    await deactivate(user, "Asistente de ventas");
+    await waitFor(() => expect(within(panel).queryByRole("radio", { name: "Asistente de ventas" })).toBeNull());
+    expect(await screen.findByRole("button", { name: "Reactivar Asistente de ventas" })).toBeTruthy();
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+  });
+
+  it("changes nothing when the PATCH fails", async () => {
+    firstReadsThen([ASISTENTE, OLIVIA], cotizacionWithOlivia(true));
+    api.updateLetterhead.mockRejectedValue(new ApiError(409, { code: "letterhead_conflict", message: "No se pudo desactivar." }));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByRole("radio", { name: "Asistente de ventas" });
+    await deactivate(user, "Asistente de ventas");
+    expect(await screen.findByText("No se pudo desactivar.")).toBeTruthy();
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(within(panel).getByRole("radio", { name: "Asistente de ventas" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Desactivar Asistente de ventas" })).toBeTruthy();
+    expect(within(panel).queryByText("Membrete inactivo")).toBeNull();
+    expect(api.listLetterheads).toHaveBeenCalledTimes(1);
+  });
+
+  it("an older read that answers after the PATCH does not undo it", async () => {
+    const olderCatalog = deferred<LetterheadAdmin[]>();
+    const olderCotizacion = deferred<ReportLetterheadAssignments>();
+    let catalogCalls = 0;
+    api.listLetterheads.mockImplementation(() => {
+      catalogCalls += 1;
+      if (catalogCalls === 1) return Promise.resolve([ASISTENTE, OLIVIA]);
+      if (catalogCalls === 2) return olderCatalog.promise;
+      return new Promise(() => undefined);
+    });
+    let cotizacionCalls = 0;
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => {
+      if (code !== "PRUEBA_COTIZACION") return Promise.resolve(assignments(code, { revision: `${code}-${Math.random()}` }));
+      cotizacionCalls += 1;
+      if (cotizacionCalls === 1) return Promise.resolve(cotizacionWithOlivia(true));
+      if (cotizacionCalls === 2) return olderCotizacion.promise;
+      return new Promise(() => undefined);
+    });
+    api.replaceReportLetterheadAssignments.mockResolvedValue(assignments("PRUEBA_DESCUENTO", { revision: "d2" }));
+    api.updateLetterhead.mockResolvedValue({ ...ASISTENTE, is_active: false });
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await within(panel).findByRole("radio", { name: "Asistente de ventas" });
+    // Saving Descuento starts reads (catalog + Cotización) that stay in flight…
+    await user.click(screen.getByRole("tab", { name: "Descuento" }));
+    const descuento = screen.getByRole("tabpanel", { name: "Descuento" });
+    await user.click(await within(descuento).findByRole("checkbox", { name: /Olivia Banda/ }));
+    await user.click(within(descuento).getByRole("button", { name: "Guardar cambios" }));
+    await waitFor(() => expect(catalogCalls).toBe(2));
+    await user.click(screen.getByRole("tab", { name: "Cotización" }));
+    // …then the deactivation is confirmed…
+    await deactivate(user, "Asistente de ventas");
+    await waitFor(() => expect(within(panel).queryByRole("radio", { name: "Asistente de ventas" })).toBeNull());
+    // …and the older reads answer last, with the pre-PATCH state.
+    await act(async () => {
+      olderCatalog.resolve([ASISTENTE, OLIVIA]);
+      olderCotizacion.resolve(cotizacionWithOlivia(true));
+    });
+    expect(screen.getByRole("button", { name: "Reactivar Asistente de ventas" })).toBeTruthy();
+    expect(within(panel).queryByRole("radio", { name: "Asistente de ventas" })).toBeNull();
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+  });
+
+  it("keeps a pending draft through the update, and discarding afterwards keeps the confirmed state", async () => {
+    firstReadsThen([ASISTENTE, OLIVIA], cotizacionWithOlivia(true));
+    api.updateLetterhead.mockResolvedValue({ ...ASISTENTE, is_active: false });
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("button", { name: "Subir Olivia Banda" }));
+    expect(within(panel).getByText("Hay cambios sin guardar.")).toBeTruthy();
+    await deactivate(user, "Asistente de ventas");
+    await waitFor(() => expect(within(panel).queryByRole("radio", { name: "Asistente de ventas" })).toBeNull());
+    expect(within(panel).getByText("Hay cambios sin guardar.")).toBeTruthy();
+    expect((within(panel).getByRole("button", { name: "Subir Olivia Banda" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(panel).getByRole("button", { name: "Descartar cambios" }));
+    expect(within(panel).queryByRole("radio", { name: "Asistente de ventas" })).toBeNull();
+    expect(within(panel).getByText("Membrete inactivo")).toBeTruthy();
+    expect(api.replaceReportLetterheadAssignments).not.toHaveBeenCalled();
+  });
+
+  it("after a PATCH, a 409 is still resolved only by an explicit, real reload", async () => {
+    let cotizacionCalls = 0;
+    api.listLetterheads.mockResolvedValueOnce([ASISTENTE, OLIVIA]).mockResolvedValue([{ ...ASISTENTE, is_active: false }, OLIVIA]);
+    api.getReportLetterheadAssignments.mockImplementation((code: string) => {
+      if (code !== "PRUEBA_COTIZACION") return Promise.resolve(assignments(code));
+      cotizacionCalls += 1;
+      return Promise.resolve(cotizacionCalls === 1 ? cotizacionWithOlivia(true) : {
+        ...cotizacionWithOlivia(true), revision: "r-fresh", default_letterhead_id: null,
+        assignments: [{ ...COTIZACION_STATE.assignments[0], letterhead_is_active: false, is_default: false, offered: false }, oliviaAssignment(true)],
+      });
+    });
+    api.updateLetterhead.mockResolvedValue({ ...ASISTENTE, is_active: false });
+    api.replaceReportLetterheadAssignments.mockRejectedValue(new ApiError(409, { code: "letterhead_conflict", message: "Cambió." }));
+    const user = userEvent.setup();
+    render(<LetterheadAdminWorkspace />);
+    const panel = await cotizacionPanel();
+    await user.click(await within(panel).findByRole("button", { name: "Subir Olivia Banda" }));
+    await deactivate(user, "Asistente de ventas");
+    await user.click(within(panel).getByRole("radio", { name: "Olivia Banda" }));
+    await user.click(within(panel).getByRole("button", { name: "Guardar cambios" }));
+    expect(await within(panel).findByText(/Otra persona modificó los membretes de Cotización/)).toBeTruthy();
+    expect(api.replaceReportLetterheadAssignments).toHaveBeenCalledTimes(1);
+    const before = cotizacionCalls;
+    await user.click(within(panel).getByRole("button", { name: "Recargar datos" }));
+    await waitFor(() => expect(cotizacionCalls).toBe(before + 1));
+    expect((await within(panel).findByRole("radio", { name: "Sin membrete — formato actual" }) as HTMLInputElement).checked).toBe(true);
+    expect(within(panel).queryByText(/El membrete predeterminado ya no está activo/)).toBeNull();
+    expect(api.replaceReportLetterheadAssignments).toHaveBeenCalledTimes(1);
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => { resolve = res; });
+  return { promise, resolve };
+}

@@ -15,8 +15,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { listLetterheads } from "@/lib/api/letterhead-admin";
 import { LETTERHEAD_REPORTS } from "@/lib/letterheads/letterhead-admin";
+import {
+  freshnessClock,
+  mergeCatalogRead,
+  mergeConfirmedLetterhead,
+  type CatalogSnapshot,
+} from "@/lib/letterheads/freshness";
 import type { LetterheadAdmin } from "@/types/letterhead-admin";
 
+const EMPTY_STAMPS: Record<number, number> = {};
 const FORBIDDEN_MESSAGE = "No tienes permisos para administrar membretes.";
 
 /**
@@ -26,9 +33,9 @@ const FORBIDDEN_MESSAGE = "No tienes permisos para administrar membretes.";
  * identity assigned to reports, not a report's own template.
  */
 export function LetterheadAdminWorkspace() {
-  const [catalog, setCatalog] = useState<LetterheadAdmin[] | null>(null);
-  /** When `catalog` was read; editors only trust it over their own, newer reads. */
-  const [catalogLoadedAt, setCatalogLoadedAt] = useState(0);
+  /** Confirmed catalog data with its per-letterhead freshness (see `freshnessClock`). */
+  const [snapshot, setSnapshot] = useState<CatalogSnapshot | null>(null);
+  const catalog = snapshot?.items ?? null;
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -36,11 +43,11 @@ export function LetterheadAdminWorkspace() {
 
   useEffect(() => {
     const controller = new AbortController();
+    const issuedAt = freshnessClock();
     void listLetterheads({ signal: controller.signal })
       .then((items) => {
         if (controller.signal.aborted) return;
-        setCatalog(items);
-        setCatalogLoadedAt(performance.now());
+        setSnapshot((current) => mergeCatalogRead(current, items, issuedAt));
         setLoadError(null);
       })
       .catch((error: unknown) => {
@@ -56,8 +63,10 @@ export function LetterheadAdminWorkspace() {
 
   const refresh = useCallback(() => setReloadToken((value) => value + 1), []);
 
-  const handleChanged = useCallback((updated: LetterheadAdmin, message: string) => {
-    setCatalog((current) => current?.map((item) => (item.id === updated.id ? updated : item)) ?? current);
+  const handleChanged = useCallback((updated: LetterheadAdmin, message: string, issuedAt: number) => {
+    // The PATCH response is confirmed data: it is shown (and wins over older
+    // reads) right away, whether or not the follow-up reads succeed.
+    setSnapshot((current) => mergeConfirmedLetterhead(current, updated, issuedAt));
     setNotice(message);
     // A deactivation also clears defaults on the server: re-read everything.
     refresh();
@@ -146,7 +155,7 @@ export function LetterheadAdminWorkspace() {
                     code={report.code}
                     label={report.label}
                     catalog={catalog}
-                    catalogLoadedAt={catalogLoadedAt}
+                    catalogStamps={snapshot?.stamps ?? EMPTY_STAMPS}
                     reloadToken={reloadToken}
                     onSaved={refresh}
                   />

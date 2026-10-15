@@ -16,15 +16,16 @@ import {
   moveRow,
   type AssignmentRow,
 } from "@/lib/letterheads/letterhead-admin";
+import { freshnessClock } from "@/lib/letterheads/freshness";
 import type { LetterheadAdmin, ReportLetterheadAssignments } from "@/types/letterhead-admin";
 
 interface EditorState {
   /** Last state confirmed by the backend (a GET or the PUT response). */
   server: ReportLetterheadAssignments;
   /**
-   * When `server` was actually received (same clock as the catalog's
-   * `catalogLoadedAt`). It only advances with a real response — restoring
-   * the cached `server` (discard) is not a new read.
+   * When the request that returned `server` was issued (`freshnessClock`).
+   * It only advances with a real response — restoring the cached `server`
+   * (discard) is not a new read.
    */
   serverReadAt: number;
   /** The draft: availability and order of each row, plus the default. */
@@ -32,9 +33,9 @@ interface EditorState {
   defaultId: number | null;
 }
 
-/** Editor state for a response that has just arrived from the backend. */
-function receivedState(server: ReportLetterheadAssignments): EditorState {
-  return { server, serverReadAt: performance.now(), ...draftFrom(server) };
+/** Editor state for a backend response to a request issued at `issuedAt`. */
+function receivedState(server: ReportLetterheadAssignments, issuedAt: number): EditorState {
+  return { server, serverReadAt: issuedAt, ...draftFrom(server) };
 }
 
 /** The draft equal to a confirmed state (no pending edits). */
@@ -45,8 +46,8 @@ function draftFrom(server: ReportLetterheadAssignments): Pick<EditorState, "rows
 /**
  * The draft rows with their letterhead metadata (name, state, current
  * version) taken from the freshest source, recomputed on every render and
- * never stored in the draft: the catalog when it was read after the last
- * backend response for these assignments, otherwise that response. The
+ * never stored in the draft: for each letterhead, the catalog entry when it
+ * was requested after these assignments, otherwise the assignments. The
  * admin's own choices (availability, order) and the revision they were made
  * against stay untouched. Catalog letterheads the editor does not list yet
  * are appended as "not assigned".
@@ -55,13 +56,13 @@ function withCatalog(
   rows: AssignmentRow[],
   catalog: LetterheadAdmin[],
   server: ReportLetterheadAssignments,
-  catalogIsNewer: boolean,
+  catalogIsNewer: (letterheadId: number) => boolean,
 ): AssignmentRow[] {
   const byId = new Map(catalog.map((letterhead) => [letterhead.id, letterhead]));
   const confirmed = new Map(server.assignments.map((item) => [item.letterhead_id, item]));
   const refreshed = rows.map((row) => {
     const latest = byId.get(row.letterhead_id);
-    if (latest != null && (catalogIsNewer || !confirmed.has(row.letterhead_id))) {
+    if (latest != null && (catalogIsNewer(row.letterhead_id) || !confirmed.has(row.letterhead_id))) {
       return {
         ...row,
         display_name: latest.display_name,
@@ -100,14 +101,15 @@ export function ReportLetterheadAssignmentsEditor({
   code,
   label,
   catalog,
-  catalogLoadedAt = 0,
+  catalogStamps,
   reloadToken,
   onSaved,
 }: {
   code: string;
   label: string;
   catalog: LetterheadAdmin[];
-  catalogLoadedAt?: number;
+  /** Per letterhead, when its catalog data was requested (`freshnessClock`). */
+  catalogStamps: Record<number, number>;
   /** Changes when the catalog changed elsewhere on the page (state or new letterhead). */
   reloadToken: number;
   onSaved?: () => void;
@@ -127,32 +129,38 @@ export function ReportLetterheadAssignmentsEditor({
   const savingRef = useRef(false);
   const dirtyRef = useRef(false);
   const hasStateRef = useRef(false);
+  const serverReadAtRef = useRef(-Infinity);
 
   const rows = useMemo(
-    () => (state != null ? withCatalog(state.rows, catalog, state.server, catalogLoadedAt > state.serverReadAt) : []),
-    [catalog, catalogLoadedAt, state],
+    () => (state != null
+      ? withCatalog(state.rows, catalog, state.server, (id) => (catalogStamps[id] ?? -Infinity) > state.serverReadAt)
+      : []),
+    [catalog, catalogStamps, state],
   );
   const dirty = state != null && initial != null && snapshot(rows, state.defaultId) !== initial;
 
   useEffect(() => {
     dirtyRef.current = dirty;
     hasStateRef.current = state != null;
+    serverReadAtRef.current = state?.serverReadAt ?? -Infinity;
   }, [dirty, state]);
 
-  const apply = useCallback((server: ReportLetterheadAssignments) => {
-    const next = receivedState(server);
+  const apply = useCallback((server: ReportLetterheadAssignments, issuedAt: number) => {
+    const next = receivedState(server, issuedAt);
     setState(next);
     setInitial(snapshot(next.rows, next.defaultId));
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
+    const issuedAt = freshnessClock();
     void getReportLetterheadAssignments(code, { signal: controller.signal })
       .then((server) => {
         if (controller.signal.aborted) return;
         // Pending edits are never thrown away by a background refresh; the
-        // revision they were made against still guards the save.
-        if (!dirtyRef.current) apply(server);
+        // revision they were made against still guards the save. A read
+        // issued before the state on screen (e.g. before a PUT) is older.
+        if (!dirtyRef.current && issuedAt > serverReadAtRef.current) apply(server, issuedAt);
         setLoadError(null);
         setRefreshError(null);
         setLoading(false);
@@ -223,6 +231,7 @@ export function ReportLetterheadAssignmentsEditor({
     setNotice(null);
     dirtyRef.current = false;
     hasStateRef.current = false;
+    serverReadAtRef.current = -Infinity;
     setInitial(null);
     setState(null);
     setLoading(true);
@@ -242,9 +251,10 @@ export function ReportLetterheadAssignmentsEditor({
     setSaving(true);
     setSaveError(null);
     setNotice(null);
+    const issuedAt = freshnessClock();
     try {
       const saved = await replaceReportLetterheadAssignments(code, body);
-      apply(saved);
+      apply(saved, issuedAt);
       setNotice(`Se guardaron los membretes de ${label}.`);
       onSaved?.();
     } catch (error) {
