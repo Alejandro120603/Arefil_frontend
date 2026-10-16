@@ -18,6 +18,8 @@ import { getErrorMessage } from "@/lib/api/errors";
 import {
   confirmImport,
   getDuplicateImportDetail,
+  getSupplierFormatError,
+  PRICE_LIST_IMPORT_SUPPLIER_LABELS,
   previewPriceListImport,
   type PriceListImportSupplier,
 } from "@/lib/api/imports";
@@ -40,7 +42,13 @@ interface ImportState {
   file: File | null;
   preview: ImportPreviewResponse | null;
   result: ImportConfirmResult | null;
-  error: { context: ErrorContext; message: string; duplicateImportId: number | null } | null;
+  error: {
+    context: ErrorContext;
+    message: string;
+    duplicateImportId: number | null;
+    /** The backend's own wording when `message` rephrases it for the user. */
+    detail: string | null;
+  } | null;
 }
 
 const initialState: ImportState = {
@@ -56,7 +64,7 @@ type Action =
   | { type: "CLEAR_FILE" }
   | { type: "ANALYZE_START" }
   | { type: "ANALYZE_SUCCESS"; preview: ImportPreviewResponse }
-  | { type: "ANALYZE_ERROR"; message: string; duplicateImportId: number | null }
+  | { type: "ANALYZE_ERROR"; message: string; duplicateImportId: number | null; detail: string | null }
   | { type: "CONFIRM_START" }
   | { type: "CONFIRM_SUCCESS"; result: ImportConfirmResult }
   | { type: "CONFIRM_ERROR"; message: string }
@@ -80,7 +88,12 @@ function reducer(state: ImportState, action: Action): ImportState {
       return {
         ...state,
         phase: "error",
-        error: { context: "analyze", message: action.message, duplicateImportId: action.duplicateImportId },
+        error: {
+          context: "analyze",
+          message: action.message,
+          duplicateImportId: action.duplicateImportId,
+          detail: action.detail,
+        },
       };
     case "CONFIRM_START":
       return { ...state, phase: "confirming", error: null };
@@ -90,7 +103,7 @@ function reducer(state: ImportState, action: Action): ImportState {
       return {
         ...state,
         phase: "error",
-        error: { context: "confirm", message: action.message, duplicateImportId: null },
+        error: { context: "confirm", message: action.message, duplicateImportId: null, detail: null },
       };
     case "RESET":
       return initialState;
@@ -99,18 +112,26 @@ function reducer(state: ImportState, action: Action): ImportState {
   }
 }
 
-function describeError(error: unknown): { message: string; duplicateImportId: number | null } {
+function describeError(
+  error: unknown,
+  supplier: PriceListImportSupplier,
+): { message: string; duplicateImportId: number | null; detail: string | null } {
   const duplicate = getDuplicateImportDetail(error);
   if (duplicate) {
-    return { message: duplicate.message, duplicateImportId: duplicate.existing_import_id };
+    return { message: duplicate.message, duplicateImportId: duplicate.existing_import_id, detail: null };
   }
-  return { message: getErrorMessage(error), duplicateImportId: null };
+  const format = getSupplierFormatError(error, supplier);
+  if (format) {
+    return { message: format.message, duplicateImportId: null, detail: format.detail };
+  }
+  return { message: getErrorMessage(error), duplicateImportId: null, detail: null };
 }
 
 export default function ImportDonaldsonPage() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [supplier, setSupplier] = useState<PriceListImportSupplier>("DONALDSON");
   const submittingRef = useRef(false);
+  const supplierLabel = PRICE_LIST_IMPORT_SUPPLIER_LABELS[supplier];
 
   async function handleAnalyze(file: File) {
     if (submittingRef.current) return;
@@ -120,8 +141,8 @@ export default function ImportDonaldsonPage() {
       const preview = await previewPriceListImport(supplier, file);
       dispatch({ type: "ANALYZE_SUCCESS", preview });
     } catch (error) {
-      const { message, duplicateImportId } = describeError(error);
-      dispatch({ type: "ANALYZE_ERROR", message, duplicateImportId });
+      const { message, duplicateImportId, detail } = describeError(error, supplier);
+      dispatch({ type: "ANALYZE_ERROR", message, duplicateImportId, detail });
     } finally {
       submittingRef.current = false;
     }
@@ -135,7 +156,7 @@ export default function ImportDonaldsonPage() {
       const result = await confirmImport(state.preview.import_id);
       dispatch({ type: "CONFIRM_SUCCESS", result });
     } catch (error) {
-      const { message } = describeError(error);
+      const { message } = describeError(error, supplier);
       dispatch({ type: "CONFIRM_ERROR", message });
     } finally {
       submittingRef.current = false;
@@ -179,7 +200,12 @@ export default function ImportDonaldsonPage() {
               </NativeSelect>
             </div>
           )}
-          {!state.file && <ImportDropzone onFileSelected={(file) => dispatch({ type: "SELECT_FILE", file })} />}
+          {!state.file && (
+            <ImportDropzone
+              supplierLabel={supplierLabel}
+              onFileSelected={(file) => dispatch({ type: "SELECT_FILE", file })}
+            />
+          )}
 
           {showFileCard && state.file && (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -210,6 +236,9 @@ export default function ImportDonaldsonPage() {
               </AlertTitle>
               <AlertDescription>
                 <p>{state.error.message}</p>
+                {state.error.detail && (
+                  <p className="mt-1 text-xs opacity-80">Detalle técnico: {state.error.detail}</p>
+                )}
                 {state.error.duplicateImportId !== null && (
                   <p className="mt-1">
                     Referencia: ImportJob #{state.error.duplicateImportId}. El backend no expone una forma de

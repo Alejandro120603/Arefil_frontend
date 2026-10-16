@@ -37,6 +37,17 @@ export function formatNumber(value: string | null | undefined): string {
   return getFormatter({}).format(parsed);
 }
 
+/**
+ * A decimal quantity such as a discount percentage: at least two decimals and
+ * up to four, the same convention as the letterhead XLSX (`#,##0.00##`).
+ * Display only; the value itself is never rounded.
+ */
+export function formatDecimal(value: string | null | undefined): string {
+  const parsed = parseDecimal(value);
+  if (parsed == null) return "—";
+  return getFormatter({ minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(parsed);
+}
+
 /** Signed currency delta (e.g. "+$12.50", "-$3.00"). Returns null when there's nothing to compare against - callers must not substitute "$0". */
 export function formatSignedCurrency(value: string | null | undefined, currency = "MXN"): string | null {
   const parsed = parseDecimal(value);

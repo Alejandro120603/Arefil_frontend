@@ -28,6 +28,7 @@ import {
 } from "@/lib/letterheads/letterhead-runtime";
 import {
   backendRowErrors,
+  changedRuntimeCells,
   isReportBuilderPreviewResponse,
   reportDocumentAvailable,
   reportExecutionId,
@@ -35,6 +36,7 @@ import {
   initialRuntimeValues,
   parameterDisplayValues,
   validateRuntimeForm,
+  visibleRuntimeErrors,
   type RuntimeGroupValues,
   type RuntimeParameterValue,
 } from "@/lib/reports/report-runtime";
@@ -94,6 +96,13 @@ function ReportRuntimeForCode({
   const [values, setValues] = useState(() => initialRuntimeValues(report.parameters, initialParameters));
   const [groupValues, setGroupValues] = useState<RuntimeGroupValues>(() => initialRuntimeGroupValues(groups));
   const [execution, setExecution] = useState<SuccessfulExecution | null>(null);
+  /**
+   * What the user already did to the form. An empty required field only
+   * shows its error once touched or after an attempt to generate (D9).
+   */
+  const [touchedFields, setTouchedFields] = useState<ReadonlySet<string>>(() => new Set());
+  const [touchedCells, setTouchedCells] = useState<ReadonlySet<string>>(() => new Set());
+  const [attempted, setAttempted] = useState(false);
   const [parameterOptions, setParameterOptions] = useState<Record<string, ReportOption[]>>({});
   const executionIdRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
@@ -171,10 +180,13 @@ function ReportRuntimeForCode({
 
   function handleChange(name: string, value: RuntimeParameterValue) {
     setValues((current) => ({ ...current, [name]: value }));
+    setTouchedFields((current) => (current.has(name) ? current : new Set(current).add(name)));
     invalidateExecution();
   }
 
   function handleGroupChange(next: RuntimeGroupValues) {
+    const changed = changedRuntimeCells(groupValues, next);
+    if (changed.length > 0) setTouchedCells((current) => new Set([...current, ...changed]));
     setGroupValues(next);
     invalidateExecution();
   }
@@ -191,7 +203,12 @@ function ReportRuntimeForCode({
   }
 
   async function generate() {
-    if (!validation.valid || !optionsReady || generating || letterheadPending) return;
+    if (!optionsReady || generating || letterheadPending) return;
+    if (!validation.valid) {
+      // Nothing is sent: the attempt only reveals every pending field.
+      setAttempted(true);
+      return;
+    }
     const controller = new AbortController();
     controllerRef.current?.abort();
     controllerRef.current = controller;
@@ -246,8 +263,15 @@ function ReportRuntimeForCode({
     }
   }
 
-  const rowErrors = Object.keys(backendErrors).length > 0 ? backendErrors : validation.rowErrors;
-  const generateDisabled = !validation.valid || !optionsReady || generating || letterheadPending;
+  const visibleErrors = visibleRuntimeErrors(validation, groupValues, {
+    fields: touchedFields,
+    cells: touchedCells,
+    attempted,
+  });
+  const rowErrors = Object.keys(backendErrors).length > 0 ? backendErrors : visibleErrors.rowErrors;
+  // Only the screen's own state blocks the button; an incomplete form can be
+  // "generated" to see what is missing, and still never reaches the backend.
+  const generateDisabled = !optionsReady || generating || letterheadPending;
   // After the commercial parameters and, when the report offers letterheads,
   // after «Presentación del documento»: the button always comes last.
   const generateControls = (
@@ -256,7 +280,11 @@ function ReportRuntimeForCode({
         {generating || loadingOptions || letterheadOptions.loading ? <Loader2 className="animate-spin" /> : <FileText />}
         {generating ? "Generando..." : generatedOnce ? "Regenerar reporte" : "Generar reporte"}
       </Button>
-      {!validation.valid && <p className="text-sm text-muted-foreground">Completa los parámetros y renglones obligatorios con valores válidos.</p>}
+      {!validation.valid && (attempted ? (
+        <p className="text-sm text-destructive" role="alert">Faltan datos o hay valores inválidos: revisa los campos marcados.</p>
+      ) : (
+        <p className="text-sm text-muted-foreground">Completa los parámetros y renglones obligatorios con valores válidos.</p>
+      ))}
       {validation.valid && letterheadsSupported && letterheadSelection === undefined && !letterheadOptions.loading && (
         <p className="text-sm text-muted-foreground">Elige la presentación del documento.</p>
       )}
@@ -273,7 +301,7 @@ function ReportRuntimeForCode({
             parameters={report.parameters}
             values={values}
             disabled={generating}
-            errors={validation.fieldErrors}
+            errors={visibleErrors.fieldErrors}
             onOptionsStateChange={setScalarOptionsState}
             onOptionsLoaded={setParameterOptions}
             onChange={handleChange}

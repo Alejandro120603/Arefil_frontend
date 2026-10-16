@@ -570,8 +570,40 @@ describe("Presentación del documento — Descuento", () => {
     renderReport("PRUEBA_DESCUENTO");
     await fillLine(user, { discount: "150" });
     await screen.findByRole("group", { name: "Presentación del documento" });
-    expect(generateButton().disabled).toBe(true);
+    await waitForReady();
+    // An invalid discount is shown as soon as it is typed, and pressing
+    // «Generar» only points at it: nothing reaches the backend.
+    expect(screen.getByText("Debe ser menor o igual que 100.")).toBeTruthy();
+    await user.click(generateButton());
+    expect(await screen.findByText("Faltan datos o hay valores inválidos: revisa los campos marcados.")).toBeTruthy();
     expect(reportsApi.executeReport).not.toHaveBeenCalled();
+  });
+});
+
+describe("Pending fields (D9)", () => {
+  it("does not flag an untouched form; pressing «Generar» reveals what is missing and sends nothing", async () => {
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION"));
+    const user = userEvent.setup();
+    renderReport();
+    await waitForReady();
+    expect(screen.queryByText("Este campo es requerido.")).toBeNull();
+    expect(screen.getByText("Completa los parámetros y renglones obligatorios con valores válidos.")).toBeTruthy();
+
+    await user.click(generateButton());
+
+    expect(await screen.findByText("Este campo es requerido.")).toBeTruthy();
+    expect(screen.getByText("Faltan datos o hay valores inválidos: revisa los campos marcados.")).toBeTruthy();
+    expect(reportsApi.executeReport).not.toHaveBeenCalled();
+  });
+
+  it("shows a required error once the user empties a field they touched", async () => {
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION"));
+    const user = userEvent.setup();
+    renderReport();
+    await fillLine(user);
+    expect(screen.queryByText("Este campo es requerido.")).toBeNull();
+    await user.clear(screen.getByLabelText("Cantidad * 1"));
+    expect(await screen.findByText("Este campo es requerido.")).toBeTruthy();
   });
 });
 

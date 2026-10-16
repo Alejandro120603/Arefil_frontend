@@ -143,7 +143,8 @@ describe("ReportRepeatableParameters", () => {
   it("L: without a product, a quantity, or the report's columns the total stays —", async () => {
     const user = userEvent.setup();
     const view = render(<Harness />);
-    const totalCell = () => screen.getAllByRole("row")[1].querySelectorAll("td")[8];
+    // The description lives under the SKU (D8): the total is the 8th cell.
+    const totalCell = () => screen.getAllByRole("row")[1].querySelectorAll("td")[7];
     expect(totalCell().textContent).toBe("—");
     await pickFilter(user);
     await user.clear(screen.getByLabelText("Cantidad * 1"));

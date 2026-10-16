@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   backendRowErrors,
+  changedRuntimeCells,
+  REQUIRED_FIELD_MESSAGE,
+  runtimeCellKey,
+  visibleRuntimeErrors,
   productSearchField,
   initialRuntimeGroupValues,
   initialRuntimeValues,
@@ -133,5 +137,55 @@ describe("repeatable report runtime parameters", () => {
     expect(backendRowErrors([{ loc: ["items", 1, "product_id"], msg: "no pertenece a la lista" }], [group])).toEqual({
       items: { 1: { product_id: "no pertenece a la lista" } },
     });
+  });
+});
+
+describe("visible runtime errors (D9)", () => {
+  const validation = {
+    valid: false,
+    formError: null,
+    parameters: {},
+    groupErrors: {},
+    fieldErrors: { price_list_id: REQUIRED_FIELD_MESSAGE, quantity: "Captura un número entero válido." },
+    rowErrors: { items: { 0: { product_id: REQUIRED_FIELD_MESSAGE, discount: "Debe ser menor o igual que 100." } } },
+  };
+  const groupValues = { items: [{ id: "row-1", values: { product_id: "", discount: "150" } }] };
+  const untouched = { fields: new Set<string>(), cells: new Set<string>(), attempted: false };
+
+  it("hides only empty required fields the user has not touched", () => {
+    expect(visibleRuntimeErrors(validation, groupValues, untouched)).toEqual({
+      fieldErrors: { quantity: "Captura un número entero válido." },
+      rowErrors: { items: { 0: { discount: "Debe ser menor o igual que 100." } } },
+    });
+  });
+
+  it("shows a required error once its field or cell was touched", () => {
+    const touched = {
+      fields: new Set(["price_list_id"]),
+      cells: new Set([runtimeCellKey("items", "row-1", "product_id")]),
+      attempted: false,
+    };
+    expect(visibleRuntimeErrors(validation, groupValues, touched)).toEqual({
+      fieldErrors: validation.fieldErrors,
+      rowErrors: validation.rowErrors,
+    });
+  });
+
+  it("shows everything after an attempt to generate", () => {
+    expect(visibleRuntimeErrors(validation, groupValues, { ...untouched, attempted: true })).toEqual({
+      fieldErrors: validation.fieldErrors,
+      rowErrors: validation.rowErrors,
+    });
+  });
+
+  it("reports the cells that changed, but not a newly added row", () => {
+    const before = { items: [{ id: "a", values: { product_id: "", quantity: "1" } }] };
+    const after = {
+      items: [
+        { id: "a", values: { product_id: "101", quantity: "1" } },
+        { id: "b", values: { product_id: "", quantity: "1" } },
+      ],
+    };
+    expect(changedRuntimeCells(before, after)).toEqual([runtimeCellKey("items", "a", "product_id")]);
   });
 });

@@ -123,7 +123,7 @@ export function ReportProductSearch({
     return (
       <div className="flex items-start gap-1">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{selected.part_number}</p>
+          <p className="truncate text-sm font-medium" title={selected.part_number}>{selected.part_number}</p>
           {selected.item_number && <p className="truncate text-xs text-muted-foreground">Item {selected.item_number}</p>}
         </div>
         <button
@@ -203,7 +203,7 @@ export function ReportProductSearch({
                     onClick={() => choose(option)}
                   >
                     <span className="block font-medium">{option.part_number}</span>
-                    <span className="block truncate text-muted-foreground">{option.description ?? option.item_number ?? "Sin descripción"}</span>
+                    <span className="block break-words text-muted-foreground">{option.description ?? option.item_number ?? "Sin descripción"}</span>
                   </button>
                 </li>
               ))}

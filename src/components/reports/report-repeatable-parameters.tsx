@@ -196,7 +196,7 @@ export function ReportRepeatableParameters({
         const discountField = editableFields.find(isDiscountField);
         const context = String(scalarValues[group.context_parameter] ?? "").trim();
         const atMaximum = group.max_items != null && rows.length >= group.max_items;
-        const columnCount = 2 + (product ? 4 : 0) + editableFields.length + (discountField ? 1 : 0);
+        const columnCount = 2 + (product ? 3 : 0) + editableFields.length + (discountField ? 1 : 0);
         return (
           <section key={group.name} className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -227,8 +227,10 @@ export function ReportRepeatableParameters({
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10">#</TableHead>
-                    {product && <TableHead className="min-w-36">{product.label}</TableHead>}
-                    {product && <TableHead className="min-w-48">Descripción</TableHead>}
+                    {/* The description sits under the SKU instead of in a column of
+                        its own: it wraps there, so prices and amounts stay on
+                        screen without scrolling sideways (D8). */}
+                    {product && <TableHead className="min-w-44">{product.label}</TableHead>}
                     {product && <TableHead className="text-right">P. Unitario</TableHead>}
                     {editableFields.map((field) => (
                       <TableHead key={field.name}>
@@ -289,11 +291,11 @@ export function ReportRepeatableParameters({
                               }}
                             />
                             {productError && <p className="text-xs text-destructive">{productError}</p>}
-                          </TableCell>
-                        )}
-                        {product && (
-                          <TableCell className="text-sm text-muted-foreground">
-                            {selected?.description ?? "—"}
+                            {selected?.description && (
+                              <p className="mt-1 max-w-64 text-xs whitespace-normal break-words text-muted-foreground">
+                                {selected.description}
+                              </p>
+                            )}
                           </TableCell>
                         )}
                         {product && (
