@@ -115,6 +115,11 @@ export interface ImportProductSample {
   item_number: string | null;
   description: string | null;
   unit_price: DecimalString;
+  /**
+   * The supplier's own "NEW" mark on the row (Donaldson's NEW/NUEVOS column;
+   * always false for Fleetguard). It says nothing about AREFIL's catalog: the
+   * preview contract carries no "already in the catalog" flag.
+   */
   is_new: boolean;
 }
 

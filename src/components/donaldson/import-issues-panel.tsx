@@ -46,7 +46,10 @@ interface IssueListProps {
 }
 
 function IssueList({ title, icon: Icon, tone, items, total }: IssueListProps) {
-  const truncated = total > items.length;
+  // The backend closes a shortened list with its own count of what it left
+  // out ("Se muestran 19 de 586 …"); repeating it here adds nothing.
+  const summarizedByBackend = items.length > 0 && items[items.length - 1].startsWith("Se muestran ");
+  const truncated = total > items.length && !summarizedByBackend;
 
   return (
     <Card>
@@ -68,7 +71,7 @@ function IssueList({ title, icon: Icon, tone, items, total }: IssueListProps) {
         </ul>
         {truncated && (
           <p className="mt-2 text-xs text-muted-foreground">
-            Mostrando {items.length} de {total.toLocaleString("es-MX")}. El backend trunca la lista devuelta.
+            Mostrando {items.length} de {total.toLocaleString("es-MX")}.
           </p>
         )}
       </CardContent>

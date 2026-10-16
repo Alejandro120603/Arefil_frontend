@@ -13,10 +13,12 @@ function isXlsxFile(file: File): boolean {
 
 interface ImportDropzoneProps {
   onFileSelected: (file: File) => void;
+  /** Supplier the file is expected to belong to ("Donaldson", "Fleetguard"). */
+  supplierLabel: string;
   disabled?: boolean;
 }
 
-export function ImportDropzone({ onFileSelected, disabled }: ImportDropzoneProps) {
+export function ImportDropzone({ onFileSelected, supplierLabel, disabled }: ImportDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -38,7 +40,7 @@ export function ImportDropzone({ onFileSelected, disabled }: ImportDropzoneProps
         role="button"
         tabIndex={disabled ? -1 : 0}
         aria-disabled={disabled}
-        aria-label="Seleccionar archivo Donaldson (.xlsx)"
+        aria-label={`Seleccionar archivo ${supplierLabel} (.xlsx)`}
         onClick={() => !disabled && inputRef.current?.click()}
         onKeyDown={(event) => {
           if (disabled) return;
@@ -68,7 +70,7 @@ export function ImportDropzone({ onFileSelected, disabled }: ImportDropzoneProps
       >
         <Upload className="h-8 w-8 text-muted-foreground" />
         <div className="space-y-1">
-          <p className="text-sm font-medium">Arrastra el archivo Donaldson aquí</p>
+          <p className="text-sm font-medium">Arrastra el archivo {supplierLabel} aquí</p>
           <p className="text-sm text-muted-foreground">o haz clic para seleccionar un archivo .xlsx</p>
         </div>
         <input
