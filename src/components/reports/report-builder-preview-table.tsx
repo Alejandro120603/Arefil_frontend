@@ -29,7 +29,8 @@ function formatCell(value: unknown, column: ReportBuilderPreviewColumn): string 
       return column.data_type === "decimal" ? formatDecimal(text) : formatNumber(text);
     case "percent": {
       const parsed = parseDecimal(text);
-      return parsed == null ? text : `${formatNumber(text)}%`;
+      if (parsed == null) return text;
+      return `${column.data_type === "decimal" ? formatDecimal(text) : formatNumber(text)}%`;
     }
     case "date":
       return formatDate(text);
@@ -153,7 +154,7 @@ export function ReportBuilderPreviewTable({
                   {preview.columns.map((column, index) => {
                     const total = values[column.key];
                     return (
-                      <TableCell key={column.key} className="font-medium">
+                      <TableCell key={column.key} className={cn("font-medium", cellClassName(column))}>
                         {total !== undefined ? formatCell(total, column) : index === 0 ? "Totales" : ""}
                       </TableCell>
                     );

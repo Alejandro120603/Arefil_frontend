@@ -46,3 +46,41 @@ describe("ReportBuilderPreviewTable", () => {
     expect(amount.className).not.toMatch(/whitespace-normal/);
   });
 });
+
+describe("ReportBuilderPreviewTable — review fixes", () => {
+  it("gives decimal percentages, rows and summaries alike, two to four decimals", () => {
+    const data = {
+      columns: [{ key: "rate", label: "Tasa", data_type: "decimal", format_type: "percent" }],
+      rows: [{ rate: "12.5" }],
+      row_count: 1,
+      truncated: false,
+      totals: {},
+      summary: { average: "5" },
+    } as unknown as ReportBuilderPreviewResponse;
+    render(
+      <ReportBuilderPreviewTable
+        preview={data}
+        summaries={[{ key: "average", label: "Promedio", operation: "FORMULA", format_type: "percent" } as never]}
+      />,
+    );
+    expect(screen.getByText("12.50%")).toBeTruthy();
+    expect(screen.getByText("5.00%")).toBeTruthy();
+  });
+
+  it("right-aligns a legacy totals row under its numeric column", () => {
+    const data = {
+      columns: [
+        { key: "description", label: "Descripción", data_type: "string", format_type: "text" },
+        { key: "line_total", label: "Importe", data_type: "decimal", format_type: "currency" },
+      ],
+      rows: [{ description: "FILTRO", line_total: "10.00" }],
+      row_count: 1,
+      truncated: false,
+      totals: { line_total: "10.00" },
+    } as unknown as ReportBuilderPreviewResponse;
+    render(<ReportBuilderPreviewTable preview={data} />);
+    const [, total] = screen.getAllByText("$10.00");
+    expect(total.className).toMatch(/text-right/);
+    expect(total.className).toMatch(/font-medium/);
+  });
+});
