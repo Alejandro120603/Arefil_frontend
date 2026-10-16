@@ -596,6 +596,18 @@ describe("Pending fields (D9)", () => {
     expect(reportsApi.executeReport).not.toHaveBeenCalled();
   });
 
+  it("shows a required error once the user leaves an empty required field", async () => {
+    getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION"));
+    const user = userEvent.setup();
+    renderReport();
+    await waitForReady();
+    await user.click(screen.getByRole("combobox", { name: "SKU 1" }));
+    expect(screen.queryByText("Este campo es requerido.")).toBeNull();
+    await user.click(document.body);
+    expect(await screen.findByText("Este campo es requerido.")).toBeTruthy();
+    expect(reportsApi.executeReport).not.toHaveBeenCalled();
+  });
+
   it("shows a required error once the user empties a field they touched", async () => {
     getReportLetterheadOptions.mockResolvedValue(options("PRUEBA_COTIZACION"));
     const user = userEvent.setup();

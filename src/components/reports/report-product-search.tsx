@@ -31,6 +31,7 @@ export function ReportProductSearch({
   label,
   disabled = false,
   invalid = false,
+  touchKey,
   onSelect,
 }: {
   code: string;
@@ -43,6 +44,8 @@ export function ReportProductSearch({
   label: string;
   disabled?: boolean;
   invalid?: boolean;
+  /** Identifies the row cell when the form records which fields were visited. */
+  touchKey?: string;
   onSelect: (option: ReportProductOption | null) => void;
 }) {
   const listId = useId();
@@ -158,6 +161,7 @@ export function ReportProductSearch({
         aria-controls={listId}
         aria-autocomplete="list"
         aria-invalid={invalid}
+        data-runtime-cell={touchKey}
         autoComplete="off"
         placeholder="Buscar parte, item o descripción"
         value={query}

@@ -84,3 +84,23 @@ describe("ReportBuilderPreviewTable — review fixes", () => {
     expect(total.className).toMatch(/font-medium/);
   });
 });
+
+describe("ReportBuilderPreviewTable — unformatted numbers", () => {
+  it("right-aligns integer and decimal columns without a format", () => {
+    const data = {
+      columns: [
+        { key: "part_number", label: "Parte", data_type: "string", format_type: null },
+        { key: "weight", label: "Peso", data_type: "decimal", format_type: null },
+      ],
+      rows: [{ part_number: "P206389", weight: "1.5" }],
+      row_count: 1,
+      truncated: false,
+      totals: {},
+      summary: {},
+    } as unknown as ReportBuilderPreviewResponse;
+    render(<ReportBuilderPreviewTable preview={data} />);
+    expect(screen.getByText("1.5").className).toMatch(/text-right/);
+    expect(screen.getByRole("columnheader", { name: "Peso" }).className).toMatch(/text-right/);
+    expect(screen.getByText("P206389").className).not.toMatch(/text-right/);
+  });
+});

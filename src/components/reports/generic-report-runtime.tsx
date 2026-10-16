@@ -184,6 +184,18 @@ function ReportRuntimeForCode({
     invalidateExecution();
   }
 
+  /**
+   * Leaving a field also counts as touching it, so visiting an empty required
+   * field and moving on shows that it is pending without a change event.
+   */
+  function handleFieldBlur(target: EventTarget) {
+    if (!(target instanceof HTMLElement)) return;
+    const field = target.dataset.runtimeField;
+    const cell = target.dataset.runtimeCell;
+    if (field) setTouchedFields((current) => (current.has(field) ? current : new Set(current).add(field)));
+    if (cell) setTouchedCells((current) => (current.has(cell) ? current : new Set(current).add(cell)));
+  }
+
   function handleGroupChange(next: RuntimeGroupValues) {
     const changed = changedRuntimeCells(groupValues, next);
     if (changed.length > 0) setTouchedCells((current) => new Set([...current, ...changed]));
@@ -295,7 +307,7 @@ function ReportRuntimeForCode({
     <div className="flex flex-col gap-6">
       <Card id="parametros" className="scroll-mt-6">
         <CardHeader><CardTitle>Parámetros del reporte</CardTitle></CardHeader>
-        <CardContent className="flex flex-col gap-5">
+        <CardContent className="flex flex-col gap-5" onBlur={(event) => handleFieldBlur(event.target)}>
           <ReportRuntimeParameters
             code={report.code}
             parameters={report.parameters}

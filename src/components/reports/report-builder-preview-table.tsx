@@ -46,6 +46,7 @@ function formatCell(value: unknown, column: ReportBuilderPreviewColumn): string 
  * and align right, so long descriptions never push the amounts off screen.
  */
 function isNumericColumn(column: ReportBuilderPreviewColumn): boolean {
+  if (column.format_type == null) return column.data_type === "integer" || column.data_type === "decimal";
   return column.format_type === "currency" || column.format_type === "number" || column.format_type === "percent";
 }
 

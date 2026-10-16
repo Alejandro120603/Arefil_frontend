@@ -18,6 +18,7 @@ import {
   orderedGroupFields,
   orderedParameterGroups,
   productSearchField,
+  runtimeCellKey,
   type RuntimeGroupValues,
   type RuntimeParameterValues,
 } from "@/lib/reports/report-runtime";
@@ -279,6 +280,7 @@ export function ReportRepeatableParameters({
                               label={`${product.label} ${rowIndex + 1}`}
                               disabled={disabled || context === ""}
                               invalid={productError != null}
+                              touchKey={runtimeCellKey(group.name, row.id, product.name)}
                               onSelect={(option) => {
                                 setProducts((current) => {
                                   const next = { ...current };
@@ -332,6 +334,7 @@ export function ReportRepeatableParameters({
                                   value={String(value)}
                                   disabled={disabled}
                                   aria-invalid={error != null}
+                                  data-runtime-cell={runtimeCellKey(group.name, row.id, field.name)}
                                   onChange={(event) => replaceCell(group.name, rowIndex, field.name, event.target.value)}
                                 />
                               )}
