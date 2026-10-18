@@ -4,6 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/errors";
+import { DUPLICATE_IMPORT_FALLBACK_MESSAGE } from "@/lib/api/imports";
 import type { ImportPreviewResponse } from "@/types/api";
 import ImportPriceListPage from "./page";
 
@@ -112,5 +113,116 @@ describe("Importar lista de precios", () => {
     await chooseFile(user);
     expect(await screen.findByText(/Se muestran 1 de 30 advertencias/)).toBeTruthy();
     expect(screen.queryByText(/Mostrando 2 de 30/)).toBeNull();
+  });
+
+  describe("a file that already is a live price list (#53)", () => {
+    const duplicate = {
+      message:
+        "Este archivo ya está importado: es la lista de precios de DONALDSON vigente desde el 2025-10-20. Si quieres reemplazarla, elimínala primero.",
+      existing_import_id: 34,
+      existing_price_list_id: 12,
+      effective_date: "2025-10-20",
+      supplier: "DONALDSON",
+    };
+
+    function expectNoTechnicalReference() {
+      expect(screen.queryByText(/ImportJob/)).toBeNull();
+      expect(screen.queryByText(/backend no expone/)).toBeNull();
+    }
+
+    it("on preview: shows the backend message and links to that list", async () => {
+      mocks.previewPriceListImport.mockRejectedValue(new ApiError(409, duplicate));
+      const user = userEvent.setup();
+      render(<ImportPriceListPage />);
+      await chooseFile(user);
+      expect(await screen.findByText(duplicate.message)).toBeTruthy();
+      expect(screen.getByText("Este archivo ya está importado")).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Ver lista de precios" }).getAttribute("href")).toBe(
+        "/donaldson/price-lists/12",
+      );
+      expectNoTechnicalReference();
+    });
+
+    it("from an older backend: a generic link and no ImportJob reference", async () => {
+      mocks.previewPriceListImport.mockRejectedValue(
+        new ApiError(409, { message: "Este archivo ya fue importado exitosamente (ImportJob #1).", existing_import_id: 1 }),
+      );
+      const user = userEvent.setup();
+      render(<ImportPriceListPage />);
+      await chooseFile(user);
+      expect(await screen.findByText(DUPLICATE_IMPORT_FALLBACK_MESSAGE)).toBeTruthy();
+      expect(screen.queryByRole("link", { name: "Ver lista de precios" })).toBeNull();
+      expect(screen.getByRole("link", { name: "Ir a Listas de precios" }).getAttribute("href")).toBe(
+        "/donaldson/price-lists",
+      );
+      expectNoTechnicalReference();
+    });
+
+    it("on confirm: the same alert, and the job can't be confirmed again", async () => {
+      mocks.previewPriceListImport.mockResolvedValue(preview());
+      mocks.confirmImport.mockRejectedValue(new ApiError(409, duplicate));
+      const user = userEvent.setup();
+      render(<ImportPriceListPage />);
+      await chooseFile(user);
+      await user.click(await screen.findByRole("button", { name: "Confirmar importación" }));
+      expect(await screen.findByText(duplicate.message)).toBeTruthy();
+      expect(screen.getByText("Este archivo ya está importado")).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Ver lista de precios" }).getAttribute("href")).toBe(
+        "/donaldson/price-lists/12",
+      );
+      expect((screen.getByRole("button", { name: "Confirmar importación" }) as HTMLButtonElement).disabled).toBe(true);
+      expectNoTechnicalReference();
+    });
+
+    it("on confirm, any other 409 keeps the current confirm error", async () => {
+      mocks.previewPriceListImport.mockResolvedValue(preview());
+      mocks.confirmImport.mockRejectedValue(
+        new ApiError(409, "ImportJob #1 está en estado 'FAILED'; solo se puede confirmar un ImportJob en estado PREVIEWED."),
+      );
+      const user = userEvent.setup();
+      render(<ImportPriceListPage />);
+      await chooseFile(user);
+      await user.click(await screen.findByRole("button", { name: "Confirmar importación" }));
+      expect(await screen.findByText("No se pudo confirmar la importación")).toBeTruthy();
+      expect(screen.getByText(/solo se puede confirmar un ImportJob en estado PREVIEWED/)).toBeTruthy();
+      expect(screen.queryByRole("link", { name: /Ver lista de precios|Ir a Listas de precios/ })).toBeNull();
+      expect((screen.getByRole("button", { name: "Confirmar importación" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it("never links to an invalid list id", async () => {
+      mocks.previewPriceListImport.mockRejectedValue(
+        new ApiError(409, { ...duplicate, existing_price_list_id: "12; DROP" }),
+      );
+      const user = userEvent.setup();
+      render(<ImportPriceListPage />);
+      await chooseFile(user);
+      expect(await screen.findByText(duplicate.message)).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Ir a Listas de precios" }).getAttribute("href")).toBe(
+        "/donaldson/price-lists",
+      );
+    });
+
+    it("importing after the list was deleted goes through the normal flow to the success screen", async () => {
+      mocks.previewPriceListImport.mockResolvedValue(preview({ import_id: 2 }));
+      mocks.confirmImport.mockResolvedValue({
+        import_id: 2,
+        price_list_id: 13,
+        effective_date: "2025-10-20",
+        created_products: 0,
+        updated_products: 2,
+        price_items: 2,
+        cancelled: 0,
+        non_catalog: 0,
+        replacements: 0,
+        warnings: 0,
+      });
+      const user = userEvent.setup();
+      render(<ImportPriceListPage />);
+      await chooseFile(user);
+      await user.click(await screen.findByRole("button", { name: "Confirmar importación" }));
+      expect(mocks.confirmImport).toHaveBeenCalledWith(2);
+      expect(await screen.findByRole("button", { name: /Importar otr/ })).toBeTruthy();
+      expect(screen.queryByText("Este archivo ya está importado")).toBeNull();
+    });
   });
 });
