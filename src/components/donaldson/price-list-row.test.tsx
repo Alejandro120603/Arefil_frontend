@@ -67,7 +67,7 @@ describe("PriceListRow", () => {
     expect(dialog).toBeTruthy();
     expect(within(dialog).getByText(/donaldson-agosto\.xlsx/)).toBeTruthy();
     expect(within(dialog).getByText(/productos del catálogo NO serán eliminados/)).toBeTruthy();
-    expect(within(dialog).getByText(/sin lista de precios vigente/)).toBeTruthy();
+    expect(within(dialog).getByText(/no estén en ninguna otra lista quedarán sin\s+lista de precios vigente/)).toBeTruthy();
     expect(within(dialog).getByText("Podrás volver a importar el mismo archivo más adelante.")).toBeTruthy();
     expect(mocks.deletePriceList).not.toHaveBeenCalled();
   });

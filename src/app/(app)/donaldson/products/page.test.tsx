@@ -65,4 +65,26 @@ describe("Productos", () => {
     expect((screen.getByLabelText("Lista de precios") as HTMLSelectElement).value).toBe("false");
     expect(screen.getByText("Limpiar").closest("a")?.getAttribute("href")).toBe("/donaldson/products");
   });
+
+  it("with an older backend that ignores the filter, shows no rows as matches", async () => {
+    api.listProducts.mockResolvedValue({
+      items: [product({ id: 3, part_number: "P-3" })],
+      meta: { page: 1, page_size: 25, total_items: 1, total_pages: 1 },
+    });
+    await renderPage({ has_price_list: "false" });
+    expect(screen.getByText("Filtro no disponible")).toBeTruthy();
+    expect(screen.queryByText("P-3")).toBeNull();
+    // Without the filter the same backend's catalog is shown as usual.
+    cleanup();
+    await renderPage();
+    expect(screen.queryByText("Filtro no disponible")).toBeNull();
+    expect(screen.getByText("P-3")).toBeTruthy();
+  });
+
+  it("an empty filtered result is a normal empty state", async () => {
+    api.listProducts.mockResolvedValue({ items: [], meta: { page: 1, page_size: 25, total_items: 0, total_pages: 0 } });
+    await renderPage({ has_price_list: "false" });
+    expect(screen.getByText("No hay productos que coincidan con los filtros aplicados.")).toBeTruthy();
+    expect(screen.queryByText("Filtro no disponible")).toBeNull();
+  });
 });

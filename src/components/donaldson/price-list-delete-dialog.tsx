@@ -68,8 +68,8 @@ export function PriceListDeleteDialog({
           <AlertDialogDescription>
             ¿Deseas eliminar la lista &quot;{priceList.source_filename}&quot;?
             <span className="mt-2 block">
-              Los productos del catálogo NO serán eliminados: seguirán en Productos, sin lista de precios vigente,
-              y no se podrán cotizar hasta que se importe otra lista que los incluya.
+              Los productos del catálogo NO serán eliminados. Los que no estén en ninguna otra lista quedarán sin
+              lista de precios vigente y no se podrán cotizar hasta que se importe una que los incluya.
             </span>
             <span className="mt-2 block">Podrás volver a importar el mismo archivo más adelante.</span>
             <span className="mt-2 block">Esta acción no se puede deshacer.</span>
