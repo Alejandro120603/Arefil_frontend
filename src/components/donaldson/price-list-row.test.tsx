@@ -67,6 +67,8 @@ describe("PriceListRow", () => {
     expect(dialog).toBeTruthy();
     expect(within(dialog).getByText(/donaldson-agosto\.xlsx/)).toBeTruthy();
     expect(within(dialog).getByText(/productos del catálogo NO serán eliminados/)).toBeTruthy();
+    expect(within(dialog).getByText(/sin lista de precios vigente/)).toBeTruthy();
+    expect(within(dialog).getByText("Podrás volver a importar el mismo archivo más adelante.")).toBeTruthy();
     expect(mocks.deletePriceList).not.toHaveBeenCalled();
   });
 
@@ -102,7 +104,7 @@ describe("PriceListRow", () => {
     resolveDelete?.();
     await waitFor(() => expect(screen.queryByText(PRICE_LIST.source_filename)).toBeNull());
 
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Lista de precios eliminada correctamente");
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Lista de precios eliminada. Los productos del catálogo se conservan.");
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
