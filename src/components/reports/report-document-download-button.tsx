@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FileSpreadsheet, Loader2 } from "lucide-react";
+import { FileSpreadsheet, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError, getUserErrorMessage } from "@/lib/api/errors";
 import { downloadReportDocumentXlsx } from "@/lib/api/reports";
@@ -11,12 +11,28 @@ import {
   STALE_EXECUTION_MESSAGE,
   TRUNCATED_EXECUTION_MESSAGE,
 } from "@/lib/reports/report-execution-errors";
+import { XLSX_MEDIA_TYPE } from "@/lib/reports/report-excel-template";
 
 /** A report with no active template is a configuration state, not a failure. */
 const MISSING_TEMPLATE_MESSAGE =
   "Este reporte todavía no tiene una plantilla Excel configurada. Puedes descargar los datos con los botones de abajo.";
 
 export { STALE_EXECUTION_MESSAGE };
+
+/**
+ * Both renderers (BONATTI and letterhead) answer with the XLSX media type.
+ * Anything else — an HTML error page from an intermediary, a JSON body with
+ * a 200 — must never be saved under an `.xlsx` name.
+ */
+function isXlsxBlob(blob: Blob): boolean {
+  return blob.type.split(";")[0].trim().toLowerCase() === XLSX_MEDIA_TYPE;
+}
+
+function isLetterheadDocumentError(error: unknown): error is ApiError {
+  if (!(error instanceof ApiError) || error.detail == null || typeof error.detail !== "object") return false;
+  const code = (error.detail as Record<string, unknown>).code;
+  return typeof code === "string" && code.startsWith("LETTERHEAD_");
+}
 
 /** A snapshot that can never produce this file: gone, foreign, or a truncated preview. */
 function isUnusableExecution(error: unknown): boolean {
@@ -27,6 +43,9 @@ function documentErrorMessage(error: unknown): string {
   const failure = executionExportFailure(error);
   if (failure === "truncated") return TRUNCATED_EXECUTION_MESSAGE;
   if (failure === "stale") return STALE_EXECUTION_MESSAGE;
+  // A letterhead execution never uses a BONATTI template: its refusals
+  // (integrity, document limits) carry their own message.
+  if (isLetterheadDocumentError(error)) return error.message;
   if (error instanceof ApiError && (error.status === 404 || error.status === 409)) return MISSING_TEMPLATE_MESSAGE;
   return getUserErrorMessage(error, "No se pudo generar el documento Excel.");
 }
@@ -74,8 +93,15 @@ export function ReportDocumentDownloadButton({
     setError(null);
     try {
       const result = await downloadReportDocumentXlsx(code, executionId, { signal: controller.signal });
+      // The execution may have been discarded (an edit, another presentation)
+      // between the response and this line: never save a file for it.
+      if (controller.signal.aborted) return;
       if (result.blob.size === 0) {
         setError("El backend devolvió un documento vacío.");
+        return;
+      }
+      if (!isXlsxBlob(result.blob)) {
+        setError("El backend no devolvió un documento Excel válido. Intenta de nuevo.");
         return;
       }
       /*
@@ -93,6 +119,13 @@ export function ReportDocumentDownloadButton({
     }
   }
 
+  /** The user gives up on this file: nothing is saved and no error is shown. */
+  function cancel() {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    setDownloading(false);
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-2">
@@ -100,6 +133,11 @@ export function ReportDocumentDownloadButton({
           {downloading ? <Loader2 className="animate-spin" /> : <FileSpreadsheet />}
           {downloading ? "Generando..." : "Descargar documento Excel"}
         </Button>
+        {downloading && (
+          <Button type="button" variant="ghost" onClick={cancel}>
+            <X /> Cancelar
+          </Button>
+        )}
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       {!error && executionId == null && (

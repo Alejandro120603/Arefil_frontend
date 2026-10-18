@@ -114,6 +114,7 @@ export function ReportRuntimeParameters({
                       className={CONTROL_CLASS}
                       value={String(value)}
                       disabled={disabled || loadingOptions}
+                      data-runtime-field={parameter.name}
                       aria-invalid={error != null}
                       aria-describedby={error ? `${id}-error` : undefined}
                       onChange={(event) => onChange(parameter.name, event.target.value)}
@@ -133,6 +134,7 @@ export function ReportRuntimeParameters({
                       step={parameter.data_type === "decimal" ? "any" : undefined}
                       value={String(value)}
                       disabled={disabled}
+                      data-runtime-field={parameter.name}
                       aria-invalid={error != null}
                       aria-describedby={error ? `${id}-error` : undefined}
                       onChange={(event) => onChange(parameter.name, event.target.value)}

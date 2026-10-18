@@ -30,7 +30,7 @@ export function ImportProductsSampleTable({ products, currency, totalProducts }:
               <TableHead>Número de artículo</TableHead>
               <TableHead>Descripción</TableHead>
               <TableHead className="text-right">Precio unitario</TableHead>
-              <TableHead>Estado</TableHead>
+              <TableHead>Marca del proveedor</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -38,19 +38,18 @@ export function ImportProductsSampleTable({ products, currency, totalProducts }:
               <TableRow key={`${product.part_number}-${index}`}>
                 <TableCell className="font-medium">{product.part_number}</TableCell>
                 <TableCell>{product.item_number ?? "—"}</TableCell>
-                <TableCell className="max-w-xs truncate">{product.description ?? "—"}</TableCell>
+                <TableCell className="min-w-48 max-w-sm whitespace-normal break-words">{product.description ?? "—"}</TableCell>
                 <TableCell className="text-right">{formatCurrency(product.unit_price, currency ?? undefined)}</TableCell>
                 <TableCell>
-                  {product.is_new ? (
-                    <Badge>Nuevo</Badge>
-                  ) : (
-                    <Badge variant="secondary">Existente</Badge>
-                  )}
+                  {product.is_new ? <Badge>Nuevo</Badge> : <span className="text-muted-foreground">—</span>}
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
+        <p className="mt-2 text-xs text-muted-foreground">
+          «Nuevo» es la marca que el proveedor pone en su lista; no indica si el producto ya existe en el catálogo de AREFIL.
+        </p>
       </CardContent>
     </Card>
   );

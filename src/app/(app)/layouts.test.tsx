@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/donaldson/reports" }));
 import { RequirePermission } from "@/components/auth/require-permission";
 import AdministrationLayout from "./administracion/layout";
 import BackupsLayout from "./administracion/respaldos/layout";
+import LetterheadAdministrationLayout from "./administracion/membretes/layout";
 import ReportAdministrationLayout from "./administracion/reportes/layout";
 import ImportLayout from "./donaldson/import/layout";
 import AuthenticatedLayout from "./layout";
@@ -43,6 +44,7 @@ describe("authenticated layouts", () => {
   it.each([
     ["administración", AdministrationLayout, ["reports:admin", "system:backup"]],
     ["reportes", ReportAdministrationLayout, ["reports:admin"]],
+    ["membretes", LetterheadAdministrationLayout, ["reports:admin"]],
     ["respaldos", BackupsLayout, ["system:backup"]],
     ["importar lista", ImportLayout, ["catalog:write"]],
   ] as const)("guards %s with the right permission", (_, Layout, anyOf) => {
@@ -79,7 +81,7 @@ describe("authenticated layouts", () => {
     const links = [...document.querySelectorAll("nav a")].map((link) => link.getAttribute("href"));
     expect(links).toEqual([
       "/", "/donaldson/import", "/donaldson/price-lists", "/donaldson/products", "/donaldson/cancelados",
-      "/donaldson/reports", "/administracion/respaldos", "/administracion/reportes",
+      "/donaldson/reports", "/administracion/respaldos", "/administracion/reportes", "/administracion/membretes",
     ]);
   });
 });

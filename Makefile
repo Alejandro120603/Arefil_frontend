@@ -9,8 +9,12 @@ BACKEND_DIR ?= ../Arefil_backend/backend
 FRONTEND_DIR ?= .
 BACKEND_PORT ?= 8000
 FRONTEND_PORT ?= 3001
-BACKEND_DATA_DIR ?= ../Arefil_backend/backend/data
-COMPOSE_PROJECT_NAME ?= arefil
+# Docker Compose settings (COMPOSE_FILE, BACKEND_DATA_DIR, AREFIL_*, ...) are
+# read by Compose itself from .env. Make passes BACKEND_DATA_DIR and
+# COMPOSE_PROJECT_NAME on only when given explicitly (`make docker_up
+# BACKEND_DATA_DIR=...` or exported), so a value in .env is never shadowed.
+COMPOSE_OVERRIDES = $(if $(BACKEND_DATA_DIR),BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)") \
+	$(if $(COMPOSE_PROJECT_NAME),COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)")
 
 # Backend deps live in a venv that is a sibling of backend/ (matches
 # Arefil_backend/README.md's own `python3 -m venv .venv` instructions).
@@ -87,31 +91,30 @@ test_deploy_config:
 
 ## Validate Docker, Compose, the sibling backend, and the persistent data path.
 docker_preflight:
-	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" ./scripts/docker_preflight.sh
+	@$(COMPOSE_OVERRIDES) ./scripts/docker_preflight.sh
 
-## Start the HTTPS deployment (Caddy + frontend + backend) and wait for healthchecks.
+## Start the HTTPS deployment (edge from COMPOSE_FILE: Caddy by default, or
+## Cloudflare Tunnel with compose.cloudflare.yaml) and wait for healthchecks.
 docker_up: docker_preflight
-	@AREFIL_UID="$$(id -u)" AREFIL_GID="$$(id -g)" \
-		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+	@AREFIL_UID="$$(id -u)" AREFIL_GID="$$(id -g)" $(COMPOSE_OVERRIDES) \
 		docker compose up --detach --build --wait
 
 ## Stop and remove containers/network. Persistent backend data is never removed.
 docker_down: docker_preflight
-	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+	@$(COMPOSE_OVERRIDES) \
 		docker compose down
 
 ## Follow logs for both application services.
 docker_logs: docker_preflight
-	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
-		docker compose logs --follow --tail=100 caddy frontend backend report-execution-cleanup
+	@$(COMPOSE_OVERRIDES) \
+		docker compose logs --follow --tail=100
 
 ## Show Compose service and health status.
 docker_ps: docker_preflight
-	@BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+	@$(COMPOSE_OVERRIDES) \
 		docker compose ps
 
 ## Rebuild/recreate both services without deleting persistent data.
 docker_rebuild: docker_preflight
-	@AREFIL_UID="$$(id -u)" AREFIL_GID="$$(id -g)" \
-		BACKEND_DATA_DIR="$(BACKEND_DATA_DIR)" COMPOSE_PROJECT_NAME="$(COMPOSE_PROJECT_NAME)" \
+	@AREFIL_UID="$$(id -u)" AREFIL_GID="$$(id -g)" $(COMPOSE_OVERRIDES) \
 		docker compose up --detach --build --force-recreate --wait

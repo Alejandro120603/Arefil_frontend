@@ -43,8 +43,14 @@ export function isCrossOriginWrite(request: Request): boolean {
  * way in is a reverse proxy (Caddy in `compose.yaml`) that overwrites it with
  * the address it actually saw. Otherwise nothing is forwarded and the backend
  * falls back to its per-username budget plus this proxy's own address.
+ *
+ * Cloudflare does not overwrite a client-sent `X-Forwarded-For` (it appends to
+ * it), so behind a Cloudflare Tunnel `CLIENT_IP_HEADER=cf-connecting-ip` names
+ * the header Cloudflare always sets itself; it takes precedence when set.
  */
 export function trustedClientAddress(request: Request): string | null {
+  const clientIpHeader = process.env.CLIENT_IP_HEADER?.trim().toLowerCase();
+  if (clientIpHeader) return request.headers.get(clientIpHeader)?.trim() || null;
   if (process.env.TRUST_PROXY_FORWARDED_FOR?.trim().toLowerCase() !== "true") return null;
   const first = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return first || null;

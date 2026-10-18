@@ -2,7 +2,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDate, formatDateTime } from "@/lib/format/date";
-import { formatCurrency, formatNumber, parseDecimal } from "@/lib/format/decimal";
+import { formatCurrency, formatDecimal, formatNumber, parseDecimal } from "@/lib/format/decimal";
+import { cn } from "@/lib/utils";
 import type {
   ReportBuilderPreviewColumn,
   ReportBuilderPreviewResponse,
@@ -25,10 +26,11 @@ function formatCell(value: unknown, column: ReportBuilderPreviewColumn): string 
     case "currency":
       return formatCurrency(text);
     case "number":
-      return formatNumber(text);
+      return column.data_type === "decimal" ? formatDecimal(text) : formatNumber(text);
     case "percent": {
       const parsed = parseDecimal(text);
-      return parsed == null ? text : `${formatNumber(text)}%`;
+      if (parsed == null) return text;
+      return `${column.data_type === "decimal" ? formatDecimal(text) : formatNumber(text)}%`;
     }
     case "date":
       return formatDate(text);
@@ -37,6 +39,21 @@ function formatCell(value: unknown, column: ReportBuilderPreviewColumn): string 
     default:
       return text;
   }
+}
+
+/**
+ * Free text (descriptions) wraps inside a bounded width; numbers keep one line
+ * and align right, so long descriptions never push the amounts off screen.
+ */
+function isNumericColumn(column: ReportBuilderPreviewColumn): boolean {
+  if (column.format_type == null) return column.data_type === "integer" || column.data_type === "decimal";
+  return column.format_type === "currency" || column.format_type === "number" || column.format_type === "percent";
+}
+
+function cellClassName(column: ReportBuilderPreviewColumn): string | undefined {
+  if (isNumericColumn(column)) return "text-right tabular-nums";
+  if (column.data_type === "string") return "min-w-36 max-w-56 whitespace-normal break-words";
+  return undefined;
 }
 
 /** A summary carries its own format; the row cell formatter handles the rest. */
@@ -118,14 +135,18 @@ export function ReportBuilderPreviewTable({
           <Table>
             <TableHeader>
               <TableRow>
-                {preview.columns.map((column) => <TableHead key={column.key}>{column.label}</TableHead>)}
+                {preview.columns.map((column) => (
+                  <TableHead key={column.key} className={cn("whitespace-normal", isNumericColumn(column) && "text-right")}>
+                    {column.label}
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {preview.rows.map((row, index) => (
                 <TableRow key={index}>
                   {preview.columns.map((column) => (
-                    <TableCell key={column.key}>{formatCell(row[column.key], column)}</TableCell>
+                    <TableCell key={column.key} className={cellClassName(column)}>{formatCell(row[column.key], column)}</TableCell>
                   ))}
                 </TableRow>
               ))}
@@ -134,7 +155,7 @@ export function ReportBuilderPreviewTable({
                   {preview.columns.map((column, index) => {
                     const total = values[column.key];
                     return (
-                      <TableCell key={column.key} className="font-medium">
+                      <TableCell key={column.key} className={cn("font-medium", cellClassName(column))}>
                         {total !== undefined ? formatCell(total, column) : index === 0 ? "Totales" : ""}
                       </TableCell>
                     );

@@ -31,6 +31,7 @@ export function ReportProductSearch({
   label,
   disabled = false,
   invalid = false,
+  touchKey,
   onSelect,
 }: {
   code: string;
@@ -43,6 +44,8 @@ export function ReportProductSearch({
   label: string;
   disabled?: boolean;
   invalid?: boolean;
+  /** Identifies the row cell when the form records which fields were visited. */
+  touchKey?: string;
   onSelect: (option: ReportProductOption | null) => void;
 }) {
   const listId = useId();
@@ -123,7 +126,7 @@ export function ReportProductSearch({
     return (
       <div className="flex items-start gap-1">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{selected.part_number}</p>
+          <p className="truncate text-sm font-medium" title={selected.part_number}>{selected.part_number}</p>
           {selected.item_number && <p className="truncate text-xs text-muted-foreground">Item {selected.item_number}</p>}
         </div>
         <button
@@ -158,6 +161,7 @@ export function ReportProductSearch({
         aria-controls={listId}
         aria-autocomplete="list"
         aria-invalid={invalid}
+        data-runtime-cell={touchKey}
         autoComplete="off"
         placeholder="Buscar parte, item o descripción"
         value={query}
@@ -203,7 +207,7 @@ export function ReportProductSearch({
                     onClick={() => choose(option)}
                   >
                     <span className="block font-medium">{option.part_number}</span>
-                    <span className="block truncate text-muted-foreground">{option.description ?? option.item_number ?? "Sin descripción"}</span>
+                    <span className="block break-words text-muted-foreground">{option.description ?? option.item_number ?? "Sin descripción"}</span>
                   </button>
                 </li>
               ))}

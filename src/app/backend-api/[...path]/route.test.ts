@@ -179,4 +179,35 @@ describe("backend API proxy", () => {
     const upstream = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
     expect(upstream.get("x-forwarded-for")).toBe("192.168.1.20");
   });
+
+  it("behind Cloudflare forwards CF-Connecting-IP and ignores a client-sent X-Forwarded-For", async () => {
+    vi.stubEnv("API_INTERNAL_URL", "http://backend:8000/api");
+    vi.stubEnv("CLIENT_IP_HEADER", "CF-Connecting-IP");
+    vi.stubEnv("TRUST_PROXY_FORWARDED_FOR", "true");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new NextRequest("https://arefil.test/backend-api/auth/me", {
+      headers: { "x-forwarded-for": "6.6.6.6, 203.0.113.7", "cf-connecting-ip": "203.0.113.7" },
+    });
+
+    await GET(request, { params: Promise.resolve({ path: ["auth", "me"] }) });
+
+    const upstream = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(upstream.get("x-forwarded-for")).toBe("203.0.113.7");
+  });
+
+  it("forwards no client address when the configured header is missing", async () => {
+    vi.stubEnv("API_INTERNAL_URL", "http://backend:8000/api");
+    vi.stubEnv("CLIENT_IP_HEADER", "cf-connecting-ip");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new NextRequest("https://arefil.test/backend-api/auth/me", {
+      headers: { "x-forwarded-for": "6.6.6.6" },
+    });
+
+    await GET(request, { params: Promise.resolve({ path: ["auth", "me"] }) });
+
+    const upstream = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(upstream.get("x-forwarded-for")).toBeNull();
+  });
 });
