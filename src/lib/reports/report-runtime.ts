@@ -32,6 +32,70 @@ export interface RuntimeFormValidation extends RuntimeParameterValidation {
   rowErrors: Record<string, Record<number, Record<string, string>>>;
 }
 
+/** A required field that is still empty: pending, not wrong. */
+export const REQUIRED_FIELD_MESSAGE = "Este campo es requerido.";
+
+/** What the user has done to the form so far (Frontend #42, D9). */
+export interface RuntimeInteraction {
+  /** Scalar parameters the user changed. */
+  fields: ReadonlySet<string>;
+  /** Row cells the user changed, as `runtimeCellKey(group, row.id, field)`. */
+  cells: ReadonlySet<string>;
+  /** The user pressed «Generar» while the form was incomplete or invalid. */
+  attempted: boolean;
+}
+
+export function runtimeCellKey(groupName: string, rowId: string, fieldName: string): string {
+  return `${groupName}:${rowId}:${fieldName}`;
+}
+
+/**
+ * Validation stays complete — it still decides whether anything is sent —
+ * but a required field that is merely empty is not shown as an error until
+ * the user has touched it or tried to generate. Wrong values (a non-integer
+ * quantity, a discount over 100) are always shown.
+ */
+export function visibleRuntimeErrors(
+  validation: RuntimeFormValidation,
+  groupValues: RuntimeGroupValues,
+  interaction: RuntimeInteraction,
+): Pick<RuntimeFormValidation, "fieldErrors" | "rowErrors"> {
+  const shown = (message: string, touched: boolean) =>
+    interaction.attempted || touched || message !== REQUIRED_FIELD_MESSAGE;
+  const fieldErrors = Object.fromEntries(
+    Object.entries(validation.fieldErrors).filter(([name, message]) => shown(message, interaction.fields.has(name))),
+  );
+  const rowErrors: RuntimeFormValidation["rowErrors"] = {};
+  for (const [groupName, rows] of Object.entries(validation.rowErrors)) {
+    for (const [index, fields] of Object.entries(rows)) {
+      const rowId = groupValues[groupName]?.[Number(index)]?.id ?? "";
+      for (const [fieldName, message] of Object.entries(fields)) {
+        if (!shown(message, interaction.cells.has(runtimeCellKey(groupName, rowId, fieldName)))) continue;
+        rowErrors[groupName] ??= {};
+        rowErrors[groupName][Number(index)] ??= {};
+        rowErrors[groupName][Number(index)][fieldName] = message;
+      }
+    }
+  }
+  return { fieldErrors, rowErrors };
+}
+
+/** Row cells whose value differs between two versions of the form. */
+export function changedRuntimeCells(previous: RuntimeGroupValues, next: RuntimeGroupValues): string[] {
+  const changed: string[] = [];
+  for (const [groupName, rows] of Object.entries(next)) {
+    const before = new Map((previous[groupName] ?? []).map((row) => [row.id, row.values]));
+    for (const row of rows) {
+      const old = before.get(row.id);
+      if (old == null) continue; // a new, untouched row
+      for (const [fieldName, value] of Object.entries(row.values)) {
+        if (old[fieldName] !== value) changed.push(runtimeCellKey(groupName, row.id, fieldName));
+      }
+    }
+  }
+  return changed;
+}
+
 export function orderedReportParameters(parameters: ReportParameter[]): ReportParameter[] {
   return parameters
     .map((parameter, index) => ({ parameter, index }))
@@ -131,7 +195,7 @@ function numericConstraint(configuration: ReportNumericConfiguration, key: "mini
 
 function validateGroupField(field: ReportParameterGroupField, raw: RuntimeParameterValue): string | null {
   const empty = typeof raw === "string" && raw.trim() === "";
-  if (field.required && empty) return "Este campo es requerido.";
+  if (field.required && empty) return REQUIRED_FIELD_MESSAGE;
   if (empty) return null;
 
   if (typeof raw === "string" && field.input_type === "number") {
@@ -176,7 +240,7 @@ export function validateRuntimeParameters(
     const raw = values[parameter.name] ?? (parameter.input_type === "checkbox" ? false : "");
     const empty = typeof raw === "string" && raw.trim() === "";
     if (parameter.required && empty) {
-      fieldErrors[parameter.name] = "Este campo es requerido.";
+      fieldErrors[parameter.name] = REQUIRED_FIELD_MESSAGE;
       continue;
     }
     if (empty) continue;

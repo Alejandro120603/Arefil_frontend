@@ -6,6 +6,8 @@
  * Parse them at render/format time (see `src/lib/format`).
  */
 
+import type { ReportExecutionPresentation } from "./letterhead-runtime";
+
 export type DecimalString = string;
 
 export interface PageMeta {
@@ -113,6 +115,11 @@ export interface ImportProductSample {
   item_number: string | null;
   description: string | null;
   unit_price: DecimalString;
+  /**
+   * The supplier's own "NEW" mark on the row (Donaldson's NEW/NUEVOS column;
+   * always false for Fleetguard). It says nothing about AREFIL's catalog: the
+   * preview contract carries no "already in the catalog" flag.
+   */
   is_new: boolean;
 }
 
@@ -786,4 +793,9 @@ export interface ReportBuilderPreviewResponse {
   totals: Record<string, DecimalString | null>;
   row_count: number;
   truncated: boolean;
+  /**
+   * Presentation the backend froze in this execution (Backend #39): the
+   * authority for describing it afterwards. `letterhead: null` is «Sin membrete».
+   */
+  presentation?: ReportExecutionPresentation;
 }

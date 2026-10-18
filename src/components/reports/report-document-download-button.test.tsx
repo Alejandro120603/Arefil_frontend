@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReportDocumentDownloadButton } from "./report-document-download-button";
 import { ApiError } from "@/lib/api/errors";
+import { XLSX_MEDIA_TYPE } from "@/lib/reports/report-excel-template";
 
 const { downloadReportDocumentXlsx, triggerBrowserDownload } = vi.hoisted(() => ({
   downloadReportDocumentXlsx: vi.fn(), triggerBrowserDownload: vi.fn(),
@@ -40,7 +41,7 @@ describe("ReportDocumentDownloadButton", () => {
 
   it("keeps the backend filename and uses the report code only as fallback", async () => {
     downloadReportDocumentXlsx.mockResolvedValue({
-      blob: new Blob(["PK"]),
+      blob: new Blob(["PK"], { type: XLSX_MEDIA_TYPE }),
       filename: "COTIZACION_PRODUCTOS-documento.xlsx",
     });
     const user = userEvent.setup();
@@ -112,7 +113,7 @@ describe("ReportDocumentDownloadButton", () => {
   it("surfaces a render failure and stays usable for a retry", async () => {
     downloadReportDocumentXlsx
       .mockRejectedValueOnce(new ApiError(500, "Falló el render."))
-      .mockResolvedValueOnce({ blob: new Blob(["PK"]), filename: null });
+      .mockResolvedValueOnce({ blob: new Blob(["PK"], { type: XLSX_MEDIA_TYPE }), filename: null });
     const user = userEvent.setup();
     render(<ReportDocumentDownloadButton code="COTIZACION" executionId={EXECUTION_ID} />);
 
@@ -135,5 +136,72 @@ describe("ReportDocumentDownloadButton", () => {
     await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
     expect(await screen.findByText("El backend devolvió un documento vacío.")).toBeTruthy();
     expect(triggerBrowserDownload).not.toHaveBeenCalled();
+  });
+
+  it("shows the letterhead document's own refusal instead of the missing-template hint", async () => {
+    downloadReportDocumentXlsx
+      .mockRejectedValueOnce(new ApiError(409, { code: "LETTERHEAD_INTEGRITY", message: "El membrete guardado no supera la verificación de integridad." }))
+      .mockRejectedValueOnce(new ApiError(422, { code: "LETTERHEAD_DOCUMENT_LIMIT", message: "El documento excede 100 páginas.", limit: "pages" }));
+    const user = userEvent.setup();
+    render(<ReportDocumentDownloadButton code="PRUEBA_COTIZACION" executionId={EXECUTION_ID} />);
+
+    await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
+    expect(await screen.findByText("El membrete guardado no supera la verificación de integridad.")).toBeTruthy();
+    expect(screen.queryByText(/plantilla Excel configurada/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
+    expect(await screen.findByText("El documento excede 100 páginas.")).toBeTruthy();
+    expect(triggerBrowserDownload).not.toHaveBeenCalled();
+  });
+
+  it("never saves a response that is not an XLSX file, and accepts the XLSX media type with parameters", async () => {
+    downloadReportDocumentXlsx
+      .mockResolvedValueOnce({ blob: new Blob(["<html>"], { type: "text/html" }), filename: "COTIZACION-documento.xlsx" })
+      .mockResolvedValueOnce({ blob: new Blob(["PK"]), filename: "COTIZACION-documento.xlsx" })
+      .mockResolvedValueOnce({ blob: new Blob(["PK"], { type: `${XLSX_MEDIA_TYPE}; charset=binary` }), filename: "COTIZACION-documento.xlsx" });
+    const user = userEvent.setup();
+    render(<ReportDocumentDownloadButton code="COTIZACION" executionId={EXECUTION_ID} />);
+    const button = () => screen.getByRole("button", { name: "Descargar documento Excel" }) as HTMLButtonElement;
+
+    await user.click(button());
+    expect(await screen.findByText(/no devolvió un documento Excel válido/)).toBeTruthy();
+    await waitFor(() => expect(button().disabled).toBe(false));
+    await user.click(button());
+    await waitFor(() => expect(downloadReportDocumentXlsx).toHaveBeenCalledTimes(2));
+    expect(triggerBrowserDownload).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(button().disabled).toBe(false));
+    await user.click(button());
+    await waitFor(() => expect(triggerBrowserDownload).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/no devolvió un documento Excel válido/)).toBeNull();
+  });
+
+  it("lets the user cancel a slow document: nothing is saved, no error, and it can be downloaded again", async () => {
+    let resolveFirst!: (value: { blob: Blob; filename: string }) => void;
+    let signal: AbortSignal | undefined;
+    downloadReportDocumentXlsx
+      .mockImplementationOnce((_code: string, _id: string, init: { signal: AbortSignal }) => {
+        signal = init.signal;
+        return new Promise((resolve) => { resolveFirst = resolve; });
+      })
+      .mockResolvedValueOnce({ blob: new Blob(["PK"], { type: XLSX_MEDIA_TYPE }), filename: "COTIZACION-documento.xlsx" });
+    const user = userEvent.setup();
+    render(<ReportDocumentDownloadButton code="COTIZACION" executionId={EXECUTION_ID} />);
+
+    await user.click(screen.getByRole("button", { name: "Descargar documento Excel" }));
+    expect(screen.getByRole("button", { name: "Generando..." })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByRole("button", { name: "Cancelar" })).toBeNull();
+    // A response that ignored the abort is still never saved.
+    await act(async () => resolveFirst({ blob: new Blob(["PK"], { type: XLSX_MEDIA_TYPE }), filename: "tarde.xlsx" }));
+    expect(triggerBrowserDownload).not.toHaveBeenCalled();
+    expect(screen.queryByText(/No se pudo|vacío|válido/)).toBeNull();
+
+    const button = screen.getByRole("button", { name: "Descargar documento Excel" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    await user.click(button);
+    await waitFor(() => expect(triggerBrowserDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: "COTIZACION-documento.xlsx" }), "COTIZACION-documento.xlsx",
+    ));
   });
 });
