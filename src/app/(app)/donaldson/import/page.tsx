@@ -232,7 +232,9 @@ export default function ImportDonaldsonPage() {
               <TriangleAlert className="h-4 w-4" />
               <AlertTitle>
                 {state.error.duplicate
-                  ? "Este archivo ya está importado"
+                  ? state.error.duplicate.priceListId !== null
+                    ? "Este archivo ya está importado"
+                    : "Este archivo ya se importó antes"
                   : state.error.context === "analyze"
                     ? "No se pudo analizar el archivo"
                     : "No se pudo confirmar la importación"}

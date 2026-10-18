@@ -151,6 +151,10 @@ describe("Importar lista de precios", () => {
       render(<ImportPriceListPage />);
       await chooseFile(user);
       expect(await screen.findByText(DUPLICATE_IMPORT_FALLBACK_MESSAGE)).toBeTruthy();
+      // That 409 doesn't prove the list still exists, so nothing claims it does.
+      expect(screen.getByText("Este archivo ya se importó antes")).toBeTruthy();
+      expect(screen.queryByText("Este archivo ya está importado")).toBeNull();
+      expect(screen.queryByText(/está disponible/)).toBeNull();
       expect(screen.queryByRole("link", { name: "Ver lista de precios" })).toBeNull();
       expect(screen.getByRole("link", { name: "Ir a Listas de precios" }).getAttribute("href")).toBe(
         "/donaldson/price-lists",

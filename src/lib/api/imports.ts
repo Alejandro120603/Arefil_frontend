@@ -84,8 +84,12 @@ export interface DuplicateImportDetail {
   supplier?: string;
 }
 
+/**
+ * For older backends: their 409 only proves a completed import exists, and its
+ * list may have been deleted since, so this never claims the list is live.
+ */
 export const DUPLICATE_IMPORT_FALLBACK_MESSAGE =
-  "Este archivo ya está importado y su lista de precios está disponible en Listas de precios.";
+  "Este archivo ya se importó antes. Revisa en Listas de precios si su lista sigue disponible.";
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
