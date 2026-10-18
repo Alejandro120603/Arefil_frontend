@@ -40,7 +40,7 @@ export function PriceListDeleteDialog({
     try {
       await deletePriceList(priceList.id);
       onOpenChange(false);
-      toast.success("Lista de precios eliminada correctamente");
+      toast.success("Lista de precios eliminada. Los productos del catálogo se conservan.");
       onDeleted();
     } catch (error) {
       toast.error(
@@ -67,7 +67,11 @@ export function PriceListDeleteDialog({
           <AlertDialogTitle>Eliminar lista de precios</AlertDialogTitle>
           <AlertDialogDescription>
             ¿Deseas eliminar la lista &quot;{priceList.source_filename}&quot;?
-            <span className="mt-2 block">Los productos del catálogo NO serán eliminados.</span>
+            <span className="mt-2 block">
+              Los productos del catálogo NO serán eliminados. Los que no estén en ninguna otra lista quedarán sin
+              lista de precios vigente y no se podrán cotizar hasta que se importe una que los incluya.
+            </span>
+            <span className="mt-2 block">Podrás volver a importar el mismo archivo más adelante.</span>
             <span className="mt-2 block">Esta acción no se puede deshacer.</span>
           </AlertDialogDescription>
         </AlertDialogHeader>
