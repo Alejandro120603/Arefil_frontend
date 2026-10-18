@@ -6,6 +6,7 @@ export interface ListProductsParams extends PageParams {
   search?: string;
   part_number?: string;
   item_number?: string;
+  has_price_list?: boolean;
 }
 
 export function listProducts(params: ListProductsParams = {}): Promise<Page<Product>> {

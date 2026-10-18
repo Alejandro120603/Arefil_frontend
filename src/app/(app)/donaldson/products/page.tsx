@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { ErrorAlert } from "@/components/donaldson/error-alert";
 import { PaginationControls } from "@/components/donaldson/pagination-controls";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,7 @@ import type { Page, Product } from "@/types/api";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 25;
+const PRICE_LIST_FILTERS = { all: "", with: "true", without: "false" } as const;
 
 interface ProductsPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -27,6 +29,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const search = firstValue(params.search) ?? "";
   const partNumber = firstValue(params.part_number) ?? "";
   const itemNumber = firstValue(params.item_number) ?? "";
+  const priceListFilter = firstValue(params.has_price_list);
+  const hasPriceList = priceListFilter === "true" ? true : priceListFilter === "false" ? false : undefined;
   const page = Number(firstValue(params.page) ?? "1") || 1;
   const pageSize = Number(firstValue(params.page_size) ?? String(DEFAULT_PAGE_SIZE)) || DEFAULT_PAGE_SIZE;
 
@@ -37,6 +41,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
       search: search || undefined,
       part_number: partNumber || undefined,
       item_number: itemNumber || undefined,
+      has_price_list: hasPriceList,
       page,
       page_size: pageSize,
     });
@@ -44,7 +49,12 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
     errorMessage = getErrorMessage(error);
   }
 
-  const hasFilters = Boolean(search || partNumber || itemNumber);
+  const hasFilters = Boolean(search || partNumber || itemNumber || hasPriceList !== undefined);
+  // An older backend ignores has_price_list and sends no flag: its rows are
+  // not filtered, so they must not be shown as matches.
+  const priceListFilterUnsupported =
+    hasPriceList !== undefined && data !== null && data.items.some((product) => product.has_price_list === undefined);
+  const rows = priceListFilterUnsupported ? null : data;
 
   return (
     <div className="flex flex-col gap-6">
@@ -76,6 +86,19 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
               <Input id="item_number" name="item_number" defaultValue={itemNumber} className="w-40" />
             </div>
             <div className="flex flex-col gap-1.5">
+              <Label htmlFor="has_price_list">Lista de precios</Label>
+              <select
+                id="has_price_list"
+                name="has_price_list"
+                defaultValue={hasPriceList === undefined ? PRICE_LIST_FILTERS.all : String(hasPriceList)}
+                className="h-8 w-44 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+              >
+                <option value={PRICE_LIST_FILTERS.all}>Todos</option>
+                <option value={PRICE_LIST_FILTERS.with}>Con lista vigente</option>
+                <option value={PRICE_LIST_FILTERS.without}>Sin lista vigente</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
               <Label htmlFor="page_size">Por página</Label>
               <select
                 id="page_size"
@@ -103,8 +126,14 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
       </Card>
 
       {errorMessage && <ErrorAlert title="No se pudo cargar el catálogo" message={errorMessage} />}
+      {priceListFilterUnsupported && (
+        <ErrorAlert
+          title="Filtro no disponible"
+          message="El servidor todavía no admite el filtro por lista de precios. Elige «Todos» para ver el catálogo."
+        />
+      )}
 
-      {data && data.items.length === 0 && !errorMessage && (
+      {rows && rows.items.length === 0 && !errorMessage && (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
             {hasFilters
@@ -114,7 +143,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
         </Card>
       )}
 
-      {data && data.items.length > 0 && (
+      {rows && rows.items.length > 0 && (
         <Card>
           <CardContent className="flex flex-col gap-4">
             <Table>
@@ -129,9 +158,16 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.items.map((product) => (
+                {rows.items.map((product) => (
                   <TableRow key={product.id}>
-                    <TableCell className="font-medium">{product.part_number}</TableCell>
+                    <TableCell className="font-medium">
+                      {product.part_number}
+                      {product.has_price_list === false && (
+                        <Badge variant="secondary" className="ml-2" title="Ninguna lista de precios vigente incluye este producto">
+                          Sin lista vigente
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell>{product.item_number ?? "—"}</TableCell>
                     <TableCell className="max-w-xs truncate" title={product.description ?? undefined}>{product.description ?? "—"}</TableCell>
                     <TableCell>{product.sat_code ?? "—"}</TableCell>
@@ -150,7 +186,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                 ))}
               </TableBody>
             </Table>
-            <PaginationControls meta={data.meta} basePath="/donaldson/products" searchParams={params} />
+            <PaginationControls meta={rows.meta} basePath="/donaldson/products" searchParams={params} />
           </CardContent>
         </Card>
       )}

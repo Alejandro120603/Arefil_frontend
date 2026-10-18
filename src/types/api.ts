@@ -86,6 +86,8 @@ export interface Product {
   sat_code: string | null;
   created_at: string;
   updated_at: string;
+  /** False when no live price list includes it. Absent on older backends. */
+  has_price_list?: boolean;
 }
 
 export interface PriceHistoryEntry {
