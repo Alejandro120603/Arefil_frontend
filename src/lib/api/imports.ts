@@ -70,26 +70,43 @@ export function confirmImport(importId: number): Promise<ImportConfirmResult> {
 }
 
 /**
- * `POST /imports/{supplier}/preview` responds 409 with this shape when the
- * same file was already imported. `existing_import_id` points at the
- * ImportJob, not a PriceList — there is no endpoint to resolve one from the
- * other, so callers must not link/navigate to a PriceList from it.
+ * `POST /imports/{supplier}/preview` and `POST /imports/{id}/confirm` respond
+ * 409 with this shape when the supplier already has a live price list built
+ * from the same file. `existing_price_list_id` is that list; older backends
+ * only sent `existing_import_id` (an ImportJob, never a PriceList id) and a
+ * message naming it, so both stay optional here.
  */
 export interface DuplicateImportDetail {
   message: string;
   existing_import_id: number;
+  existing_price_list_id?: number;
+  effective_date?: string;
+  supplier?: string;
+}
+
+/**
+ * For older backends: their 409 only proves a completed import exists, and its
+ * list may have been deleted since, so this never claims the list is live.
+ */
+export const DUPLICATE_IMPORT_FALLBACK_MESSAGE =
+  "Este archivo ya se importó antes. Revisa en Listas de precios si su lista sigue disponible.";
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
 export function getDuplicateImportDetail(error: unknown): DuplicateImportDetail | null {
   if (!(error instanceof ApiError) || error.status !== 409) return null;
   const detail = error.detail;
-  if (
-    detail &&
-    typeof detail === "object" &&
-    typeof (detail as Record<string, unknown>).existing_import_id === "number" &&
-    typeof (detail as Record<string, unknown>).message === "string"
-  ) {
-    return detail as DuplicateImportDetail;
-  }
-  return null;
+  if (!detail || typeof detail !== "object") return null;
+  const record = detail as Record<string, unknown>;
+  if (typeof record.existing_import_id !== "number" || typeof record.message !== "string") return null;
+  return {
+    // The old message named the ImportJob, which means nothing to the user.
+    message: /ImportJob\s*#/.test(record.message) ? DUPLICATE_IMPORT_FALLBACK_MESSAGE : record.message,
+    existing_import_id: record.existing_import_id,
+    ...(isPositiveInteger(record.existing_price_list_id) && { existing_price_list_id: record.existing_price_list_id }),
+    ...(typeof record.effective_date === "string" && { effective_date: record.effective_date }),
+    ...(typeof record.supplier === "string" && { supplier: record.supplier }),
+  };
 }

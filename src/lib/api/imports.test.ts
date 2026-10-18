@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { previewPriceListImport } from "./imports";
+import { ApiError } from "./errors";
+import { DUPLICATE_IMPORT_FALLBACK_MESSAGE, getDuplicateImportDetail, previewPriceListImport } from "./imports";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -34,5 +35,42 @@ describe("price-list import API", () => {
     );
     const body = fetchMock.mock.calls[0]?.[1]?.body as FormData;
     expect(body.get("file")).toBe(file);
+  });
+});
+
+describe("getDuplicateImportDetail", () => {
+  const detail = {
+    message: "Este archivo ya está importado: es la lista de precios de FLEETGUARD vigente desde el 2026-07-01.",
+    existing_import_id: 5,
+    existing_price_list_id: 7,
+    effective_date: "2026-07-01",
+    supplier: "FLEETGUARD",
+  };
+
+  it("reads the current 409 contract", () => {
+    expect(getDuplicateImportDetail(new ApiError(409, detail))).toEqual(detail);
+  });
+
+  it("accepts the older contract and drops its ImportJob wording", () => {
+    expect(
+      getDuplicateImportDetail(
+        new ApiError(409, { message: "Este archivo ya fue importado exitosamente (ImportJob #1).", existing_import_id: 1 }),
+      ),
+    ).toEqual({ message: DUPLICATE_IMPORT_FALLBACK_MESSAGE, existing_import_id: 1 });
+  });
+
+  it.each([0, -1, 1.5, "7", null])("ignores an unusable price list id (%s)", (existing_price_list_id) => {
+    expect(getDuplicateImportDetail(new ApiError(409, { ...detail, existing_price_list_id }))).not.toHaveProperty(
+      "existing_price_list_id",
+    );
+  });
+
+  it.each([
+    ["a text 409", new ApiError(409, "ImportJob #1 está en estado 'FAILED'.")],
+    ["another status", new ApiError(422, detail)],
+    ["no message", new ApiError(409, { existing_import_id: 1 })],
+    ["not an ApiError", new Error("x")],
+  ])("is null for %s", (_label, error) => {
+    expect(getDuplicateImportDetail(error)).toBeNull();
   });
 });

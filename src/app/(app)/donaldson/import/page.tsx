@@ -45,11 +45,14 @@ interface ImportState {
   error: {
     context: ErrorContext;
     message: string;
-    duplicateImportId: number | null;
+    /** Set when the file already is a live price list; `priceListId` is null on older backends. */
+    duplicate: { priceListId: number | null } | null;
     /** The backend's own wording when `message` rephrases it for the user. */
     detail: string | null;
   } | null;
 }
+
+type DescribedError = Omit<NonNullable<ImportState["error"]>, "context">;
 
 const initialState: ImportState = {
   phase: "idle",
@@ -64,10 +67,10 @@ type Action =
   | { type: "CLEAR_FILE" }
   | { type: "ANALYZE_START" }
   | { type: "ANALYZE_SUCCESS"; preview: ImportPreviewResponse }
-  | { type: "ANALYZE_ERROR"; message: string; duplicateImportId: number | null; detail: string | null }
+  | ({ type: "ANALYZE_ERROR" } & DescribedError)
   | { type: "CONFIRM_START" }
   | { type: "CONFIRM_SUCCESS"; result: ImportConfirmResult }
-  | { type: "CONFIRM_ERROR"; message: string }
+  | ({ type: "CONFIRM_ERROR" } & DescribedError)
   | { type: "RESET" };
 
 function reducer(state: ImportState, action: Action): ImportState {
@@ -88,12 +91,7 @@ function reducer(state: ImportState, action: Action): ImportState {
       return {
         ...state,
         phase: "error",
-        error: {
-          context: "analyze",
-          message: action.message,
-          duplicateImportId: action.duplicateImportId,
-          detail: action.detail,
-        },
+        error: { context: "analyze", message: action.message, duplicate: action.duplicate, detail: action.detail },
       };
     case "CONFIRM_START":
       return { ...state, phase: "confirming", error: null };
@@ -103,7 +101,7 @@ function reducer(state: ImportState, action: Action): ImportState {
       return {
         ...state,
         phase: "error",
-        error: { context: "confirm", message: action.message, duplicateImportId: null, detail: null },
+        error: { context: "confirm", message: action.message, duplicate: action.duplicate, detail: action.detail },
       };
     case "RESET":
       return initialState;
@@ -112,19 +110,20 @@ function reducer(state: ImportState, action: Action): ImportState {
   }
 }
 
-function describeError(
-  error: unknown,
-  supplier: PriceListImportSupplier,
-): { message: string; duplicateImportId: number | null; detail: string | null } {
+function describeError(error: unknown, supplier: PriceListImportSupplier): DescribedError {
   const duplicate = getDuplicateImportDetail(error);
   if (duplicate) {
-    return { message: duplicate.message, duplicateImportId: duplicate.existing_import_id, detail: null };
+    return {
+      message: duplicate.message,
+      duplicate: { priceListId: duplicate.existing_price_list_id ?? null },
+      detail: null,
+    };
   }
   const format = getSupplierFormatError(error, supplier);
   if (format) {
-    return { message: format.message, duplicateImportId: null, detail: format.detail };
+    return { message: format.message, duplicate: null, detail: format.detail };
   }
-  return { message: getErrorMessage(error), duplicateImportId: null, detail: null };
+  return { message: getErrorMessage(error), duplicate: null, detail: null };
 }
 
 export default function ImportDonaldsonPage() {
@@ -141,8 +140,7 @@ export default function ImportDonaldsonPage() {
       const preview = await previewPriceListImport(supplier, file);
       dispatch({ type: "ANALYZE_SUCCESS", preview });
     } catch (error) {
-      const { message, duplicateImportId, detail } = describeError(error, supplier);
-      dispatch({ type: "ANALYZE_ERROR", message, duplicateImportId, detail });
+      dispatch({ type: "ANALYZE_ERROR", ...describeError(error, supplier) });
     } finally {
       submittingRef.current = false;
     }
@@ -156,8 +154,7 @@ export default function ImportDonaldsonPage() {
       const result = await confirmImport(state.preview.import_id);
       dispatch({ type: "CONFIRM_SUCCESS", result });
     } catch (error) {
-      const { message } = describeError(error, supplier);
-      dispatch({ type: "CONFIRM_ERROR", message });
+      dispatch({ type: "CONFIRM_ERROR", ...describeError(error, supplier) });
     } finally {
       submittingRef.current = false;
     }
@@ -167,7 +164,9 @@ export default function ImportDonaldsonPage() {
   const isConfirming = state.phase === "confirming";
   const showFileCard = state.file && state.phase !== "success";
   const showPreview = state.preview && state.phase !== "success";
-  const canConfirm = state.preview !== null && state.preview.summary.errors === 0 && !isConfirming;
+  // A duplicate on confirm closes the job on the backend, so it can't be retried.
+  const canConfirm =
+    state.preview !== null && state.preview.summary.errors === 0 && !isConfirming && !state.error?.duplicate;
 
   return (
     <div className="flex flex-col gap-6">
@@ -232,21 +231,31 @@ export default function ImportDonaldsonPage() {
             <Alert variant="destructive">
               <TriangleAlert className="h-4 w-4" />
               <AlertTitle>
-                {state.error.context === "analyze" ? "No se pudo analizar el archivo" : "No se pudo confirmar la importación"}
+                {state.error.duplicate
+                  ? state.error.duplicate.priceListId !== null
+                    ? "Este archivo ya está importado"
+                    : "Este archivo ya se importó antes"
+                  : state.error.context === "analyze"
+                    ? "No se pudo analizar el archivo"
+                    : "No se pudo confirmar la importación"}
               </AlertTitle>
               <AlertDescription>
                 <p>{state.error.message}</p>
                 {state.error.detail && (
                   <p className="mt-1 text-xs opacity-80">Detalle técnico: {state.error.detail}</p>
                 )}
-                {state.error.duplicateImportId !== null && (
+                {state.error.duplicate && (
                   <p className="mt-1">
-                    Referencia: ImportJob #{state.error.duplicateImportId}. El backend no expone una forma de
-                    resolver la lista de precios asociada a esa importación desde aquí; consúltala en{" "}
-                    <Link href="/donaldson/price-lists" className="underline underline-offset-2">
-                      Listas de precios
+                    <Link
+                      href={
+                        state.error.duplicate.priceListId !== null
+                          ? `/donaldson/price-lists/${state.error.duplicate.priceListId}`
+                          : "/donaldson/price-lists"
+                      }
+                      className="font-medium underline underline-offset-2"
+                    >
+                      {state.error.duplicate.priceListId !== null ? "Ver lista de precios" : "Ir a Listas de precios"}
                     </Link>
-                    .
                   </p>
                 )}
               </AlertDescription>
