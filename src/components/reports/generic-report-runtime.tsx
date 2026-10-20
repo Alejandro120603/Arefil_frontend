@@ -34,6 +34,7 @@ import {
   reportExecutionId,
   initialRuntimeGroupValues,
   initialRuntimeValues,
+  parameterCurrency,
   parameterDisplayValues,
   validateRuntimeForm,
   visibleRuntimeErrors,
@@ -57,6 +58,8 @@ interface SuccessfulExecution {
   documentAvailable: boolean;
   /** Labels of the option-backed values sent (`price_list_id` → its name), fixed at generation. */
   parameterLabels: Record<string, string>;
+  /** Currency of the price list sent, fixed at generation; amounts are shown in it. */
+  currency: string | null;
   /**
    * Presentation the backend froze for this execution (Backend #39), shown
    * as returned — never re-derived from the live catalog. `undefined` when
@@ -250,6 +253,7 @@ function ReportRuntimeForCode({
         executionId: reportExecutionId(payload),
         documentAvailable: reportDocumentAvailable(payload),
         parameterLabels: parameterDisplayValues(report.parameters, parameters, parameterOptions),
+        currency: parameterCurrency(report.parameters, parameters, parameterOptions),
         frozenLetterhead: requestedLetterhead !== undefined ? frozenLetterhead(payload) : undefined,
       });
       setGeneratedOnce(true);
@@ -322,6 +326,7 @@ function ReportRuntimeForCode({
             code={report.code}
             groups={groups}
             scalarValues={values}
+            scalarOptions={parameterOptions}
             lineAmount={lineAmount}
             values={groupValues}
             disabled={generating}
@@ -359,6 +364,7 @@ function ReportRuntimeForCode({
               summaries={summaries}
               parameters={report.parameters}
               parameterLabels={execution.parameterLabels}
+              currency={execution.currency}
             />
           </section>
           <Card id="descargas" className="scroll-mt-6">

@@ -5,7 +5,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportRepeatableParameters } from "./report-repeatable-parameters";
-import { initialRuntimeGroupValues, type RuntimeGroupValues } from "@/lib/reports/report-runtime";
+import { createRuntimeGroupRow, initialRuntimeGroupValues, type RuntimeGroupValues } from "@/lib/reports/report-runtime";
+import { formatCurrency, formatNumber } from "@/lib/format/decimal";
 import type { ReportColumn, ReportParameterGroup, ReportProductOption, ReportSummaryConfiguration } from "@/types/api";
 
 const { resolveReportProductOption, searchReportProductOptions } = vi.hoisted(() => ({
@@ -199,5 +200,194 @@ describe("ReportRepeatableParameters", () => {
     render(<Harness />);
     await user.click(screen.getByRole("combobox", { name: "Producto 1" }));
     expect(await screen.findByText("No se pudieron buscar productos.")).toBeTruthy();
+  });
+});
+
+const MANUAL_GROUP: ReportParameterGroup = {
+  ...GROUP,
+  max_items: null,
+  allow_manual_items: true,
+  fields: GROUP.fields.filter((field) => field.name !== "delivery_time"),
+};
+
+/** The definitive quotation formula: `line.unit_price` prices list and manual lines. */
+const QUOTATION_LINE = {
+  columns: [
+    column("unit_price", { source_field: "line.unit_price" }),
+    column("quantity", { column_type: "PARAMETER", source_parameter: "items.quantity", data_type: "integer" }),
+    column("discount", { column_type: "PARAMETER", source_parameter: "items.discount" }),
+    column("discounted_unit_price", { column_type: "FORMULA", formula_definition: "ROUND(unit_price * (1 - discount / 100), 2)" }),
+    column("line_total", { column_type: "FORMULA", formula_definition: "ROUND(quantity * discounted_unit_price, 2)" }),
+  ],
+  summaries: DISCOUNTED_LINE.summaries,
+};
+
+const PRICE_LISTS = {
+  price_list_id: [
+    { value: 7, label: "DONALDSON · 2025-10-20 · MXN · lista.xlsx", currency: "MXN" },
+    { value: 9, label: "FLEETGUARD · 2026-01-01 · USD · fg.xlsx", currency: "USD" },
+    { value: 11, label: "Lista anterior" },
+  ],
+};
+
+function ManualHarness({
+  context = "7",
+  onValues,
+  options = PRICE_LISTS,
+}: {
+  context?: string;
+  onValues?: (values: RuntimeGroupValues) => void;
+  options?: Record<string, { value: number; label: string; currency?: string }[]>;
+}) {
+  const [values, setValues] = useState<RuntimeGroupValues>(() => initialRuntimeGroupValues([MANUAL_GROUP]));
+  return (
+    <ReportRepeatableParameters
+      code="PRODUCTOS_DESCUENTO"
+      groups={[MANUAL_GROUP]}
+      scalarValues={{ price_list_id: context }}
+      scalarOptions={options}
+      values={values}
+      onChange={(next) => { setValues(next); onValues?.(next); }}
+      lineAmount={QUOTATION_LINE}
+    />
+  );
+}
+
+async function typeInto(user: ReturnType<typeof userEvent.setup>, label: string, text: string) {
+  const input = screen.getByLabelText(label);
+  await user.clear(input);
+  await user.type(input, text);
+}
+
+describe("ReportRepeatableParameters — productos fuera de lista", () => {
+  it("offers list and manual products; a manual one needs no price list", async () => {
+    const user = userEvent.setup();
+    render(<ManualHarness context="" />);
+    expect((screen.getByRole("button", { name: "Producto de lista" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Agregar producto" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+    expect(screen.getByText("Fuera de lista")).toBeTruthy();
+    for (const label of ["Descripción * 2", "No. de parte 2", "Unidad 2", "Precio unitario * 2"]) {
+      expect(screen.getByLabelText(label)).toBeTruthy();
+    }
+    // The list row keeps its product search.
+    expect(screen.getByRole("combobox", { name: "Producto 1" })).toBeTruthy();
+    expect(screen.getByText("Lista")).toBeTruthy();
+  });
+
+  it("mixes list and manual lines in capture order and estimates each one immediately", async () => {
+    const user = userEvent.setup();
+    let latest: RuntimeGroupValues = {};
+    render(<ManualHarness onValues={(values) => { latest = values; }} />);
+    await pickFilter(user);
+    await typeInto(user, "Cantidad * 1", "2");
+    await typeInto(user, "Descuento (%) 1", "10");
+
+    await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+    await typeInto(user, "Descripción * 2", "Servicio especial de fabricación");
+    await typeInto(user, "Precio unitario * 2", "800");
+    await typeInto(user, "Descuento (%) 2", "15");
+    await user.click(screen.getByRole("button", { name: "Producto de lista" }));
+
+    // 574.13 × 0.90 = 516.72 (rounded) × 2 = 1,033.44; 800 × 0.85 = 680.00 × 1.
+    expect(screen.getByText("$516.72")).toBeTruthy();
+    expect(screen.getByText("$1,033.44")).toBeTruthy();
+    expect(screen.getAllByText("$680.00")).toHaveLength(2);
+    await typeInto(user, "Cantidad * 2", "3");
+    expect(screen.getByText("$2,040.00")).toBeTruthy();
+
+    expect(latest.items.map((row) => row.origin)).toEqual(["LIST_PRODUCT", "MANUAL_PRODUCT", "LIST_PRODUCT"]);
+    expect(latest.items[1].values).toMatchObject({ description: "Servicio especial de fabricación", unit_price: "800", quantity: "3" });
+    // Manual lines never touch the price of the list lines.
+    expect(screen.getByText("$1,033.44")).toBeTruthy();
+  });
+
+  it("deletes a manual line without disturbing the list lines around it", async () => {
+    const user = userEvent.setup();
+    let latest: RuntimeGroupValues = {};
+    render(<ManualHarness onValues={(values) => { latest = values; }} />);
+    await pickFilter(user);
+    await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+    await typeInto(user, "Descripción * 2", "Temporal");
+    await user.click(screen.getByRole("button", { name: "Producto de lista" }));
+    await user.click(screen.getByRole("button", { name: "Eliminar renglón 2" }));
+
+    expect(screen.queryByLabelText("Descripción * 2")).toBeNull();
+    expect(latest.items.map((row) => row.origin)).toEqual(["LIST_PRODUCT", "LIST_PRODUCT"]);
+    expect(screen.getByText("Filtro Donaldson")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Producto 2" })).toBeTruthy();
+  });
+
+  it("shows the errors of a manual line under its own fields", () => {
+    const values = { items: [createRuntimeGroupRow(MANUAL_GROUP, "m", "MANUAL_PRODUCT")] };
+    render(
+      <ReportRepeatableParameters
+        code="COTIZACION_PRODUCTOS"
+        groups={[MANUAL_GROUP]}
+        scalarValues={{ price_list_id: "7" }}
+        values={values}
+        onChange={() => undefined}
+        errors={{ items: { 0: { description: "Este campo es requerido.", unit_price: "admite como máximo dos decimales." } } }}
+      />,
+    );
+    expect(screen.getByText("Este campo es requerido.")).toBeTruthy();
+    expect(screen.getByText("admite como máximo dos decimales.")).toBeTruthy();
+    expect(screen.getByLabelText("Descripción * 1").getAttribute("aria-invalid")).toBe("true");
+    // A manual line has no product search to revalidate.
+    expect(resolveReportProductOption).not.toHaveBeenCalled();
+  });
+});
+
+/** As shown on screen: Intl separates «USD» with a no-break space, which queries normalize. */
+const shown = (text: string) => text.replace(/\s+/g, " ");
+
+describe("ReportRepeatableParameters — moneda de la lista seleccionada", () => {
+  async function manualOnly(user: ReturnType<typeof userEvent.setup>) {
+    // Only manual lines: the first (list) row is removed first.
+    await user.click(screen.getByRole("button", { name: "Eliminar renglón 1" }));
+    await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+    await typeInto(user, "Descripción * 1", "Servicio especial");
+    await typeInto(user, "Precio unitario * 1", "800");
+    await typeInto(user, "Descuento (%) 1", "15");
+  }
+
+  it("prices manual-only quotations in MXN for an MXN list", async () => {
+    const user = userEvent.setup();
+    render(<ManualHarness context="7" />);
+    await manualOnly(user);
+    expect(screen.getAllByText("$680.00")).toHaveLength(2);
+    expect(screen.getByText("MXN")).toBeTruthy();
+  });
+
+  it("prices manual-only quotations in USD for a USD list, never in MXN", async () => {
+    const user = userEvent.setup();
+    render(<ManualHarness context="9" />);
+    await manualOnly(user);
+    expect(screen.getAllByText(shown(formatCurrency("680", "USD")))).toHaveLength(2);
+    expect(screen.queryByText("$680.00")).toBeNull();
+    expect(screen.getByText("USD")).toBeTruthy();
+  });
+
+  it("prices list and manual lines of a mixed USD quotation in USD", async () => {
+    searchReportProductOptions.mockResolvedValue([{ ...FILTER, currency: "USD" }]);
+    resolveReportProductOption.mockResolvedValue({ ...FILTER, currency: "USD" });
+    const user = userEvent.setup();
+    render(<ManualHarness context="9" />);
+    await pickFilter(user);
+    await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+    await typeInto(user, "Descripción * 2", "Servicio especial");
+    await typeInto(user, "Precio unitario * 2", "800");
+    // List line: 574.13 at 0 %; manual line: 800 at 0 %.
+    expect(screen.getAllByText(shown(formatCurrency("574.13", "USD"))).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(shown(formatCurrency("800", "USD")))).toHaveLength(2);
+    expect(screen.queryByText(/^\$/)).toBeNull();
+  });
+
+  it("shows a plain number when the list's currency is unknown instead of guessing MXN", async () => {
+    const user = userEvent.setup();
+    render(<ManualHarness context="11" />);
+    await manualOnly(user);
+    expect(screen.queryByText("$680.00")).toBeNull();
+    expect(screen.getAllByText(shown(formatNumber("680")))).toHaveLength(2);
   });
 });

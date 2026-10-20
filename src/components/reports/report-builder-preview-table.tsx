@@ -18,13 +18,13 @@ import type {
  * backend's formula engine — nothing here recalculates a monetary value, the
  * formatting below is presentation only.
  */
-function formatCell(value: unknown, column: ReportBuilderPreviewColumn): string {
+function formatCell(value: unknown, column: ReportBuilderPreviewColumn, currency?: string | null): string {
   if (value == null) return "—";
   if (typeof value === "boolean") return value ? "Sí" : "No";
   const text = String(value);
   switch (column.format_type) {
     case "currency":
-      return formatCurrency(text);
+      return currency ? formatCurrency(text, currency) : formatCurrency(text);
     case "number":
       return column.data_type === "decimal" ? formatDecimal(text) : formatNumber(text);
     case "percent": {
@@ -57,13 +57,13 @@ function cellClassName(column: ReportBuilderPreviewColumn): string | undefined {
 }
 
 /** A summary carries its own format; the row cell formatter handles the rest. */
-function formatSummary(value: unknown, summary: ReportSummaryConfiguration | null): string {
+function formatSummary(value: unknown, summary: ReportSummaryConfiguration | null, currency?: string | null): string {
   return formatCell(value, {
     key: summary?.key ?? "",
     label: summary?.label ?? "",
     data_type: "decimal",
     format_type: summary?.format_type ?? "number",
-  });
+  }, currency);
 }
 
 export function ReportBuilderPreviewTable({
@@ -72,6 +72,7 @@ export function ReportBuilderPreviewTable({
   parameters = [],
   title = "Vista previa del reporte",
   parameterLabels = {},
+  currency,
 }: {
   preview: ReportBuilderPreviewResponse;
   /** Saved summary configuration, the only place their labels exist. */
@@ -81,6 +82,8 @@ export function ReportBuilderPreviewTable({
   title?: string;
   /** Human labels for option-backed parameters (`price_list_id` → its list's name). */
   parameterLabels?: Record<string, string>;
+  /** Currency of the execution's price list; MXN when unknown, as before. */
+  currency?: string | null;
 }) {
   const values = preview.summary ?? preview.totals;
   // A pre-#20 layout keys its totals by column, and renders under that column.
@@ -91,7 +94,7 @@ export function ReportBuilderPreviewTable({
     ? []
     : Object.entries(values).map(([key, value]) => {
       const summary = summaries.find((candidate) => candidate.key === key) ?? null;
-      return { key, label: summary?.label || key, value: formatSummary(value, summary) };
+      return { key, label: summary?.label || key, value: formatSummary(value, summary, currency) };
     });
   const parameterRows = Object.entries(preview.parameters ?? {})
     .filter(([, value]) => value != null && value !== "")
@@ -146,7 +149,7 @@ export function ReportBuilderPreviewTable({
               {preview.rows.map((row, index) => (
                 <TableRow key={index}>
                   {preview.columns.map((column) => (
-                    <TableCell key={column.key} className={cellClassName(column)}>{formatCell(row[column.key], column)}</TableCell>
+                    <TableCell key={column.key} className={cellClassName(column)}>{formatCell(row[column.key], column, currency)}</TableCell>
                   ))}
                 </TableRow>
               ))}
@@ -156,7 +159,7 @@ export function ReportBuilderPreviewTable({
                     const total = values[column.key];
                     return (
                       <TableCell key={column.key} className={cn("font-medium", cellClassName(column))}>
-                        {total !== undefined ? formatCell(total, column) : index === 0 ? "Totales" : ""}
+                        {total !== undefined ? formatCell(total, column, currency) : index === 0 ? "Totales" : ""}
                       </TableCell>
                     );
                   })}

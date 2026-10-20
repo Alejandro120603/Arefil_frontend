@@ -119,3 +119,44 @@ describe("estimateDiscountedUnitPrice", () => {
     expect(estimateDiscountedUnitPrice(PRODUCT, "invalid")).toBeNull();
   });
 });
+
+describe("manual lines (MANUAL_PRODUCT)", () => {
+  /** The definitive quotation: `line.unit_price` resolves list and manual lines. */
+  const QUOTATION = {
+    columns: [
+      column("unit_price", { source_field: "line.unit_price" }),
+      column("quantity", { column_type: "PARAMETER", source_parameter: "items.quantity", data_type: "integer" }),
+      column("discount", { column_type: "PARAMETER", source_parameter: "items.discount" }),
+      column("discounted", { column_type: "FORMULA", formula_definition: "ROUND(unit_price * (1 - discount / 100), 2)" }),
+      column("line_total", { column_type: "FORMULA", formula_definition: "ROUND(quantity * discounted, 2)" }),
+    ],
+    summaries: [SUM("line_total")],
+  };
+  const lineEstimate = (row: Record<string, string>, product: ReportProductOption | null, manual: { unit_price: string } | null) =>
+    estimateLineAmount({ ...QUOTATION, groupName: "items", row, scalars: {}, product, manual });
+
+  it("prices a manual line from the captured price", () => {
+    expect(lineEstimate({ quantity: "3", discount: "33.33" }, null, { unit_price: "99.99" })).toBe(199.98);
+    expect(lineEstimate({ quantity: "1", discount: "100" }, null, { unit_price: "800" })).toBe(0);
+  });
+
+  it("prices a list line from the list through line.unit_price", () => {
+    expect(lineEstimate({ quantity: "2", discount: "10" }, PRODUCT, null)).toBe(225);
+  });
+
+  it("stays unknown until the manual price is captured", () => {
+    expect(lineEstimate({ quantity: "2", discount: "0" }, null, { unit_price: "" })).toBeNull();
+    expect(lineEstimate({ quantity: "2", discount: "0" }, null, null)).toBeNull();
+  });
+
+  it("never gives a manual line a list price", () => {
+    const listPriced = { ...QUOTATION, columns: QUOTATION.columns.map((item) => item.key === "unit_price" ? { ...item, source_field: "price_list_item.unit_price" } : item) };
+    expect(estimateLineAmount({ ...listPriced, groupName: "items", row: { quantity: "1", discount: "0" }, scalars: {}, product: null, manual: { unit_price: "50" } })).toBeNull();
+  });
+
+  it("estimates the discounted price of a manual line", () => {
+    expect(estimateDiscountedUnitPrice({ unit_price: "800.00" }, "15")).toBe(680);
+    expect(estimateDiscountedUnitPrice({ unit_price: "" }, "15")).toBeNull();
+    expect(estimateDiscountedUnitPrice({ unit_price: "-1" }, "15")).toBeNull();
+  });
+});

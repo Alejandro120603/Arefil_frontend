@@ -242,3 +242,38 @@ it("notifies the wizard when editing parameters invalidates a generated preview"
   expect(onPreviewInvalidated).toHaveBeenCalled();
   expect(screen.queryByText("Vista previa basada en plantilla v4")).toBeNull();
 });
+
+it("estimates manual rows in the selected list's currency (USD), never MXN", async () => {
+  listAllReportParameterOptions.mockResolvedValue([{ value: 9, label: "FLEETGUARD · 2026-01-01 · USD", currency: "USD" }]);
+  const report: ReportDefinition = {
+    ...REPORT,
+    parameters: [{ name: "price_list_id", label: "Lista de precios", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "price_lists" } }],
+    parameter_groups: [{
+      name: "items", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id",
+      min_items: 0, max_items: null, display_order: 0, allow_manual_items: true,
+      fields: [
+        { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" } },
+        { name: "quantity", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: 0, exclusive_minimum: true } },
+      ],
+    }],
+  };
+  const lineAmount = {
+    columns: [
+      { key: "unit_price", label: "Precio", column_type: "FIELD" as const, source_field: "line.unit_price", source_parameter: null, formula_definition: null, data_type: "decimal" as const, format_type: "currency" as const, display_order: 0, visible: true, width: null },
+      { key: "quantity", label: "Cantidad", column_type: "PARAMETER" as const, source_field: null, source_parameter: "items.quantity", formula_definition: null, data_type: "integer" as const, format_type: "number" as const, display_order: 1, visible: true, width: null },
+      { key: "line_total", label: "Importe", column_type: "FORMULA" as const, source_field: null, source_parameter: null, formula_definition: "ROUND(quantity * unit_price, 2)", data_type: "decimal" as const, format_type: "currency" as const, display_order: 2, visible: true, width: null },
+    ],
+    summaries: [{ key: "subtotal", label: "Subtotal", column_key: "line_total", operation: "SUM" as const, formula_definition: null, format_type: "currency" as const }],
+  };
+  const user = userEvent.setup();
+  render(<ReportExcelTemplatePreview report={report} hasSummaries templateVersion={4} hasUnsavedChanges={false} lineAmount={lineAmount} />);
+  await screen.findByRole("option", { name: /USD/ });
+  await user.selectOptions(screen.getByLabelText(/Lista de precios/), "9");
+  await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+  await user.type(screen.getByLabelText("Descripción * 1"), "Servicio especial");
+  await user.type(screen.getByLabelText("Precio unitario * 1"), "800");
+  const usd = new Intl.NumberFormat("es-MX", { style: "currency", currency: "USD" }).format(800).replace(/\s+/g, " ");
+  expect(screen.getByText("USD")).toBeTruthy();
+  expect(screen.getByText(usd)).toBeTruthy();
+  expect(screen.queryByText("$800.00")).toBeNull();
+});

@@ -131,10 +131,30 @@ export function lineAmountColumn(
   return columns.find((column) => column.key === summed?.column_key) ?? null;
 }
 
-/** Source fields the selected product already carries; the browser knows no other. */
-function productField(sourceField: string | null, product: ReportProductOption | null): Value | undefined {
+/** What a manual line (MANUAL_PRODUCT) already says about its price. */
+export interface ManualLinePricing {
+  unit_price: RuntimeParameterValue | undefined;
+}
+
+/**
+ * Source fields the line already carries; the browser knows no other. A
+ * manual line has no catalog product nor list price, exactly like the
+ * backend row: only `line.unit_price` resolves for it.
+ */
+function lineField(
+  sourceField: string | null,
+  product: ReportProductOption | null,
+  manual: ManualLinePricing | null,
+): Value | undefined {
+  if (manual != null) {
+    if (sourceField === "line.unit_price") return numeric(manual.unit_price);
+    if (sourceField === "price_list_item.unit_price" || sourceField === "product.id") return null;
+    return undefined;
+  }
   if (product == null) return null;
-  if (sourceField === "price_list_item.unit_price") return numeric(product.unit_price);
+  if (sourceField === "price_list_item.unit_price" || sourceField === "line.unit_price") {
+    return numeric(product.unit_price);
+  }
   if (sourceField === "product.id") return product.product_id;
   return undefined;
 }
@@ -153,19 +173,28 @@ export interface LineEstimateInput {
   row: RuntimeParameterValues;
   scalars: RuntimeParameterValues;
   product: ReportProductOption | null;
+  /** Set for a manual line instead of `product`. */
+  manual?: ManualLinePricing | null;
 }
 
 /** Display-only discounted unit price; the backend Decimal result remains authoritative. */
 export function estimateDiscountedUnitPrice(
-  product: ReportProductOption | null,
+  product: { unit_price: RuntimeParameterValue | string | undefined } | null,
   rawDiscount: RuntimeParameterValue | undefined,
 ): number | null {
-  if (product == null || typeof rawDiscount === "boolean" || rawDiscount == null || rawDiscount === "") {
+  if (
+    product == null
+    || typeof product.unit_price !== "string"
+    || product.unit_price.trim() === ""
+    || typeof rawDiscount === "boolean"
+    || rawDiscount == null
+    || rawDiscount === ""
+  ) {
     return null;
   }
   const price = Number(product.unit_price);
   const discount = Number(rawDiscount);
-  if (!Number.isFinite(price) || !Number.isFinite(discount) || discount < 0 || discount > 100) {
+  if (!Number.isFinite(price) || price < 0 || !Number.isFinite(discount) || discount < 0 || discount > 100) {
     return null;
   }
   return roundHalfUp(price * (1 - discount / 100), 2);
@@ -174,7 +203,8 @@ export function estimateDiscountedUnitPrice(
 /** The estimated amount of one line, or `null` when it cannot be known yet. */
 export function estimateLineAmount(input: LineEstimateInput): number | null {
   const target = lineAmountColumn(input.columns, input.summaries);
-  if (target == null || input.product == null) return null;
+  const manual = input.manual ?? null;
+  if (target == null || (input.product == null && manual == null)) return null;
   const columnsByKey = new Map(input.columns.map((column) => [column.key, column]));
   const resolving = new Set<string>();
 
@@ -185,7 +215,7 @@ export function estimateLineAmount(input: LineEstimateInput): number | null {
     resolving.add(name);
     try {
       if (column.column_type === "FIELD") {
-        const value = productField(column.source_field, input.product);
+        const value = lineField(column.source_field, input.product, manual);
         if (value === undefined) throw new EstimateUnavailable();
         return value;
       }

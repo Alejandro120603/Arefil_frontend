@@ -13,9 +13,37 @@ import type {
 export type RuntimeParameterValue = string | boolean;
 export type RuntimeParameterValues = Record<string, RuntimeParameterValue>;
 
+/**
+ * Origin of a quotation line (Backend `services/reports/repeatable.py`). A
+ * LIST_PRODUCT line is a product of the selected price list, priced by it; a
+ * MANUAL_PRODUCT line is captured by hand and exists only in the execution.
+ */
+export const LIST_PRODUCT = "LIST_PRODUCT";
+export const MANUAL_PRODUCT = "MANUAL_PRODUCT";
+export type RuntimeLineOrigin = typeof LIST_PRODUCT | typeof MANUAL_PRODUCT;
+
+/** Reserved row keys a manual line sends instead of the product. */
+export const MANUAL_LINE_FIELDS = ["part_number", "description", "unit_of_measure", "unit_price"] as const;
+export type ManualLineField = (typeof MANUAL_LINE_FIELDS)[number];
+const MANUAL_TEXT_LIMITS: Record<Exclude<ManualLineField, "unit_price">, number> = {
+  part_number: 100,
+  description: 500,
+  unit_of_measure: 30,
+};
+/** Mirrors the backend bound; prices are exact decimals with at most two places. */
+const MAX_MANUAL_UNIT_PRICE = 9_999_999_999.99;
+const MANUAL_PRICE = /^\d+(?:\.\d{1,2})?$/;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+
 export interface RuntimeGroupRow {
   id: string;
   values: RuntimeParameterValues;
+  /** Only rows of a group with `allow_manual_items`; absent means a list product. */
+  origin?: RuntimeLineOrigin;
+}
+
+export function isManualRow(group: ReportParameterGroup, row: RuntimeGroupRow): boolean {
+  return group.allow_manual_items === true && row.origin === MANUAL_PRODUCT;
 }
 
 export type RuntimeGroupValues = Record<string, RuntimeGroupRow[]>;
@@ -154,11 +182,31 @@ export function initialRuntimeGroupValues(groups: ReportParameterGroup[]): Runti
   ]));
 }
 
-export function createRuntimeGroupRow(group: ReportParameterGroup, id: string): RuntimeGroupRow {
-  return {
-    id,
-    values: Object.fromEntries(orderedGroupFields(group.fields).map((field) => [field.name, initialValue(field)])),
-  };
+export function createRuntimeGroupRow(
+  group: ReportParameterGroup,
+  id: string,
+  origin: RuntimeLineOrigin = LIST_PRODUCT,
+): RuntimeGroupRow {
+  const values = Object.fromEntries(orderedGroupFields(group.fields).map((field) => [field.name, initialValue(field)]));
+  if (!group.allow_manual_items) return { id, values };
+  if (origin === MANUAL_PRODUCT) {
+    for (const field of MANUAL_LINE_FIELDS) values[field] = "";
+  }
+  return { id, values, origin };
+}
+
+function validateManualField(field: ManualLineField, raw: RuntimeParameterValue | undefined): string | null {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (field === "unit_price") {
+    if (text === "") return REQUIRED_FIELD_MESSAGE;
+    if (!MANUAL_PRICE.test(text)) return "Captura un precio no negativo con hasta dos decimales.";
+    if (Number(text) > MAX_MANUAL_UNIT_PRICE) return "El precio es demasiado grande.";
+    return null;
+  }
+  if (text === "") return field === "description" ? REQUIRED_FIELD_MESSAGE : null;
+  if (CONTROL_CHARACTERS.test(text)) return "No admite saltos de línea.";
+  const limit = MANUAL_TEXT_LIMITS[field];
+  return text.length > limit ? `Máximo ${limit} caracteres.` : null;
 }
 
 function isValidDate(value: string): boolean {
@@ -303,19 +351,40 @@ export function validateRuntimeForm(
       groupErrors[group.name] = `El grupo permite como máximo ${group.max_items} renglones.`;
     }
 
+    const product = productSearchField(group);
     payload[group.name] = rows.map((row, rowIndex) => {
       const serialized: Record<string, unknown> = {};
+      const manual = isManualRow(group, row);
+      const fail = (fieldName: string, error: string) => {
+        rowErrors[group.name] ??= {};
+        rowErrors[group.name][rowIndex] ??= {};
+        rowErrors[group.name][rowIndex][fieldName] = error;
+      };
+      if (group.allow_manual_items) serialized.origin = manual ? MANUAL_PRODUCT : LIST_PRODUCT;
       for (const field of orderedGroupFields(group.fields)) {
+        // A manual line is never linked to a catalog product.
+        if (manual && field.name === product?.name) continue;
         const raw = row.values[field.name] ?? (field.input_type === "checkbox" ? false : "");
         const error = validateGroupField(field, raw);
         if (error) {
-          rowErrors[group.name] ??= {};
-          rowErrors[group.name][rowIndex] ??= {};
-          rowErrors[group.name][rowIndex][field.name] = error;
+          fail(field.name, error);
           continue;
         }
         const empty = typeof raw === "string" && raw.trim() === "";
         if (!empty) serialized[field.name] = coerceValue(field, raw);
+      }
+      if (manual) {
+        for (const field of MANUAL_LINE_FIELDS) {
+          const raw = row.values[field];
+          const error = validateManualField(field, raw);
+          if (error) {
+            fail(field, error);
+            continue;
+          }
+          // Prices stay exact decimal strings; optional blanks are omitted.
+          const text = typeof raw === "string" ? raw.trim() : "";
+          if (text !== "") serialized[field] = text;
+        }
       }
       return serialized;
     });
@@ -365,6 +434,27 @@ export function parameterDisplayValues(
     if (option) labels[parameter.name] = option.label;
   }
   return labels;
+}
+
+/**
+ * Currency of the price list an execution was generated with, from the
+ * option the runtime loaded for the exact value sent; `null` when the report
+ * has no price list or the backend does not say (older versions).
+ */
+export function parameterCurrency(
+  parameters: ReportParameter[],
+  sent: Record<string, unknown>,
+  options: Record<string, ReportOption[]>,
+): string | null {
+  for (const parameter of parameters) {
+    const configuration = parameter.configuration_json as { options_source?: unknown } | null;
+    if (parameter.input_type !== "select" || configuration?.options_source !== "price_lists") continue;
+    const value = sent[parameter.name];
+    if (value == null || value === "") continue;
+    const option = (options[parameter.name] ?? []).find((candidate) => String(candidate.value) === String(value));
+    if (typeof option?.currency === "string" && option.currency !== "") return option.currency;
+  }
+  return null;
 }
 
 export function backendRowErrors(
