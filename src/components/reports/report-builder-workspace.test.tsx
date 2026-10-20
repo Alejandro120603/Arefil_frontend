@@ -643,6 +643,61 @@ describe("ReportBuilderWorkspace", () => {
     expect(screen.getByText("Cantidad:")).toBeTruthy();
   });
 
+  it("prices manual rows and the generated preview in the selected list's currency (USD)", async () => {
+    const quotationBuilder: ReportBuilderDefinition = {
+      ...SAVED_BUILDER,
+      report: { ...REPORT, parameters: [PRICE_LIST] },
+      columns: [
+        { key: "unit_price", label: "Precio", column_type: "FIELD", source_field: "line.unit_price", source_parameter: null, formula_definition: null, data_type: "decimal", format_type: "currency", display_order: 0, visible: true, width: null },
+        { key: "quantity", label: "Cantidad", column_type: "PARAMETER", source_field: null, source_parameter: "items.quantity", formula_definition: null, data_type: "integer", format_type: "number", display_order: 1, visible: true, width: null },
+        { key: "line_total", label: "Importe", column_type: "FORMULA", source_field: null, source_parameter: null, formula_definition: "ROUND(quantity * unit_price, 2)", data_type: "decimal", format_type: "currency", display_order: 2, visible: true, width: null },
+      ],
+      parameter_groups: [{
+        name: "items", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id",
+        min_items: 0, max_items: null, display_order: 0, allow_manual_items: true,
+        fields: [
+          { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" } },
+          { name: "quantity", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: 0, exclusive_minimum: true } },
+        ],
+      }],
+      excel_layout: {
+        ...SAVED_BUILDER.excel_layout!,
+        totals: [{ key: "subtotal", label: "Subtotal", column_key: "line_total", operation: "SUM", formula_definition: null, format_type: "currency" }],
+      },
+    };
+    getReportBuilderMock.mockResolvedValue(quotationBuilder);
+    listAllReportParameterOptionsMock.mockResolvedValue([{ value: 9, label: "FLEETGUARD · 2026-01-01 · USD", currency: "USD" }]);
+    previewReportBuilderMock.mockResolvedValue({
+      columns: [{ key: "line_total", label: "Importe", data_type: "decimal", format_type: "currency" }],
+      parameters: { price_list_id: 9 },
+      rows: [{ line_total: "1600.00" }],
+      summary: { subtotal: "1600.00" },
+      totals: { subtotal: "1600.00" },
+      row_count: 1,
+      truncated: false,
+    } satisfies ReportBuilderPreviewResponse);
+    const usd = (amount: number) =>
+      new Intl.NumberFormat("es-MX", { style: "currency", currency: "USD" }).format(amount).replace(/\s+/g, " ");
+
+    const user = userEvent.setup();
+    renderWorkspace([PRICE_LIST]);
+    await screen.findByRole("option", { name: /USD/ });
+    await user.selectOptions(screen.getByLabelText(/Lista de precios/), "9");
+    await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+    await user.type(screen.getByLabelText("Descripción * 1"), "Servicio especial");
+    await user.type(screen.getByLabelText("Precio unitario * 1"), "800");
+    await user.clear(screen.getByLabelText("Cantidad * 1"));
+    await user.type(screen.getByLabelText("Cantidad * 1"), "2");
+    expect(screen.getByText("USD")).toBeTruthy();
+    expect(screen.getByText(usd(1600))).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /Generar vista previa/ }));
+    await waitFor(() => expect(previewReportBuilderMock).toHaveBeenCalled());
+    // Row, summary and the line estimate: all in USD, none in MXN.
+    expect((await screen.findAllByText(usd(1600))).length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText("$1,600.00")).toBeNull();
+  });
+
   it("refuses to preview unsaved changes", async () => {
     getReportBuilderMock.mockResolvedValue(SAVED_BUILDER);
     const user = userEvent.setup();
