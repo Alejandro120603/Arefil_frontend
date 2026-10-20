@@ -56,6 +56,25 @@ describe("runtime report catalog", () => {
     expect(api.listRuntimeReportDefinitions).toHaveBeenCalledTimes(1);
   });
 
+  it("shows exactly the three Donaldson reports once the test reports are retired", async () => {
+    // Archived reports never reach this list; disabled ones are filtered here too.
+    api.listRuntimeReportDefinitions.mockResolvedValue([
+      { ...report("PRICE_LIST_COMPARISON", true, true), name: "Comparación de listas de precios" },
+      { ...report("COTIZACION_PRODUCTOS", true, true), name: "Cotización de productos" },
+      { ...report("PRODUCTOS_DESCUENTO", true, true), name: "Productos con descuento" },
+      { ...report("PRUEBA_COTIZACION", false, true), name: "Prueba Cotización" },
+      { ...report("PRUEBA_DESCUENTO", false, true), name: "Prueba Descuento" },
+    ]);
+
+    render(await ReportsPage());
+
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Comparación de listas de precios",
+      "Cotización de productos",
+      "Productos con descuento",
+    ]);
+  });
+
   it("uses an operational empty state when no report is currently usable", async () => {
     api.listRuntimeReportDefinitions.mockResolvedValue([
       report("REPORT_DEGRADED", true, false),
