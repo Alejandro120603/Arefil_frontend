@@ -421,6 +421,11 @@ export interface SQLReportExecutionResponse {
 export interface ReportOption {
   value: number | string;
   label: string;
+  /**
+   * Price lists only: the currency every line quoted against the list is in,
+   * manual lines included. Absent from older backends and other sources.
+   */
+  currency?: string | null;
 }
 
 /**

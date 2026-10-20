@@ -5,6 +5,7 @@ import {
   createRuntimeGroupRow,
   LIST_PRODUCT,
   MANUAL_PRODUCT,
+  parameterCurrency,
   REQUIRED_FIELD_MESSAGE,
   runtimeCellKey,
   visibleRuntimeErrors,
@@ -286,5 +287,30 @@ describe("quotation lines outside the price list (MANUAL_PRODUCT)", () => {
     const group = { ...GROUP, allow_manual_items: undefined };
     const row = { ...createRuntimeGroupRow(group, "l"), values: { product_id: "5", quantity: "1", discount: "0" } };
     expect(validate([row], group).parameters.items).toEqual([{ product_id: 5, quantity: 1, discount: "0" }]);
+  });
+});
+
+describe("parameterCurrency", () => {
+  const PARAMETERS: ReportParameter[] = [
+    parameter({ name: "price_list_id", data_type: "integer", input_type: "select", configuration_json: { options_source: "price_lists" } }),
+  ];
+  const OPTIONS = {
+    price_list_id: [
+      { value: 7, label: "MXN", currency: "MXN" },
+      { value: 9, label: "USD", currency: "USD" },
+      { value: 11, label: "sin moneda" },
+    ],
+  };
+
+  it("is the currency of the exact list sent", () => {
+    expect(parameterCurrency(PARAMETERS, { price_list_id: 7 }, OPTIONS)).toBe("MXN");
+    expect(parameterCurrency(PARAMETERS, { price_list_id: 9 }, OPTIONS)).toBe("USD");
+  });
+
+  it("is unknown without a list, an option or its currency", () => {
+    expect(parameterCurrency(PARAMETERS, {}, OPTIONS)).toBeNull();
+    expect(parameterCurrency(PARAMETERS, { price_list_id: 11 }, OPTIONS)).toBeNull();
+    expect(parameterCurrency(PARAMETERS, { price_list_id: 9 }, {})).toBeNull();
+    expect(parameterCurrency([], { price_list_id: 9 }, OPTIONS)).toBeNull();
   });
 });

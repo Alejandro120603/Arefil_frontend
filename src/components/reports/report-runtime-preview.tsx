@@ -14,14 +14,25 @@ export function ReportRuntimePreview({
   summaries = [],
   parameters = [],
   parameterLabels,
+  currency,
 }: {
   payload: unknown;
   summaries?: ReportSummaryConfiguration[];
   parameters?: ReportParameter[];
   parameterLabels?: Record<string, string>;
+  /** Currency of the execution's price list; MXN when unknown, as before. */
+  currency?: string | null;
 }) {
   if (isReportBuilderPreviewResponse(payload)) {
-    return <ReportBuilderPreviewTable preview={payload} summaries={summaries} parameters={parameters} parameterLabels={parameterLabels} />;
+    return (
+      <ReportBuilderPreviewTable
+        preview={payload}
+        summaries={summaries}
+        parameters={parameters}
+        parameterLabels={parameterLabels}
+        currency={currency}
+      />
+    );
   }
   if (isPriceListComparisonResponse(payload)) return <PriceListComparisonPreview comparison={payload} />;
   if (isSQLReportExecutionResponse(payload)) {

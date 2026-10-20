@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { resolveReportProductOption } from "@/lib/api/reports";
 import { getUserErrorMessage } from "@/lib/api/errors";
-import { formatCurrency } from "@/lib/format/decimal";
+import { formatCurrency, formatNumber } from "@/lib/format/decimal";
 import {
   estimateDiscountedUnitPrice,
   estimateLineAmount,
@@ -31,6 +31,7 @@ import {
 import type {
   ReportColumn,
   ReportNumericConfiguration,
+  ReportOption,
   ReportParameterGroup,
   ReportParameterGroupField,
   ReportProductOption,
@@ -39,6 +40,20 @@ import type {
 
 /** Selected product per row, keyed by `${group.name}:${row.id}`. */
 type SelectedProducts = Record<string, ReportProductOption>;
+
+/**
+ * An amount in `currency`, or a plain number when the currency is unknown:
+ * never a guessed one (formatCurrency would silently print MXN).
+ */
+function formatAmount(value: string, currency: string | undefined): string {
+  return currency ? formatCurrency(value, currency) : formatNumber(value);
+}
+
+/** The currency of the price list selected for a group, from its option. */
+function contextCurrency(options: ReportOption[] | undefined, context: string): string | undefined {
+  const option = options?.find((candidate) => String(candidate.value) === context);
+  return typeof option?.currency === "string" && option.currency !== "" ? option.currency : undefined;
+}
 
 function productKey(groupName: string, rowId: string): string {
   return `${groupName}:${rowId}`;
@@ -79,6 +94,7 @@ export function ReportRepeatableParameters({
   code,
   groups,
   scalarValues,
+  scalarOptions = {},
   values,
   disabled = false,
   errors = {},
@@ -90,6 +106,8 @@ export function ReportRepeatableParameters({
   code: string;
   groups: ReportParameterGroup[];
   scalarValues: RuntimeParameterValues;
+  /** Loaded options of the scalar parameters: the price list's currency. */
+  scalarOptions?: Record<string, ReportOption[]>;
   values: RuntimeGroupValues;
   disabled?: boolean;
   errors?: Record<string, Record<number, Record<string, string>>>;
@@ -212,10 +230,9 @@ export function ReportRepeatableParameters({
         const atMaximum = group.max_items != null && rows.length >= group.max_items;
         const columnCount = 2 + (product ? 3 : 0) + editableFields.length + (discountField ? 1 : 0);
         const allowsManual = product != null && group.allow_manual_items === true;
-        // Manual prices are in the list's currency: the one its products carry.
-        const groupCurrency = rows
-          .map((row) => products[productKey(group.name, row.id)]?.currency)
-          .find((currency) => currency != null);
+        // Every line, manual ones included, is priced in the selected list's
+        // currency; it comes from the list itself, never from a product.
+        const listCurrency = contextCurrency(scalarOptions[group.context_parameter], context);
         const addRow = (origin: RuntimeLineOrigin) => onChange({
           ...values,
           [group.name]: [...rows, createRuntimeGroupRow(group, `${group.name}-${nextRowId.current++}`, origin)],
@@ -301,7 +318,7 @@ export function ReportRepeatableParameters({
                     const manual = isManualRow(group, row);
                     const manualPricing = manual ? { unit_price: row.values.unit_price } : null;
                     const selected = product && !manual ? products[productKey(group.name, row.id)] ?? null : null;
-                    const currency = selected?.currency ?? groupCurrency;
+                    const currency = listCurrency ?? selected?.currency ?? undefined;
                     const productError = product ? errors[group.name]?.[rowIndex]?.[product.name] : undefined;
                     const lineTotal = product && lineAmount
                       ? estimateLineAmount({
@@ -383,7 +400,13 @@ export function ReportRepeatableParameters({
                           </TableCell>
                         )}
                         {product && manual && (
-                          <TableCell>{manualInput("unit_price", "Precio unitario", true, "min-w-28 text-right")}</TableCell>
+                          <TableCell>
+                            <div className="flex items-start gap-1.5">
+                              {manualInput("unit_price", "Precio unitario", true, "min-w-28 text-right")}
+                              {/* The manual price is in the selected list's currency. */}
+                              {listCurrency && <span className="pt-2 text-xs text-muted-foreground">{listCurrency}</span>}
+                            </div>
+                          </TableCell>
                         )}
                         {product && !manual && (
                           <TableCell className="text-right tabular-nums">
@@ -431,12 +454,12 @@ export function ReportRepeatableParameters({
                           <TableCell className="text-right tabular-nums">
                             {discountedUnitPrice == null
                               ? "—"
-                              : formatCurrency(String(discountedUnitPrice), currency)}
+                              : formatAmount(String(discountedUnitPrice), currency)}
                           </TableCell>
                         )}
                         {product && (
                           <TableCell className="text-right tabular-nums">
-                            {lineTotal == null ? "—" : formatCurrency(String(lineTotal), currency)}
+                            {lineTotal == null ? "—" : formatAmount(String(lineTotal), currency)}
                           </TableCell>
                         )}
                         <TableCell>

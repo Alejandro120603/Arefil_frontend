@@ -212,6 +212,55 @@ describe("GenericReportRuntime", () => {
     expect(await screen.findByText("Servicio especial")).toBeTruthy();
   });
 
+  it("shows a USD list's manual-only quotation and its backend totals in USD", async () => {
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "COTIZACION_PRODUCTOS",
+      data_source_id: 5,
+      data_source: { ...REPORT.data_source, id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización", capabilities: ["REPEATABLE_ROWS"] },
+      parameters: [{ name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: 9, display_order: 0, configuration_json: { options_source: "price_lists" } }],
+      parameter_groups: [{
+        name: "items", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id", min_items: 0, max_items: null, display_order: 0,
+        allow_manual_items: true,
+        fields: [
+          { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" } },
+          { name: "quantity", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: "0", exclusive_minimum: true } },
+        ],
+      }],
+    };
+    listAllReportParameterOptions.mockResolvedValue([{ value: 9, label: "FLEETGUARD · 2026-01-01 · USD", currency: "USD" }]);
+    executeReport.mockResolvedValue({
+      execution_id: EXECUTION_ID,
+      document_available: true,
+      columns: [
+        { key: "description", label: "Descripción", data_type: "string", format_type: "text" },
+        { key: "line_total", label: "Importe", data_type: "decimal", format_type: "currency" },
+      ],
+      rows: [{ description: "Servicio especial", line_total: "1600.00" }],
+      summary: { subtotal: "1600.00" },
+      totals: { subtotal: "1600.00" }, row_count: 1, truncated: false,
+    });
+    const user = userEvent.setup();
+    render(
+      <GenericReportRuntime
+        report={report}
+        summaries={[{ key: "subtotal", label: "SUBTOTAL", column_key: "line_total", operation: "SUM", formula_definition: null, format_type: "currency" }]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+    expect(await screen.findByText("USD")).toBeTruthy();
+    await user.type(screen.getByLabelText("Descripción * 1"), "Servicio especial");
+    await user.type(screen.getByLabelText("Precio unitario * 1"), "800");
+    await user.clear(screen.getByLabelText("Cantidad * 1"));
+    await user.type(screen.getByLabelText("Cantidad * 1"), "2");
+    await clickGenerate(user);
+    await waitFor(() => expect(executeReport).toHaveBeenCalled());
+    // Intl separates «USD» with a no-break space; queries normalize it.
+    const usd = new Intl.NumberFormat("es-MX", { style: "currency", currency: "USD" }).format(1600).replace(/\s+/g, " ");
+    expect((await screen.findAllByText(usd)).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("$1,600.00")).toBeNull();
+  });
+
   it("serializes repeatable rows, renders the backend builder dataset, and invalidates the snapshot after edits", async () => {
     const report: ReportDefinition = {
       ...REPORT,

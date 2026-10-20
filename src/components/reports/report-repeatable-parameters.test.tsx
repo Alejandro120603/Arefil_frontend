@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportRepeatableParameters } from "./report-repeatable-parameters";
 import { createRuntimeGroupRow, initialRuntimeGroupValues, type RuntimeGroupValues } from "@/lib/reports/report-runtime";
+import { formatCurrency, formatNumber } from "@/lib/format/decimal";
 import type { ReportColumn, ReportParameterGroup, ReportProductOption, ReportSummaryConfiguration } from "@/types/api";
 
 const { resolveReportProductOption, searchReportProductOptions } = vi.hoisted(() => ({
@@ -221,13 +222,30 @@ const QUOTATION_LINE = {
   summaries: DISCOUNTED_LINE.summaries,
 };
 
-function ManualHarness({ context = "7", onValues }: { context?: string; onValues?: (values: RuntimeGroupValues) => void }) {
+const PRICE_LISTS = {
+  price_list_id: [
+    { value: 7, label: "DONALDSON · 2025-10-20 · MXN · lista.xlsx", currency: "MXN" },
+    { value: 9, label: "FLEETGUARD · 2026-01-01 · USD · fg.xlsx", currency: "USD" },
+    { value: 11, label: "Lista anterior" },
+  ],
+};
+
+function ManualHarness({
+  context = "7",
+  onValues,
+  options = PRICE_LISTS,
+}: {
+  context?: string;
+  onValues?: (values: RuntimeGroupValues) => void;
+  options?: Record<string, { value: number; label: string; currency?: string }[]>;
+}) {
   const [values, setValues] = useState<RuntimeGroupValues>(() => initialRuntimeGroupValues([MANUAL_GROUP]));
   return (
     <ReportRepeatableParameters
       code="PRODUCTOS_DESCUENTO"
       groups={[MANUAL_GROUP]}
       scalarValues={{ price_list_id: context }}
+      scalarOptions={options}
       values={values}
       onChange={(next) => { setValues(next); onValues?.(next); }}
       lineAmount={QUOTATION_LINE}
@@ -317,5 +335,59 @@ describe("ReportRepeatableParameters — productos fuera de lista", () => {
     expect(screen.getByLabelText("Descripción * 1").getAttribute("aria-invalid")).toBe("true");
     // A manual line has no product search to revalidate.
     expect(resolveReportProductOption).not.toHaveBeenCalled();
+  });
+});
+
+/** As shown on screen: Intl separates «USD» with a no-break space, which queries normalize. */
+const shown = (text: string) => text.replace(/\s+/g, " ");
+
+describe("ReportRepeatableParameters — moneda de la lista seleccionada", () => {
+  async function manualOnly(user: ReturnType<typeof userEvent.setup>) {
+    // Only manual lines: the first (list) row is removed first.
+    await user.click(screen.getByRole("button", { name: "Eliminar renglón 1" }));
+    await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+    await typeInto(user, "Descripción * 1", "Servicio especial");
+    await typeInto(user, "Precio unitario * 1", "800");
+    await typeInto(user, "Descuento (%) 1", "15");
+  }
+
+  it("prices manual-only quotations in MXN for an MXN list", async () => {
+    const user = userEvent.setup();
+    render(<ManualHarness context="7" />);
+    await manualOnly(user);
+    expect(screen.getAllByText("$680.00")).toHaveLength(2);
+    expect(screen.getByText("MXN")).toBeTruthy();
+  });
+
+  it("prices manual-only quotations in USD for a USD list, never in MXN", async () => {
+    const user = userEvent.setup();
+    render(<ManualHarness context="9" />);
+    await manualOnly(user);
+    expect(screen.getAllByText(shown(formatCurrency("680", "USD")))).toHaveLength(2);
+    expect(screen.queryByText("$680.00")).toBeNull();
+    expect(screen.getByText("USD")).toBeTruthy();
+  });
+
+  it("prices list and manual lines of a mixed USD quotation in USD", async () => {
+    searchReportProductOptions.mockResolvedValue([{ ...FILTER, currency: "USD" }]);
+    resolveReportProductOption.mockResolvedValue({ ...FILTER, currency: "USD" });
+    const user = userEvent.setup();
+    render(<ManualHarness context="9" />);
+    await pickFilter(user);
+    await user.click(screen.getByRole("button", { name: "Producto fuera de lista" }));
+    await typeInto(user, "Descripción * 2", "Servicio especial");
+    await typeInto(user, "Precio unitario * 2", "800");
+    // List line: 574.13 at 0 %; manual line: 800 at 0 %.
+    expect(screen.getAllByText(shown(formatCurrency("574.13", "USD"))).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(shown(formatCurrency("800", "USD")))).toHaveLength(2);
+    expect(screen.queryByText(/^\$/)).toBeNull();
+  });
+
+  it("shows a plain number when the list's currency is unknown instead of guessing MXN", async () => {
+    const user = userEvent.setup();
+    render(<ManualHarness context="11" />);
+    await manualOnly(user);
+    expect(screen.queryByText("$680.00")).toBeNull();
+    expect(screen.getAllByText(shown(formatNumber("680")))).toHaveLength(2);
   });
 });

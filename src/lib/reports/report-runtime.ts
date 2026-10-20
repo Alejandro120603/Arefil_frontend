@@ -436,6 +436,27 @@ export function parameterDisplayValues(
   return labels;
 }
 
+/**
+ * Currency of the price list an execution was generated with, from the
+ * option the runtime loaded for the exact value sent; `null` when the report
+ * has no price list or the backend does not say (older versions).
+ */
+export function parameterCurrency(
+  parameters: ReportParameter[],
+  sent: Record<string, unknown>,
+  options: Record<string, ReportOption[]>,
+): string | null {
+  for (const parameter of parameters) {
+    const configuration = parameter.configuration_json as { options_source?: unknown } | null;
+    if (parameter.input_type !== "select" || configuration?.options_source !== "price_lists") continue;
+    const value = sent[parameter.name];
+    if (value == null || value === "") continue;
+    const option = (options[parameter.name] ?? []).find((candidate) => String(candidate.value) === String(value));
+    if (typeof option?.currency === "string" && option.currency !== "") return option.currency;
+  }
+  return null;
+}
+
 export function backendRowErrors(
   detail: unknown,
   groups: ReportParameterGroup[],
