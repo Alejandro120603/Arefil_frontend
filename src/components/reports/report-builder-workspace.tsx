@@ -29,6 +29,7 @@ import {
 import {
   initialRuntimeValues,
   initialRuntimeGroupValues,
+  parameterCurrency,
   validateRuntimeForm,
   type RuntimeGroupValues,
   type RuntimeParameterValues,
@@ -36,6 +37,7 @@ import {
 import type {
   ReportBuilderPreviewResponse,
   ReportColumn,
+  ReportOption,
   ReportExcelLayout,
   ReportParameter,
   ReportParameterGroup,
@@ -114,6 +116,10 @@ export function ReportBuilderWorkspace({
   const [groupOptionsReady, setGroupOptionsReady] = useState(true);
   const optionsReady = scalarOptionsReady && groupOptionsReady;
   const [preview, setPreview] = useState<ReportBuilderPreviewResponse | null>(null);
+  /** Loaded options of the scalar parameters: the selected price list's currency. */
+  const [scalarOptions, setScalarOptions] = useState<Record<string, ReportOption[]>>({});
+  /** Currency of the list the shown preview ran with, fixed when it was generated. */
+  const [previewCurrency, setPreviewCurrency] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
@@ -209,7 +215,9 @@ export function ReportBuilderWorkspace({
 
     setPreviewing(true);
     try {
+      const currency = parameterCurrency(parameters, validation.parameters, scalarOptions);
       setPreview(await previewReportBuilder(code, validation.parameters));
+      setPreviewCurrency(currency);
     } catch (error) {
       setPreviewError(getUserErrorMessage(error, "No se pudo generar la vista previa."));
     } finally {
@@ -355,12 +363,14 @@ export function ReportBuilderWorkspace({
             disabled={previewing}
             errors={runtimeErrors}
             onOptionsStateChange={({ ready }) => setScalarOptionsReady(ready)}
+            onOptionsLoaded={setScalarOptions}
             onChange={changeRuntime}
           />
           <ReportRepeatableParameters
             code={code}
             groups={value.parameterGroups}
             scalarValues={runtimeValues}
+            scalarOptions={scalarOptions}
             lineAmount={{ columns: value.columns, summaries: value.layout.totals }}
             values={runtimeGroupValues}
             disabled={previewing}
@@ -386,6 +396,7 @@ export function ReportBuilderWorkspace({
               preview={preview}
               summaries={value.layout.totals}
               parameters={parameters}
+              currency={previewCurrency}
             />
           )}
         </CardContent>

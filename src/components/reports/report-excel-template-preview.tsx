@@ -24,7 +24,7 @@ import {
   type RuntimeGroupValues,
   type RuntimeParameterValue,
 } from "@/lib/reports/report-runtime";
-import type { ReportColumn, ReportDefinition, ReportExcelRenderPreview, ReportSummaryConfiguration } from "@/types/api";
+import type { ReportColumn, ReportDefinition, ReportExcelRenderPreview, ReportOption, ReportSummaryConfiguration } from "@/types/api";
 
 type PreviewStage =
   | { status: "idle" }
@@ -70,6 +70,8 @@ export function ReportExcelTemplatePreview({
   const [values, setValues] = useState(() => initialRuntimeValues(report.parameters));
   const [groupValues, setGroupValues] = useState<RuntimeGroupValues>(() => initialRuntimeGroupValues(groups));
   const [stage, setStage] = useState<PreviewStage>({ status: "idle" });
+  /** Loaded options of the scalar parameters: the selected price list's currency. */
+  const [scalarOptions, setScalarOptions] = useState<Record<string, ReportOption[]>>({});
   const [backendErrors, setBackendErrors] = useState<Record<string, Record<number, Record<string, string>>>>({});
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
   const controllerRef = useRef<AbortController | null>(null);
@@ -175,12 +177,14 @@ export function ReportExcelTemplatePreview({
             disabled={busy || hasUnsavedChanges}
             errors={validation.fieldErrors}
             onOptionsStateChange={setScalarOptionsState}
+            onOptionsLoaded={setScalarOptions}
             onChange={handleChange}
           />
           <ReportRepeatableParameters
             code={report.code}
             groups={groups}
             scalarValues={values}
+            scalarOptions={scalarOptions}
             values={groupValues}
             disabled={busy || hasUnsavedChanges}
             errors={rowErrors}

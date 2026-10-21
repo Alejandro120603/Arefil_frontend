@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   backendRowErrors,
   changedRuntimeCells,
+  createRuntimeGroupRow,
+  LIST_PRODUCT,
+  MANUAL_PRODUCT,
+  parameterCurrency,
   REQUIRED_FIELD_MESSAGE,
   runtimeCellKey,
   visibleRuntimeErrors,
@@ -187,5 +191,126 @@ describe("visible runtime errors (D9)", () => {
       ],
     };
     expect(changedRuntimeCells(before, after)).toEqual([runtimeCellKey("items", "a", "product_id")]);
+  });
+});
+
+describe("quotation lines outside the price list (MANUAL_PRODUCT)", () => {
+  const GROUP: ReportParameterGroup = {
+    name: "items",
+    label: "Productos",
+    resolver_key: "products_by_price_list",
+    context_parameter: "price_list_id",
+    min_items: 1,
+    max_items: null,
+    display_order: 0,
+    allow_manual_items: true,
+    fields: [
+      { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" } },
+      { name: "quantity", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: 0, exclusive_minimum: true } },
+      { name: "discount", label: "Descuento", data_type: "decimal", input_type: "number", required: true, default_value: "0", display_order: 2, configuration_json: { minimum: 0, maximum: 100 } },
+    ],
+  };
+  const PARAMETERS: ReportParameter[] = [
+    parameter({ name: "price_list_id", data_type: "integer", input_type: "select", required: true }),
+  ];
+
+  function validate(rows: ReturnType<typeof createRuntimeGroupRow>[], group = GROUP) {
+    return validateRuntimeForm("COTIZACION_PRODUCTOS", PARAMETERS, [group], { price_list_id: "7" }, { items: rows });
+  }
+
+  function manualRow(values: Record<string, string>) {
+    const row = createRuntimeGroupRow(GROUP, "m", MANUAL_PRODUCT);
+    return { ...row, values: { ...row.values, ...values } };
+  }
+
+  it("creates list rows by default and manual rows with their own empty fields", () => {
+    expect(createRuntimeGroupRow(GROUP, "a")).toEqual({
+      id: "a", origin: LIST_PRODUCT, values: { product_id: "", quantity: "1", discount: "0" },
+    });
+    expect(createRuntimeGroupRow(GROUP, "b", MANUAL_PRODUCT)).toEqual({
+      id: "b",
+      origin: MANUAL_PRODUCT,
+      values: { product_id: "", quantity: "1", discount: "0", part_number: "", description: "", unit_of_measure: "", unit_price: "" },
+    });
+    // A group without manual lines keeps the former row shape.
+    expect(createRuntimeGroupRow({ ...GROUP, allow_manual_items: false }, "c", MANUAL_PRODUCT)).toEqual({
+      id: "c", values: { product_id: "", quantity: "1", discount: "0" },
+    });
+  });
+
+  it("serializes mixed rows in capture order with their origin, never a product for a manual line", () => {
+    const list = { ...createRuntimeGroupRow(GROUP, "l"), values: { product_id: "101", quantity: "2", discount: "10" } };
+    const manual = manualRow({ description: "  Servicio especial de fabricación ", unit_price: "800.00", quantity: "1", discount: "15", unit_of_measure: "SERV" });
+    const result = validate([list, manual, { ...list, id: "l2", values: { product_id: "303", quantity: "3", discount: "5" } }]);
+    expect(result.valid).toBe(true);
+    expect(result.parameters.items).toEqual([
+      { origin: LIST_PRODUCT, product_id: 101, quantity: 2, discount: "10" },
+      { origin: MANUAL_PRODUCT, quantity: 1, discount: "15", description: "Servicio especial de fabricación", unit_of_measure: "SERV", unit_price: "800.00" },
+      { origin: LIST_PRODUCT, product_id: 303, quantity: 3, discount: "5" },
+    ]);
+  });
+
+  it("accepts a manual line without part number and requires its description and price", () => {
+    expect(validate([manualRow({ description: "Tornillo", unit_price: "0" })]).valid).toBe(true);
+    const missing = validate([manualRow({ description: "   ", unit_price: "" })]);
+    expect(missing.valid).toBe(false);
+    expect(missing.rowErrors.items[0]).toEqual({ description: REQUIRED_FIELD_MESSAGE, unit_price: REQUIRED_FIELD_MESSAGE });
+  });
+
+  it.each([["-1"], ["10.001"], ["abc"], ["1e3"], ["99999999999"]])("rejects the manual price %s", (price) => {
+    const result = validate([manualRow({ description: "Tornillo", unit_price: price })]);
+    expect(result.rowErrors.items[0].unit_price).toBeTruthy();
+  });
+
+  it("limits manual texts like the backend", () => {
+    const result = validate([manualRow({ description: "a".repeat(501), part_number: "p".repeat(101), unit_of_measure: "u".repeat(31), unit_price: "1" })]);
+    expect(result.rowErrors.items[0]).toEqual({
+      description: "Máximo 500 caracteres.",
+      part_number: "Máximo 100 caracteres.",
+      unit_of_measure: "Máximo 30 caracteres.",
+    });
+    expect(validate([manualRow({ description: "uno\ndos", unit_price: "1" })]).rowErrors.items[0].description).toBe("No admite saltos de línea.");
+  });
+
+  it("validates quantity and discount of manual lines exactly like list lines", () => {
+    const result = validate([manualRow({ description: "x", unit_price: "1", quantity: "0", discount: "100.5" })]);
+    expect(Object.keys(result.rowErrors.items[0]).sort()).toEqual(["discount", "quantity"]);
+    expect(validate([manualRow({ description: "x", unit_price: "1", discount: "100" })]).valid).toBe(true);
+  });
+
+  it("still requires the product of a list line", () => {
+    const result = validate([createRuntimeGroupRow(GROUP, "l")]);
+    expect(result.rowErrors.items[0]).toEqual({ product_id: REQUIRED_FIELD_MESSAGE });
+  });
+
+  it("sends no origin for groups without manual lines", () => {
+    const group = { ...GROUP, allow_manual_items: undefined };
+    const row = { ...createRuntimeGroupRow(group, "l"), values: { product_id: "5", quantity: "1", discount: "0" } };
+    expect(validate([row], group).parameters.items).toEqual([{ product_id: 5, quantity: 1, discount: "0" }]);
+  });
+});
+
+describe("parameterCurrency", () => {
+  const PARAMETERS: ReportParameter[] = [
+    parameter({ name: "price_list_id", data_type: "integer", input_type: "select", configuration_json: { options_source: "price_lists" } }),
+  ];
+  const OPTIONS = {
+    price_list_id: [
+      { value: 7, label: "MXN", currency: "MXN" },
+      { value: 9, label: "USD", currency: "USD" },
+      { value: 11, label: "sin moneda" },
+    ],
+  };
+
+  it("is the currency of the exact list sent", () => {
+    expect(parameterCurrency(PARAMETERS, { price_list_id: 7 }, OPTIONS)).toBe("MXN");
+    expect(parameterCurrency(PARAMETERS, { price_list_id: 9 }, OPTIONS)).toBe("USD");
+  });
+
+  it("is unknown without a list, an option or its currency", () => {
+    expect(parameterCurrency(PARAMETERS, {}, OPTIONS)).toBeNull();
+    expect(parameterCurrency(PARAMETERS, { price_list_id: 11 }, OPTIONS)).toBeNull();
+    expect(parameterCurrency(PARAMETERS, { price_list_id: 9 }, {})).toBeNull();
+    expect(parameterCurrency([], { price_list_id: 9 }, OPTIONS)).toBeNull();
   });
 });

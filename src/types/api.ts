@@ -257,6 +257,8 @@ export interface ReportDefinition {
   data_source: ReportDataSourceSummary;
   parameters: ReportParameter[];
   parameter_groups: ReportParameterGroup[];
+  /** Retired reports keep their history; the catalogs never list them. */
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -331,6 +333,11 @@ export interface ReportParameterGroup {
   min_items: number;
   max_items: number | null;
   display_order: number;
+  /**
+   * Lines may also be captured by hand (MANUAL_PRODUCT) beside price-list
+   * products. Optional: older backends omit it (no manual lines).
+   */
+  allow_manual_items?: boolean;
   fields: ReportParameterGroupField[];
 }
 
@@ -414,6 +421,11 @@ export interface SQLReportExecutionResponse {
 export interface ReportOption {
   value: number | string;
   label: string;
+  /**
+   * Price lists only: the currency every line quoted against the list is in,
+   * manual lines included. Absent from older backends and other sources.
+   */
+  currency?: string | null;
 }
 
 /**
