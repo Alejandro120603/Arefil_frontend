@@ -24,7 +24,7 @@ export type RuntimeParameterValues = Record<string, RuntimeParameterValue>;
 export const QUOTATION_CONTACT_REPORT_CODES: readonly string[] = [DISCOUNT_PRODUCTS_CODE];
 export const QUOTATION_CONTACT_PARAMETERS = ["cliente", "atencion", "folio"] as const;
 export const QUOTATION_FOLIO_PARAMETER = "folio";
-export const QUOTATION_CONTACT_MAX_LENGTH = 200;
+export const QUOTATION_CONTACT_MAX_LENGTH = 120;
 export const QUOTATION_FOLIO_HINT = "Si lo dejas vacío, el sistema genera un folio automáticamente.";
 
 export function isQuotationContactParameter(code: string, parameter: ReportParameter): boolean {

@@ -74,7 +74,7 @@ describe("ReportRuntimeParameters", () => {
     expect(folio.required).toBe(false);
     expect(folio.getAttribute("aria-describedby")).toBe(hint.id);
     for (const label of ["Cliente", "Atención", "Folio"]) {
-      expect((screen.getByLabelText(label) as HTMLInputElement).maxLength).toBe(200);
+      expect((screen.getByLabelText(label) as HTMLInputElement).maxLength).toBe(120);
     }
     // Only the folio has a hint; an unrelated text keeps no length bound.
     expect(screen.getAllByText(/genera un folio/)).toHaveLength(1);
