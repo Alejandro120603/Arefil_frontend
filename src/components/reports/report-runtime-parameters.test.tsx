@@ -56,4 +56,28 @@ describe("ReportRuntimeParameters", () => {
     expect(screen.getByText("Este campo es requerido.")).toBeTruthy();
     expect(screen.getByLabelText("supplier *").getAttribute("aria-invalid")).toBe("true");
   });
+
+  it("explains that a blank Folio is generated and bounds the quotation contact texts", () => {
+    const contact = (name: string, label: string, display_order: number): ReportParameter => ({
+      ...parameter(name, "text", "string", display_order), label, required: false,
+    });
+    render(
+      <ReportRuntimeParameters
+        code="PRODUCTOS_DESCUENTO"
+        parameters={[contact("cliente", "Cliente", 1), contact("atencion", "Atención", 2), contact("folio", "Folio", 3), parameter("notes", "text", "string", 4)]}
+        values={{}}
+        onChange={vi.fn()}
+      />,
+    );
+    const folio = screen.getByLabelText("Folio") as HTMLInputElement;
+    const hint = screen.getByText("Si lo dejas vacío, el sistema genera un folio automáticamente.");
+    expect(folio.required).toBe(false);
+    expect(folio.getAttribute("aria-describedby")).toBe(hint.id);
+    for (const label of ["Cliente", "Atención", "Folio"]) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).maxLength).toBe(200);
+    }
+    // Only the folio has a hint; an unrelated text keeps no length bound.
+    expect(screen.getAllByText(/genera un folio/)).toHaveLength(1);
+    expect((screen.getByLabelText("notes *") as HTMLInputElement).maxLength).toBe(-1);
+  });
 });
