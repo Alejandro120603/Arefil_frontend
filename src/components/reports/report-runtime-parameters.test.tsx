@@ -80,4 +80,20 @@ describe("ReportRuntimeParameters", () => {
     expect(screen.getAllByText(/genera un folio/)).toHaveLength(1);
     expect((screen.getByLabelText("notes *") as HTMLInputElement).maxLength).toBe(-1);
   });
+
+  it("keeps another report's `folio` an ordinary text and drops the hint reference behind an error", () => {
+    const folio = { ...parameter("folio", "text", "string", 0), label: "Folio", required: false };
+    const { unmount } = render(<ReportRuntimeParameters code="MI_REPORTE" parameters={[folio]} values={{}} onChange={vi.fn()} />);
+    expect(screen.queryByText(/genera un folio/)).toBeNull();
+    expect((screen.getByLabelText("Folio") as HTMLInputElement).maxLength).toBe(-1);
+    unmount();
+
+    render(
+      <ReportRuntimeParameters code="PRODUCTOS_DESCUENTO" parameters={[folio]} values={{}} errors={{ folio: "Inválido." }} onChange={vi.fn()} />,
+    );
+    const input = screen.getByLabelText("Folio") as HTMLInputElement;
+    expect(screen.queryByText(/genera un folio/)).toBeNull();
+    expect(input.getAttribute("aria-describedby")).toBe("runtime-folio-error");
+    expect(screen.getByText("Inválido.").id).toBe("runtime-folio-error");
+  });
 });

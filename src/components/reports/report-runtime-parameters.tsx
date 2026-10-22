@@ -93,7 +93,8 @@ export function ReportRuntimeParameters({
           const id = `runtime-${parameter.name}`;
           const value = values[parameter.name] ?? (parameter.data_type === "boolean" ? false : "");
           const error = errors[parameter.name];
-          const hint = runtimeParameterHint(parameter);
+          // The hint gives way to the error, so it is only referenced while shown.
+          const hint = error ? null : runtimeParameterHint(code, parameter);
           const describedBy = [error ? `${id}-error` : null, hint ? `${id}-hint` : null].filter(Boolean).join(" ") || undefined;
           return (
             <div key={parameter.name} className="grid gap-1.5">
@@ -137,7 +138,7 @@ export function ReportRuntimeParameters({
                         parameter.input_type === "number" ? "number" : parameter.input_type
                       }
                       step={parameter.data_type === "decimal" ? "any" : undefined}
-                      maxLength={isQuotationContactParameter(parameter) ? QUOTATION_CONTACT_MAX_LENGTH : undefined}
+                      maxLength={isQuotationContactParameter(code, parameter) ? QUOTATION_CONTACT_MAX_LENGTH : undefined}
                       value={String(value)}
                       disabled={disabled}
                       data-runtime-field={parameter.name}
@@ -151,7 +152,7 @@ export function ReportRuntimeParameters({
               {parameter.input_type === "select" && !loadingOptions && optionsError == null && (options[parameter.name]?.length ?? 0) === 0 && (
                 <p className="text-xs text-muted-foreground">No hay opciones disponibles.</p>
               )}
-              {hint && !error && <p id={`${id}-hint`} className="text-xs text-muted-foreground">{hint}</p>}
+              {hint && <p id={`${id}-hint`} className="text-xs text-muted-foreground">{hint}</p>}
               {error && <p id={`${id}-error`} className="text-xs text-destructive">{error}</p>}
             </div>
           );
