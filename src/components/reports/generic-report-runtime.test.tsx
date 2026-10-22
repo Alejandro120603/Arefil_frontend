@@ -495,6 +495,88 @@ describe("GenericReportRuntime", () => {
     expect(listAllReportParameterOptions).toHaveBeenCalledTimes(1);
   });
 
+  it("sends Cliente, Atención and a typed Folio, omits a blank Folio, and shows the generated one", async () => {
+    const contact = (name: string, label: string, display_order: number) => ({
+      name, label, input_type: "text" as const, data_type: "string" as const, required: false, default_value: null, display_order, configuration_json: null,
+    });
+    const report: ReportDefinition = {
+      ...REPORT,
+      code: "PRODUCTOS_DESCUENTO",
+      name: "Productos con descuento",
+      data_source_id: 5,
+      data_source: { ...REPORT.data_source, id: 5, code: "QUOTATION_ROWS", name: "Renglones de cotización", capabilities: ["REPEATABLE_ROWS"] },
+      parameters: [
+        { name: "price_list_id", label: "Lista de precios", input_type: "select", data_type: "integer", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "price_lists" } },
+        contact("cliente", "Cliente", 1),
+        contact("atencion", "Atención", 2),
+        contact("folio", "Folio", 3),
+      ],
+      parameter_groups: [{
+        name: "items", label: "Productos", resolver_key: "products_by_price_list", context_parameter: "price_list_id", min_items: 1, max_items: null, display_order: 0,
+        fields: [
+          { name: "product_id", label: "Producto", data_type: "integer", input_type: "select", required: true, default_value: null, display_order: 0, configuration_json: { options_source: "products_by_price_list", context_parameter: "price_list_id" } },
+          { name: "quantity", label: "Cantidad", data_type: "integer", input_type: "number", required: true, default_value: 1, display_order: 1, configuration_json: { minimum: "0", exclusive_minimum: true } },
+          { name: "discount", label: "Descuento", data_type: "decimal", input_type: "number", required: true, default_value: "0", display_order: 2, configuration_json: { minimum: "0", maximum: "100" } },
+        ],
+      }],
+    };
+    listAllReportParameterOptions.mockResolvedValue([{ value: 7, label: "FLEETGUARD · 2026-07-01 · MXN", currency: "MXN" }]);
+    searchReportProductOptions.mockResolvedValue(PRODUCTS);
+    resolveReportProductOption.mockResolvedValue(PRODUCTS[0]);
+    const GENERATED = "COT-20261022-7K3M9Q";
+    executeReport.mockImplementation(async (_code, parameters: Record<string, unknown>) => ({
+      execution_id: EXECUTION_ID,
+      document_available: true,
+      columns: [{ key: "line_total", label: "Importe", data_type: "decimal", format_type: "currency" }],
+      // What the backend froze: blank texts become null and a blank folio is generated.
+      parameters: {
+        price_list_id: parameters.price_list_id,
+        cliente: parameters.cliente ?? null,
+        atencion: parameters.atencion ?? null,
+        folio: parameters.folio ?? GENERATED,
+      },
+      rows: [{ line_total: "208.78" }], summary: { subtotal: "208.78", tax: "33.40", grand_total: "242.18" }, totals: {}, row_count: 1, truncated: false,
+    }));
+    const user = userEvent.setup();
+    render(<GenericReportRuntime report={report} />);
+
+    // The three fields are offered; none is required.
+    for (const label of ["Cliente", "Atención", "Folio"]) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).required).toBe(false);
+    }
+    expect(screen.getByText("Si lo dejas vacío, el sistema genera un folio automáticamente.")).toBeTruthy();
+    await user.selectOptions(await screen.findByLabelText("Lista de precios *"), "7");
+    await user.type(screen.getByLabelText("Cliente"), "ACME, S.A. de C.V.");
+    await user.type(screen.getByLabelText("Atención"), "Ing. Pérez");
+    await user.click(screen.getByRole("combobox", { name: "Producto 1" }));
+    await user.click(await screen.findByRole("option", { name: /P-001/ }));
+    await user.clear(screen.getByLabelText("Descuento (%) * 1"));
+    await user.type(screen.getByLabelText("Descuento (%) * 1"), "10");
+    await clickGenerate(user);
+
+    // A blank Folio is simply not sent: the backend generates it.
+    await waitFor(() => expect(executeReport).toHaveBeenCalledWith("PRODUCTOS_DESCUENTO", {
+      price_list_id: 7,
+      cliente: "ACME, S.A. de C.V.",
+      atencion: "Ing. Pérez",
+      items: [{ product_id: 101, quantity: 1, discount: "10" }],
+    }, expect.anything()));
+    expect(await screen.findByText(GENERATED, { selector: "dd" })).toBeTruthy();
+    expect(screen.getByText("Folio:", { selector: "dt" })).toBeTruthy();
+    expect(screen.getByText("ACME, S.A. de C.V.", { selector: "dd" })).toBeTruthy();
+    expect(screen.getByText("Ing. Pérez", { selector: "dd" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Descargar documento Excel" })).toBeTruthy();
+
+    // A typed Folio travels as is and the preview shows that one.
+    await user.type(screen.getByLabelText("Folio"), "Q-2026-0042");
+    expect(screen.queryByText(GENERATED, { selector: "dd" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Regenerar reporte" }));
+    await waitFor(() => expect(executeReport).toHaveBeenLastCalledWith("PRODUCTOS_DESCUENTO", expect.objectContaining({
+      folio: "Q-2026-0042", cliente: "ACME, S.A. de C.V.", atencion: "Ing. Pérez",
+    }), expect.anything()));
+    expect(await screen.findByText("Q-2026-0042", { selector: "dd" })).toBeTruthy();
+  });
+
   it("#45 G: a preselected default list is labelled without being picked by hand", async () => {
     const report: ReportDefinition = {
       ...REPORT,

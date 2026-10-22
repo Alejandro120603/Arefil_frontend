@@ -54,6 +54,7 @@ const REPORT_FIELD_LABELS: Record<string, string> = {
   description: "Descripción",
   category: "Categoría",
   template_version: "Versión de plantilla",
+  generated_at: "Fecha de generación",
 };
 
 function fieldOption(namespace: MappingNamespace, key: string, label: string): MappingFieldOption {

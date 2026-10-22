@@ -7,7 +7,10 @@ import { Label } from "@/components/ui/label";
 import { listAllReportParameterOptions } from "@/lib/api/reports";
 import { getUserErrorMessage } from "@/lib/api/errors";
 import {
+  QUOTATION_CONTACT_MAX_LENGTH,
+  isQuotationContactParameter,
   orderedReportParameters,
+  runtimeParameterHint,
   type RuntimeParameterValues,
 } from "@/lib/reports/report-runtime";
 import type { ReportOption, ReportParameter } from "@/types/api";
@@ -90,6 +93,9 @@ export function ReportRuntimeParameters({
           const id = `runtime-${parameter.name}`;
           const value = values[parameter.name] ?? (parameter.data_type === "boolean" ? false : "");
           const error = errors[parameter.name];
+          // The hint gives way to the error, so it is only referenced while shown.
+          const hint = error ? null : runtimeParameterHint(code, parameter);
+          const describedBy = [error ? `${id}-error` : null, hint ? `${id}-hint` : null].filter(Boolean).join(" ") || undefined;
           return (
             <div key={parameter.name} className="grid gap-1.5">
               {parameter.input_type === "checkbox" ? (
@@ -132,11 +138,12 @@ export function ReportRuntimeParameters({
                         parameter.input_type === "number" ? "number" : parameter.input_type
                       }
                       step={parameter.data_type === "decimal" ? "any" : undefined}
+                      maxLength={isQuotationContactParameter(code, parameter) ? QUOTATION_CONTACT_MAX_LENGTH : undefined}
                       value={String(value)}
                       disabled={disabled}
                       data-runtime-field={parameter.name}
                       aria-invalid={error != null}
-                      aria-describedby={error ? `${id}-error` : undefined}
+                      aria-describedby={describedBy}
                       onChange={(event) => onChange(parameter.name, event.target.value)}
                     />
                   )}
@@ -145,6 +152,7 @@ export function ReportRuntimeParameters({
               {parameter.input_type === "select" && !loadingOptions && optionsError == null && (options[parameter.name]?.length ?? 0) === 0 && (
                 <p className="text-xs text-muted-foreground">No hay opciones disponibles.</p>
               )}
+              {hint && <p id={`${id}-hint`} className="text-xs text-muted-foreground">{hint}</p>}
               {error && <p id={`${id}-error`} className="text-xs text-destructive">{error}</p>}
             </div>
           );
