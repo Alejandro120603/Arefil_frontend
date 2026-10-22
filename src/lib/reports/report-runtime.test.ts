@@ -12,7 +12,10 @@ import {
   productSearchField,
   initialRuntimeGroupValues,
   initialRuntimeValues,
+  isQuotationContactParameter,
   orderedReportParameters,
+  QUOTATION_FOLIO_HINT,
+  runtimeParameterHint,
   validateRuntimeForm,
   validateRuntimeParameters,
 } from "./report-runtime";
@@ -287,6 +290,39 @@ describe("quotation lines outside the price list (MANUAL_PRODUCT)", () => {
     const group = { ...GROUP, allow_manual_items: undefined };
     const row = { ...createRuntimeGroupRow(group, "l"), values: { product_id: "5", quantity: "1", discount: "0" } };
     expect(validate([row], group).parameters.items).toEqual([{ product_id: 5, quantity: 1, discount: "0" }]);
+  });
+});
+
+describe("quotation contact parameters (Cliente, Atención, Folio)", () => {
+  const cliente = parameter({ name: "cliente", data_type: "string", input_type: "text", display_order: 1 });
+  const atencion = parameter({ name: "atencion", data_type: "string", input_type: "text", display_order: 2 });
+  const folio = parameter({ name: "folio", data_type: "string", input_type: "text", display_order: 3 });
+
+  it("recognizes the discount quotation's contact parameters by report, name and shape", () => {
+    expect([cliente, atencion, folio].map((p) => isQuotationContactParameter("PRODUCTOS_DESCUENTO", p))).toEqual([true, true, true]);
+    // Another report's own `folio` or `cliente` keeps its plain meaning (Codex review).
+    expect([cliente, atencion, folio].map((p) => isQuotationContactParameter("MI_REPORTE", p))).toEqual([false, false, false]);
+    expect(isQuotationContactParameter("PRODUCTOS_DESCUENTO", parameter({ name: "notes", data_type: "string", input_type: "text" }))).toBe(false);
+    expect(isQuotationContactParameter("PRODUCTOS_DESCUENTO", parameter({ name: "folio", data_type: "integer", input_type: "number" }))).toBe(false);
+    expect(isQuotationContactParameter("PRODUCTOS_DESCUENTO", parameter({ name: "folio", data_type: "string", input_type: "select", configuration_json: { options_source: "suppliers" } }))).toBe(false);
+  });
+
+  it("explains only that a blank, optional folio of the discount quotation is generated", () => {
+    expect(runtimeParameterHint("PRODUCTOS_DESCUENTO", folio)).toBe(QUOTATION_FOLIO_HINT);
+    expect(runtimeParameterHint("PRODUCTOS_DESCUENTO", cliente)).toBeNull();
+    expect(runtimeParameterHint("PRODUCTOS_DESCUENTO", atencion)).toBeNull();
+    expect(runtimeParameterHint("MI_REPORTE", folio)).toBeNull();
+    expect(runtimeParameterHint("PRODUCTOS_DESCUENTO", { ...folio, required: true })).toBeNull();
+  });
+
+  it("omits blank contact texts so the backend generates the folio, and sends typed ones as is", () => {
+    const blank = validateRuntimeParameters("PRODUCTOS_DESCUENTO", [cliente, atencion, folio], { cliente: "", atencion: "   ", folio: "" });
+    expect(blank.valid).toBe(true);
+    expect(blank.parameters).toEqual({});
+    const typed = validateRuntimeParameters("PRODUCTOS_DESCUENTO", [cliente, atencion, folio], { cliente: " ACME ", atencion: "Ing. Pérez", folio: "Q-42" });
+    expect(typed.valid).toBe(true);
+    // Trimming is the backend's job (it also bounds the length); the form sends what was typed.
+    expect(typed.parameters).toEqual({ cliente: " ACME ", atencion: "Ing. Pérez", folio: "Q-42" });
   });
 });
 

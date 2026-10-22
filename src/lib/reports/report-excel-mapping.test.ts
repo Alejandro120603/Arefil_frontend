@@ -59,6 +59,10 @@ describe("buildMappingFieldGroups", () => {
     const byNamespace = Object.fromEntries(groups.map((group) => [group.namespace, group]));
 
     expect(byNamespace.report.options.map((o) => o.placeholder)).toContain("report.name");
+    // The generation date the backend offers (`_REPORT_KEYS`).
+    expect(byNamespace.report.options).toContainEqual(
+      { namespace: "report", key: "generated_at", label: "Fecha de generación", abbreviation: "D", placeholder: "report.generated_at" },
+    );
     expect(byNamespace.parameters.options.map((o) => o.key)).toEqual(["quote_date", "customer_name"]);
     expect(byNamespace.rows.options.map((o) => o.key)).toEqual(["row_number", "part_number"]);
     expect(byNamespace.summary.options).toEqual([
